@@ -109,7 +109,7 @@ fn normalize(
             reset_at,
         )),
         secondary: Some(window(
-            "Auto",
+            "Auto + Composer",
             usage.individual_usage.plan.auto_percent_used,
             reset_at,
         )),

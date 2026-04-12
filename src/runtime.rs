@@ -6,7 +6,7 @@ use crate::model::{
 };
 use crate::providers::{claude, codex, cursor};
 use chrono::Utc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub async fn load_initial_state(config: &AppConfig) -> AppState {
     let mut state = load_cached_state()
@@ -107,7 +107,11 @@ where
             state.error = None;
         }
         Err(error_value) => {
-            error!(provider = provider.label(), error = %error_value, "provider refresh failed");
+            if error_value.is_transient() {
+                warn!(provider = provider.label(), error = %error_value, "provider refresh skipped (transient)");
+            } else {
+                error!(provider = provider.label(), error = %error_value, "provider refresh failed");
+            }
             state.is_refreshing = false;
             state.health = ProviderHealth::Error;
             state.auth_state = classify_auth_state(&error_value);

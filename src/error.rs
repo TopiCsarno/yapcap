@@ -46,6 +46,13 @@ impl AppError {
             Self::Cache(_) | Self::Config(_) | Self::Logging(_) => false,
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Provider(error) => error.is_transient(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -219,6 +226,13 @@ impl ProviderError {
             Self::Cursor(error) => error.requires_user_action(),
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Claude(error) => error.is_transient(),
+            Self::Codex(_) | Self::Cursor(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -265,8 +279,14 @@ pub enum ClaudeError {
     UsageRequest(#[source] reqwest::Error),
     #[error("Claude token unauthorized or expired")]
     Unauthorized,
-    #[error("claude usage endpoint returned error")]
-    UsageEndpoint(#[source] reqwest::Error),
+    #[error("claude usage endpoint rate limited (429)")]
+    RateLimited,
+    #[error("claude usage endpoint returned HTTP {status}")]
+    UsageEndpoint {
+        status: u16,
+        #[source]
+        source: reqwest::Error,
+    },
     #[error("failed to decode claude usage response")]
     DecodeUsage(#[source] reqwest::Error),
     #[error("Claude response had no usage windows")]
@@ -285,6 +305,10 @@ impl ClaudeError {
             self,
             Self::Auth(_) | Self::MissingProfileScope | Self::Unauthorized
         )
+    }
+
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::RateLimited)
     }
 }
 

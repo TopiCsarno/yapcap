@@ -15,7 +15,7 @@ impl ProviderId {
     pub fn label(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
-            Self::Claude => "Claude Code",
+            Self::Claude => "Claude",
             Self::Cursor => "Cursor",
         }
     }

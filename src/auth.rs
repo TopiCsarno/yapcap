@@ -13,6 +13,7 @@ pub struct CodexAuth {
 pub struct ClaudeAuth {
     pub access_token: String,
     pub scopes: Vec<String>,
+    pub subscription_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +38,8 @@ struct ClaudeOauthBlock {
     #[serde(rename = "accessToken")]
     access_token: String,
     scopes: Vec<String>,
+    #[serde(rename = "subscriptionType")]
+    subscription_type: Option<String>,
 }
 
 pub fn load_codex_auth() -> Result<CodexAuth> {
@@ -72,5 +75,6 @@ pub fn load_claude_auth() -> Result<ClaudeAuth> {
     Ok(ClaudeAuth {
         access_token: parsed.oauth.access_token,
         scopes: parsed.oauth.scopes,
+        subscription_type: parsed.oauth.subscription_type,
     })
 }

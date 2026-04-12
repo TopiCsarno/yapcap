@@ -1,4 +1,7 @@
+use super::claude_cli;
+use super::claude_web;
 use crate::auth::load_claude_auth;
+use crate::config::CursorBrowser;
 use crate::error::{ClaudeError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
@@ -10,6 +13,7 @@ use tracing::warn;
 
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const REQUIRED_SCOPE: &str = "user:profile";
+const TEMP_DISABLE_OAUTH_FOR_TESTING: bool = true;
 
 #[derive(Debug, Deserialize)]
 struct ClaudeUsageResponse {
@@ -32,6 +36,51 @@ struct ClaudeExtraUsage {
 }
 
 pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot> {
+    if TEMP_DISABLE_OAUTH_FOR_TESTING {
+        warn!("claude oauth temporarily disabled; forcing CLI/web fallback");
+        return fetch_without_oauth(client, CursorBrowser::Firefox).await;
+    }
+
+    match fetch_oauth(client).await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            warn!(error = %error, "claude oauth failed; trying CLI then web fallback");
+            fetch_without_oauth(client, CursorBrowser::Firefox).await
+        }
+    }
+}
+
+pub async fn fetch_with_browser(
+    client: &reqwest::Client,
+    browser: CursorBrowser,
+) -> Result<UsageSnapshot> {
+    if TEMP_DISABLE_OAUTH_FOR_TESTING {
+        return fetch_without_oauth(client, browser).await;
+    }
+
+    match fetch_oauth(client).await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            warn!(error = %error, "claude oauth failed; trying CLI then web fallback");
+            fetch_without_oauth(client, browser).await
+        }
+    }
+}
+
+async fn fetch_without_oauth(
+    client: &reqwest::Client,
+    browser: CursorBrowser,
+) -> Result<UsageSnapshot> {
+    match claude_cli::fetch().await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(cli_error) => {
+            warn!(error = %cli_error, "claude CLI failed; trying web cookie fallback");
+            claude_web::fetch(client, browser).await
+        }
+    }
+}
+
+async fn fetch_oauth(client: &reqwest::Client) -> Result<UsageSnapshot> {
     let auth = load_claude_auth()?;
     let subscription_type = auth.subscription_type.clone();
     if !auth.scopes.iter().any(|scope| scope == REQUIRED_SCOPE) {
@@ -136,6 +185,22 @@ fn normalize_window(label: &str, window: &ClaudeWindow) -> Result<UsageWindow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::claude_cli;
+
+    fn assert_usage_equivalent(left: &UsageSnapshot, right: &UsageSnapshot) {
+        assert_eq!(
+            left.primary.as_ref().map(|window| window.used_percent),
+            right.primary.as_ref().map(|window| window.used_percent)
+        );
+        assert_eq!(
+            left.secondary.as_ref().map(|window| window.used_percent),
+            right.secondary.as_ref().map(|window| window.used_percent)
+        );
+        assert_eq!(
+            left.tertiary.as_ref().map(|window| window.used_percent),
+            right.tertiary.as_ref().map(|window| window.used_percent)
+        );
+    }
 
     #[test]
     fn normalizes_fixture() {
@@ -146,5 +211,17 @@ mod tests {
         assert_eq!(snapshot.primary.as_ref().unwrap().used_percent, 18.0);
         assert_eq!(snapshot.secondary.as_ref().unwrap().used_percent, 90.0);
         assert_eq!(snapshot.provider_cost.as_ref().unwrap().used, 2.44);
+    }
+
+    #[test]
+    fn oauth_and_cli_fixtures_produce_same_usage_windows() {
+        let oauth_payload: ClaudeUsageResponse =
+            serde_json::from_str(include_str!("../../fixtures/claude/usage_oauth.json")).unwrap();
+        let oauth_snapshot = normalize(oauth_payload, Some("pro".to_string())).unwrap();
+        let cli_snapshot =
+            claude_cli::parse_usage_snapshot(include_str!("../../fixtures/claude/usage_cli.txt"))
+                .unwrap();
+
+        assert_usage_equivalent(&oauth_snapshot, &cli_snapshot);
     }
 }

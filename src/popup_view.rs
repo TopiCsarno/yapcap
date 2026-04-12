@@ -168,6 +168,9 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
     let mut content = column![title_row, subtitle].spacing(6);
 
     if let Some(snapshot) = &provider.snapshot {
+        if let Some(source) = provider.source_label.as_ref().or(Some(&snapshot.source)) {
+            content = content.push(info_block("Source", source.clone(), None));
+        }
         if let Some(primary) = &snapshot.primary {
             content = content.push(usage_section(primary));
         }

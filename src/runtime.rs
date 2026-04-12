@@ -33,7 +33,7 @@ pub async fn refresh_all(config: &AppConfig) -> AppState {
         async {
             codex::fetch(&client)
                 .await
-                .map(|snapshot| ("OAuth", snapshot))
+                .map(|snapshot| ("OAuth".to_string(), snapshot))
         },
     );
     let claude_future = refresh_provider(
@@ -41,9 +41,9 @@ pub async fn refresh_all(config: &AppConfig) -> AppState {
         config.provider_enabled(ProviderId::Claude),
         previous_provider(&previous, ProviderId::Claude),
         async {
-            claude::fetch(&client)
+            claude::fetch_with_browser(&client, config.cursor_browser)
                 .await
-                .map(|snapshot| ("OAuth", snapshot))
+                .map(|snapshot| (snapshot.source.clone(), snapshot))
         },
     );
     let cursor_future = refresh_provider(
@@ -53,7 +53,7 @@ pub async fn refresh_all(config: &AppConfig) -> AppState {
         async {
             cursor::fetch(&client, config.cursor_browser)
                 .await
-                .map(|snapshot| (config.cursor_browser.label(), snapshot))
+                .map(|snapshot| (config.cursor_browser.label().to_string(), snapshot))
         },
     );
     let (codex_state, claude_state, cursor_state) =
@@ -78,7 +78,7 @@ async fn refresh_provider<F>(
     fetch: F,
 ) -> ProviderRuntimeState
 where
-    F: std::future::Future<Output = crate::error::Result<(&'static str, UsageSnapshot)>>,
+    F: std::future::Future<Output = crate::error::Result<(String, UsageSnapshot)>>,
 {
     if !enabled {
         return ProviderRuntimeState::disabled(provider);
@@ -95,13 +95,13 @@ where
         Ok((source_label, snapshot)) => {
             info!(
                 provider = provider.label(),
-                source = source_label,
+                source = source_label.as_str(),
                 "provider refresh succeeded"
             );
             state.is_refreshing = false;
             state.health = ProviderHealth::Ok;
             state.auth_state = AuthState::Ready;
-            state.source_label = Some(source_label.to_string());
+            state.source_label = Some(source_label);
             state.last_success_at = Some(Utc::now());
             state.snapshot = Some(snapshot);
             state.error = None;

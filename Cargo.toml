@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT"
 description = "COSMIC panel applet for Codex, Claude Code, and Cursor usage"
 repository = "https://github.com/TopiCsarno/yapcap"
+default-run = "yapcap-dev"
 
 [lib]
 name = "yapcap"

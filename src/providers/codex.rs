@@ -18,6 +18,7 @@ const ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 const RPC_TIMEOUT: Duration = Duration::from_secs(8);
 const PTY_STARTUP: Duration = Duration::from_millis(2000);
 const PTY_TIMEOUT: Duration = Duration::from_secs(15);
+const PTY_STATUS_SETTLE: Duration = Duration::from_millis(2500);
 const FORCE_SOURCE_ENV: &str = "YAPCAP_CODEX_FORCE_SOURCE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,22 +384,16 @@ fn run_pty_command(binary: &Path) -> Result<String> {
     thread::sleep(PTY_STARTUP);
     stdin.write_all(b"/status\n").map_err(CodexError::CliIo)?;
     stdin.flush().map_err(CodexError::CliIo)?;
+
+    // `/status` updates the interactive footer but does not terminate the Codex TUI.
+    // Treat the PTY path as a bounded probe: allow the footer to render, then end the
+    // session ourselves and parse the captured transcript.
+    let deadline = Instant::now() + PTY_TIMEOUT;
+    thread::sleep(PTY_STATUS_SETTLE.min(deadline.saturating_duration_since(Instant::now())));
     drop(stdin);
 
-    let deadline = Instant::now() + PTY_TIMEOUT;
-    loop {
-        if child.try_wait().map_err(CodexError::CliCommand)?.is_some() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CodexError::CliTimeout {
-                timeout: PTY_TIMEOUT,
-            }
-            .into());
-        }
-        thread::sleep(Duration::from_millis(200));
+    if child.try_wait().map_err(CodexError::CliCommand)?.is_none() {
+        let _ = child.kill();
     }
 
     let output = child.wait_with_output().map_err(CodexError::CliCommand)?;

@@ -7,5 +7,6 @@ pub mod error;
 pub mod logging;
 pub mod model;
 pub mod popup_view;
+pub mod provider_assets;
 pub mod providers;
 pub mod runtime;

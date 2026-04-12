@@ -1,13 +1,15 @@
 use crate::config::AppConfig;
 use crate::model::{AppState, ProviderId};
 use crate::popup_view::popup_content;
+use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
 use crate::runtime;
 use cosmic::app::{Core, Task};
 use cosmic::iced::time;
+use cosmic::iced::widget::{column, progress_bar};
 use cosmic::iced::window::Id;
 use cosmic::iced::{Rectangle, Subscription};
 use cosmic::surface::action::{app_popup, destroy_popup};
-use cosmic::{Element, iced, task};
+use cosmic::{Element, iced, task, widget};
 use std::time::Duration;
 
 pub struct AppModel {
@@ -78,7 +80,10 @@ impl cosmic::Application for AppModel {
         let button =
             self.core
                 .applet
-                .icon_button("utilities-terminal-symbolic")
+                .button_from_element(
+                    applet_indicator(&self.state, self.selected_provider, &self.core),
+                    false,
+                )
                 .on_press_with_rectangle(move |offset, bounds| {
                     if let Some(id) = have_popup {
                         Message::Surface(destroy_popup(id))
@@ -192,5 +197,57 @@ fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {
             .first()
             .map(|provider| provider.provider)
             .unwrap_or(ProviderId::Codex)
+    }
+}
+
+fn applet_indicator<'a>(
+    state: &AppState,
+    selected_provider: ProviderId,
+    core: &Core,
+) -> Element<'a, Message> {
+    let (suggested_w, suggested_h) = core.applet.suggested_size(false);
+    let icon_size = f32::from(suggested_w.min(suggested_h));
+    let show_logo = icon_size >= 20.0;
+    let usage = selected_provider_percent(state, selected_provider);
+    let mut content = column![].align_x(iced::Alignment::Center).spacing(2);
+
+    if show_logo {
+        let logo_size = (icon_size - 10.0).max(9.0);
+        content = content.push(
+            widget::icon::icon(provider_icon_handle(
+                selected_provider,
+                provider_icon_variant(),
+            ))
+            .size(logo_size as u16)
+            .width(iced::Length::Fixed(logo_size))
+            .height(iced::Length::Fixed(logo_size)),
+        );
+    }
+
+    content = content.push(
+        progress_bar(0.0..=100.0, usage)
+            .length(icon_size.max(14.0))
+            .girth(if show_logo { 4.0 } else { 5.0 }),
+    );
+
+    Element::from(content)
+}
+
+fn selected_provider_percent(state: &AppState, selected_provider: ProviderId) -> f32 {
+    state
+        .providers
+        .iter()
+        .find(|provider| provider.provider == selected_provider)
+        .and_then(|provider| provider.snapshot.as_ref())
+        .and_then(|snapshot| snapshot.headline_window())
+        .map(|window| window.used_percent.clamp(0.0, 100.0) as f32)
+        .unwrap_or(0.0)
+}
+
+fn provider_icon_variant() -> ProviderIconVariant {
+    if cosmic::theme::is_dark() {
+        ProviderIconVariant::Reversed
+    } else {
+        ProviderIconVariant::Default
     }
 }

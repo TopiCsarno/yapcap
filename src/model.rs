@@ -76,6 +76,15 @@ impl UsageSnapshot {
             UsageHeadline::Tertiary => self.tertiary.as_ref(),
         }
     }
+
+    pub fn applet_windows(&self) -> (Option<&UsageWindow>, Option<&UsageWindow>) {
+        match self.provider {
+            ProviderId::Cursor => (self.primary.as_ref(), self.tertiary.as_ref()),
+            ProviderId::Codex | ProviderId::Claude => {
+                (self.primary.as_ref(), self.secondary.as_ref())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,5 +189,47 @@ impl AppState {
                 .collect(),
             updated_at: Utc::now(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn window(label: &str) -> UsageWindow {
+        UsageWindow {
+            label: label.to_string(),
+            used_percent: 10.0,
+            reset_at: None,
+            reset_description: None,
+        }
+    }
+
+    fn snapshot(provider: ProviderId) -> UsageSnapshot {
+        UsageSnapshot {
+            provider,
+            source: "test".to_string(),
+            updated_at: Utc::now(),
+            headline: UsageHeadline::Primary,
+            primary: Some(window("primary")),
+            secondary: Some(window("secondary")),
+            tertiary: Some(window("tertiary")),
+            provider_cost: None,
+            identity: ProviderIdentity::default(),
+        }
+    }
+
+    #[test]
+    fn applet_windows_codex_uses_secondary() {
+        let snapshot = snapshot(ProviderId::Codex);
+        let (_, secondary) = snapshot.applet_windows();
+        assert_eq!(secondary.map(|w| w.label.as_str()), Some("secondary"));
+    }
+
+    #[test]
+    fn applet_windows_cursor_uses_tertiary() {
+        let snapshot = snapshot(ProviderId::Cursor);
+        let (_, secondary) = snapshot.applet_windows();
+        assert_eq!(secondary.map(|w| w.label.as_str()), Some("tertiary"));
     }
 }

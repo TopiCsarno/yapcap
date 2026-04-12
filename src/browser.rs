@@ -20,7 +20,9 @@ use crate::error::{BrowserError, Result};
 const CURSOR_COOKIE_NAME: &str = "WorkosCursorSessionToken";
 const CURSOR_COOKIE_DOMAIN: &str = "cursor.com";
 
-pub async fn load_cursor_cookie_from_brave(
+/// Load the Cursor session cookie from a Chromium-based browser (Brave, Chrome, Edge).
+/// `application` is the secret-service application name used to look up the Safe Storage key.
+pub async fn load_cursor_cookie_chromium(
     cookie_db_path: &Path,
     application: &str,
 ) -> Result<String> {
@@ -28,6 +30,53 @@ pub async fn load_cursor_cookie_from_brave(
     let encrypted_cookie = read_cookie_blob(cookie_db_path)?;
     let decrypted = decrypt_chromium_cookie(&encrypted_cookie, &password)?;
     Ok(format!("{CURSOR_COOKIE_NAME}={decrypted}"))
+}
+
+/// Load the Cursor session cookie from Firefox.
+/// Firefox on Linux stores cookies unencrypted in `moz_cookies`.
+pub fn load_cursor_cookie_firefox(cookie_db_path: &Path) -> Result<String> {
+    if !cookie_db_path.exists() {
+        return Err(BrowserError::CookieDatabaseNotFound {
+            path: cookie_db_path.to_path_buf(),
+        }
+        .into());
+    }
+
+    let temp = NamedTempFile::new().map_err(BrowserError::CreateTempCookieDb)?;
+    fs::copy(cookie_db_path, temp.path()).map_err(|source| BrowserError::CopyCookieDb {
+        path: cookie_db_path.to_path_buf(),
+        source,
+    })?;
+    let connection = Connection::open_with_flags(
+        temp.path(),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(BrowserError::OpenCookieDb)?;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT value
+             FROM moz_cookies
+             WHERE name = ?1
+               AND (
+                    host = ?2
+                 OR host = '.' || ?2
+                 OR host LIKE '%.' || ?2
+               )
+             ORDER BY
+               CASE
+                 WHEN host = ?2 THEN 0
+                 WHEN host = '.' || ?2 THEN 1
+                 ELSE 2
+               END
+             LIMIT 1",
+        )
+        .map_err(BrowserError::PrepareCookieLookup)?;
+    let value: String = statement
+        .query_row((CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN), |row| row.get(0))
+        .map_err(BrowserError::CookieNotFound)?;
+
+    Ok(format!("{CURSOR_COOKIE_NAME}={value}"))
 }
 
 async fn load_safe_storage_password(application: &str) -> Result<String> {
@@ -212,6 +261,73 @@ fn normalize_decrypted_cookie(decrypted: &[u8]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cbc::Encryptor;
+    use cbc::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+    use rusqlite::Connection;
+    use tempfile::NamedTempFile;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Create a minimal Chromium cookies SQLite database.
+    fn chromium_cookies_db(
+        name: &str,
+        host_key: &str,
+        plaintext_value: &str,
+        encrypted_value: &[u8],
+    ) -> NamedTempFile {
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cookies (
+                 name            TEXT,
+                 host_key        TEXT,
+                 value           TEXT  NOT NULL DEFAULT '',
+                 encrypted_value BLOB  NOT NULL DEFAULT X''
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cookies (name, host_key, value, encrypted_value) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![name, host_key, plaintext_value, encrypted_value],
+        )
+        .unwrap();
+        file
+    }
+
+    /// Create a minimal Firefox moz_cookies SQLite database.
+    fn firefox_cookies_db(name: &str, host: &str, value: &str) -> NamedTempFile {
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE moz_cookies (
+                 name  TEXT,
+                 host  TEXT,
+                 value TEXT NOT NULL DEFAULT ''
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO moz_cookies (name, host, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![name, host, value],
+        )
+        .unwrap();
+        file
+    }
+
+    /// Encrypt `plaintext` with AES-128-CBC using the same key-derivation and
+    /// IV as the production code, then prepend the `v10` version prefix.
+    fn make_chromium_cbc_blob(password: &str, plaintext: &str) -> Vec<u8> {
+        let key = derive_chromium_key(password);
+        let iv = [b' '; 16];
+        let ciphertext = Encryptor::<aes::Aes128>::new_from_slices(&key, &iv)
+            .unwrap()
+            .encrypt_padded_vec_mut::<Pkcs7>(plaintext.as_bytes());
+        let mut blob = b"v10".to_vec();
+        blob.extend_from_slice(&ciphertext);
+        blob
+    }
+
+    // ── existing tests ────────────────────────────────────────────────────────
 
     #[test]
     fn derive_key_has_expected_size() {
@@ -233,5 +349,130 @@ mod tests {
         decrypted.extend_from_slice(b"session-value");
         let normalized = normalize_decrypted_cookie(&decrypted).unwrap();
         assert_eq!(normalized, "session-value");
+    }
+
+    // ── Chromium cookie extraction ────────────────────────────────────────────
+
+    #[test]
+    fn chromium_read_cookie_blob_returns_encrypted_bytes() {
+        let encrypted = vec![1u8, 2, 3, 4];
+        let db = chromium_cookies_db(CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN, "", &encrypted);
+        let blob = read_cookie_blob(db.path()).unwrap();
+        assert_eq!(blob, encrypted);
+    }
+
+    #[test]
+    fn chromium_read_cookie_blob_falls_back_to_plaintext_value() {
+        // When `value` is non-empty the function returns it as bytes (the
+        // plaintext-storage fallback path).
+        let db = chromium_cookies_db(
+            CURSOR_COOKIE_NAME,
+            CURSOR_COOKIE_DOMAIN,
+            "plain_session",
+            &[],
+        );
+        let blob = read_cookie_blob(db.path()).unwrap();
+        assert_eq!(blob, b"plain_session");
+    }
+
+    #[test]
+    fn chromium_read_cookie_blob_matches_dot_prefixed_domain() {
+        let encrypted = vec![5u8, 6];
+        let db = chromium_cookies_db(
+            CURSOR_COOKIE_NAME,
+            &format!(".{CURSOR_COOKIE_DOMAIN}"),
+            "",
+            &encrypted,
+        );
+        let blob = read_cookie_blob(db.path()).unwrap();
+        assert_eq!(blob, encrypted);
+    }
+
+    #[test]
+    fn chromium_read_cookie_blob_returns_error_when_missing() {
+        // Empty database — cookie row absent.
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cookies (
+                 name TEXT, host_key TEXT,
+                 value TEXT NOT NULL DEFAULT '',
+                 encrypted_value BLOB NOT NULL DEFAULT X''
+             );",
+        )
+        .unwrap();
+        drop(conn);
+        let err = read_cookie_blob(file.path()).unwrap_err().to_string();
+        assert!(err.contains("cursor cookie not found"), "got: {err}");
+    }
+
+    #[test]
+    fn chromium_cbc_decrypt_roundtrip() {
+        let password = "test_safe_storage_password";
+        let plaintext = "user%3AtestWorkosSessionToken";
+        let blob = make_chromium_cbc_blob(password, plaintext);
+        let result = decrypt_chromium_cookie(&blob, password).unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn chromium_decrypt_rejects_unrecognized_blob_prefix() {
+        // A blob that is neither v10/v11 nor valid UTF-8 should produce an error.
+        let bad = vec![0xff, 0xfe, 0x00, 0x01];
+        let err = decrypt_chromium_cookie(&bad, "secret")
+            .unwrap_err()
+            .to_string();
+        // Falls through the version-prefix check and tries UTF-8; should fail.
+        assert!(!err.is_empty());
+    }
+
+    // ── Firefox cookie extraction ─────────────────────────────────────────────
+
+    #[test]
+    fn firefox_extracts_cookie_exact_domain() {
+        let db = firefox_cookies_db(
+            CURSOR_COOKIE_NAME,
+            CURSOR_COOKIE_DOMAIN,
+            "firefox_session_value",
+        );
+        let result = load_cursor_cookie_firefox(db.path()).unwrap();
+        assert_eq!(
+            result,
+            format!("{CURSOR_COOKIE_NAME}=firefox_session_value")
+        );
+    }
+
+    #[test]
+    fn firefox_extracts_cookie_dot_prefixed_domain() {
+        let db = firefox_cookies_db(
+            CURSOR_COOKIE_NAME,
+            &format!(".{CURSOR_COOKIE_DOMAIN}"),
+            "dot_domain_value",
+        );
+        let result = load_cursor_cookie_firefox(db.path()).unwrap();
+        assert_eq!(result, format!("{CURSOR_COOKIE_NAME}=dot_domain_value"));
+    }
+
+    #[test]
+    fn firefox_returns_error_when_cookie_absent() {
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE moz_cookies (name TEXT, host TEXT, value TEXT NOT NULL DEFAULT '');",
+        )
+        .unwrap();
+        drop(conn);
+        let err = load_cursor_cookie_firefox(file.path())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cursor cookie not found"), "got: {err}");
+    }
+
+    #[test]
+    fn firefox_returns_error_for_missing_db() {
+        let err = load_cursor_cookie_firefox(Path::new("/tmp/nonexistent_cookies.sqlite"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not found"), "got: {err}");
     }
 }

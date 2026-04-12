@@ -1,4 +1,4 @@
-use crate::browser::load_cursor_cookie_from_brave;
+use crate::browser::{load_cursor_cookie_chromium, load_cursor_cookie_firefox};
 use crate::config::CursorBrowser;
 use crate::error::{CursorError, Result};
 use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow};
@@ -42,8 +42,10 @@ struct CursorIdentityResponse {
 
 pub async fn fetch(client: &reqwest::Client, browser: CursorBrowser) -> Result<UsageSnapshot> {
     let cookie_db = browser.cookie_db_path()?;
-    let cookie_header =
-        load_cursor_cookie_from_brave(&cookie_db, browser.keyring_application()).await?;
+    let cookie_header = match browser.keyring_application() {
+        Some(application) => load_cursor_cookie_chromium(&cookie_db, application).await?,
+        None => load_cursor_cookie_firefox(&cookie_db)?,
+    };
     let mut headers = HeaderMap::new();
     headers.insert(
         COOKIE,

@@ -1,0 +1,324 @@
+use std::num::ParseFloatError;
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error(transparent)]
+    Auth(#[from] AuthError),
+    #[error(transparent)]
+    Browser(#[from] BrowserError),
+    #[error(transparent)]
+    Cache(#[from] CacheError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Logging(#[from] LoggingError),
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
+impl From<CodexError> for AppError {
+    fn from(value: CodexError) -> Self {
+        Self::Provider(ProviderError::Codex(value))
+    }
+}
+
+impl From<ClaudeError> for AppError {
+    fn from(value: ClaudeError) -> Self {
+        Self::Provider(ProviderError::Claude(value))
+    }
+}
+
+impl From<CursorError> for AppError {
+    fn from(value: CursorError) -> Self {
+        Self::Provider(ProviderError::Cursor(value))
+    }
+}
+
+impl AppError {
+    pub fn requires_user_action(&self) -> bool {
+        match self {
+            Self::Auth(_) => true,
+            Self::Browser(error) => error.requires_user_action(),
+            Self::Provider(error) => error.requires_user_action(),
+            Self::Cache(_) | Self::Config(_) | Self::Logging(_) => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("could not resolve CODEX_HOME or ~/.codex")]
+    ResolveCodexHome,
+    #[error("could not resolve CLAUDE_HOME or ~/.claude")]
+    ResolveClaudeHome,
+    #[error("failed to read codex auth file {path}")]
+    ReadCodexAuthFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse codex auth.json")]
+    ParseCodexAuthJson(#[source] serde_json::Error),
+    #[error("failed to read claude credentials {path}")]
+    ReadClaudeCredentials {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse claude credentials")]
+    ParseClaudeCredentials(#[source] serde_json::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum BrowserError {
+    #[error("failed to connect to secret service")]
+    ConnectSecretService(#[source] secret_service::Error),
+    #[error("failed to search secret service")]
+    SearchSecretService(#[source] secret_service::Error),
+    #[error("no matching keyring item found for browser safe storage")]
+    MissingKeyringItem,
+    #[error("failed to read browser safe storage secret")]
+    ReadBrowserSecret(#[source] secret_service::Error),
+    #[error("browser safe storage secret is not valid UTF-8")]
+    BrowserSecretNotUtf8(#[source] std::string::FromUtf8Error),
+    #[error("cookie database not found at {path}")]
+    CookieDatabaseNotFound { path: PathBuf },
+    #[error("failed to create temp cookie db")]
+    CreateTempCookieDb(#[source] std::io::Error),
+    #[error("failed to copy {path}")]
+    CopyCookieDb {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to open copied cookie db")]
+    OpenCookieDb(#[source] rusqlite::Error),
+    #[error("failed to prepare cookie lookup")]
+    PrepareCookieLookup(#[source] rusqlite::Error),
+    #[error("cursor cookie not found in browser db")]
+    CookieNotFound(#[source] rusqlite::Error),
+    #[error("encrypted cookie blob is empty")]
+    EmptyCookieBlob,
+    #[error("cookie blob not recognized")]
+    CookieBlobNotRecognized(#[source] std::string::FromUtf8Error),
+    #[error("failed to initialize AES-CBC decryptor: {0}")]
+    InitAesCbc(String),
+    #[error("failed to decrypt chromium cookie: {0}")]
+    DecryptCookieCbc(String),
+    #[error("failed to initialize AES-GCM decryptor: {0}")]
+    InitAesGcm(String),
+    #[error("failed to decrypt chromium cookie with AES-GCM: {0}")]
+    DecryptCookieGcm(String),
+    #[error("decrypted cookie is not valid UTF-8, even after stripping domain hash")]
+    CookieNotUtf8AfterPrefix(#[source] std::string::FromUtf8Error),
+    #[error("decrypted cookie is not valid UTF-8 ({len} bytes — likely wrong decryption key)")]
+    CookieNotUtf8 {
+        len: usize,
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
+    #[error("failed to decrypt chromium cookie: {0}")]
+    CookieDecryptFailed(String),
+}
+
+impl BrowserError {
+    pub fn requires_user_action(&self) -> bool {
+        matches!(
+            self,
+            Self::MissingKeyringItem
+                | Self::CookieDatabaseNotFound { .. }
+                | Self::CookieNotFound(_)
+        )
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CacheError {
+    #[error("failed to read cache {path}")]
+    ReadCache {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse cached snapshots")]
+    ParseCache(#[source] serde_json::Error),
+    #[error("failed to create {path}")]
+    CreateCacheDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to encode cache")]
+    EncodeCache(#[source] serde_json::Error),
+    #[error("failed to write cache {path}")]
+    WriteCache {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("failed to read config file {path}")]
+    ReadConfigFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse config")]
+    ParseConfig(#[source] toml::de::Error),
+    #[error("failed to create {path}")]
+    CreateConfigDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to encode config")]
+    EncodeConfig(#[source] toml::ser::Error),
+    #[error("failed to write {path}")]
+    WriteConfig {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("missing home directory")]
+    MissingHomeDir,
+}
+
+#[derive(Debug, Error)]
+pub enum LoggingError {
+    #[error("failed to create {path}")]
+    CreateLogDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to initialize tracing")]
+    InitTracing(#[source] tracing_subscriber::util::TryInitError),
+}
+
+#[derive(Debug, Error)]
+pub enum ProviderError {
+    #[error(transparent)]
+    Codex(#[from] CodexError),
+    #[error(transparent)]
+    Claude(#[from] ClaudeError),
+    #[error(transparent)]
+    Cursor(#[from] CursorError),
+}
+
+impl ProviderError {
+    pub fn requires_user_action(&self) -> bool {
+        match self {
+            Self::Codex(error) => error.requires_user_action(),
+            Self::Claude(error) => error.requires_user_action(),
+            Self::Cursor(error) => error.requires_user_action(),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CodexError {
+    #[error(transparent)]
+    Auth(#[from] AuthError),
+    #[error("invalid codex bearer header")]
+    InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("invalid codex account id header")]
+    InvalidAccountIdHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("codex usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Codex login required")]
+    Unauthorized,
+    #[error("codex usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode codex usage response")]
+    DecodeUsage(#[source] reqwest::Error),
+    #[error("Codex response had no usage windows")]
+    NoUsageData,
+    #[error("failed to parse codex credit balance {balance}")]
+    InvalidCreditBalance {
+        balance: String,
+        #[source]
+        source: ParseFloatError,
+    },
+}
+
+impl CodexError {
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::Auth(_) | Self::Unauthorized)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ClaudeError {
+    #[error(transparent)]
+    Auth(#[from] AuthError),
+    #[error("Claude token missing user:profile scope")]
+    MissingProfileScope,
+    #[error("invalid claude bearer header")]
+    InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("claude usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Claude token unauthorized or expired")]
+    Unauthorized,
+    #[error("claude usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode claude usage response")]
+    DecodeUsage(#[source] reqwest::Error),
+    #[error("Claude response had no usage windows")]
+    NoUsageData,
+    #[error("invalid claude reset timestamp {value}")]
+    InvalidResetTimestamp {
+        value: String,
+        #[source]
+        source: chrono::ParseError,
+    },
+}
+
+impl ClaudeError {
+    pub fn requires_user_action(&self) -> bool {
+        matches!(
+            self,
+            Self::Auth(_) | Self::MissingProfileScope | Self::Unauthorized
+        )
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CursorError {
+    #[error(transparent)]
+    Browser(#[from] BrowserError),
+    #[error("invalid cursor cookie header")]
+    InvalidCookieHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("cursor usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Cursor login required")]
+    Unauthorized,
+    #[error("cursor usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode cursor usage response")]
+    DecodeUsage(#[source] reqwest::Error),
+    #[error("cursor identity request failed")]
+    IdentityRequest(#[source] reqwest::Error),
+    #[error("failed to decode cursor identity response")]
+    DecodeIdentity(#[source] reqwest::Error),
+    #[error("invalid cursor billing cycle end {value}")]
+    InvalidBillingCycleEnd {
+        value: String,
+        #[source]
+        source: chrono::ParseError,
+    },
+}
+
+impl CursorError {
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::Browser(error) if error.requires_user_action())
+            || matches!(self, Self::Unauthorized)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, AppError>;

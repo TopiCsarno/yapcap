@@ -889,6 +889,10 @@ flowchart TD
 - Source label stored with cached header.
 - Stored session file path `~/.local/share/yapcap/cursor-session.json`.
 - Session file contains serialized cookies.
+- Cursor auth material has two distinct token families that must not be conflated.
+- Browser cookie auth is a web token route and is represented by imported cookies such as `WorkosCursorSessionToken`.
+- Local `auth.json` bearer/JWT material is a separate session route used against `api2.cursor.sh`-style endpoints.
+- Browser cookie auth cannot be reconstructed from `auth.json`; Cursor web usage requires a real browser session cookie.
 - Manual cookie header is never stored in cosmic-config; only secret backends may persist it.
 - Browser-imported cookies are not permanently copied unless accepted.
 - Accepted import can update cached header.
@@ -1568,6 +1572,47 @@ flowchart TD
 - Key retrieval supports Secret Service and KWallet paths for `Chrome Safe Storage` / `Chromium Safe Storage`, with explicit legacy fallback to literal `peanuts` when keyring-backed key is unavailable, matching Chromium Linux compatibility behavior.
 - In-repo decryptor uses `rusqlite`, D-Bus keyring access, `aes` + `cbc` (or equivalent), `pbkdf2`, `hmac`, and `sha1` primitives.
 - This is custom integration code, not shelling out to browser internals.
+
+#### Multi-browser support priority and Linux implementation notes
+
+- Browser-cookie import must support Firefox and Chromium-based browsers in v1.
+- Priority order is Firefox import first, Chromium-family import second, and manual cookie entry third.
+- Manual cookie mode remains the escape hatch for unsupported browser packaging, decryption failures, and unusual profiles.
+- Snap and Flatpak browser cookie stores are out of scope for v1 and should be documented as unsupported rather than half-supported.
+
+#### Firefox import path
+
+- Firefox is the low-complexity path on Linux and should be attempted before Chromium-family decryptors.
+- Firefox cookies are read directly from `cookies.sqlite` without an app-managed decryption path.
+- Default profile discovery starts from `~/.mozilla/firefox/`.
+- Importer should glob profiles and query `moz_cookies` for `.cursor.com` and the provider cookie name.
+- Cursor web auth currently depends on the `WorkosCursorSessionToken` browser cookie.
+- Firefox support is required for the first browser-import milestone.
+
+#### Chromium-family import path
+
+- Chromium-family browsers share one decryption strategy with browser-specific profile paths and keyring labels.
+- Initial browser set is Chrome, Chromium, Brave, Edge, Vivaldi, and Opera.
+- Default cookie DB path shape is `~/.config/<browser>/<profile>/Cookies`.
+- Importer reads the `encrypted_value` field from the SQLite cookie store.
+- Secret retrieval uses Secret Service first on GNOME-style systems.
+- KWallet support is desirable but lower priority than Secret Service-backed Chromium import.
+- Importer should classify browser path discovery, DB access, key retrieval, decrypt, and validation failures separately for diagnostics.
+
+#### Chromium-family Linux crypto notes
+
+- Linux Chromium OSCrypt compatibility uses PBKDF2-HMAC-SHA1 with salt `saltysalt`, one iteration, and a 16-byte derived key for the legacy CBC path.
+- Legacy Linux cookie blobs use AES-128-CBC with `v10`-style prefixes after prefix stripping.
+- Newer prefix variants must be detected explicitly before attempting decrypt.
+- The implementation must keep browser-path enumeration separate from the shared decryptor code path.
+- Recommended crate set for the importer is `rusqlite`, `glob`, `secret-service`, `aes`, `cbc`, `pbkdf2`, and `sha1`.
+
+#### Browser support policy
+
+- Browser import order should prefer the cheapest reliable path, not browser popularity guesses.
+- Firefox should be tried before Chromium-family browsers because it avoids keyring and decrypt complexity.
+- Chromium-family import should enumerate known browser paths deterministically.
+- Unsupported desktop keyring setups, including unimplemented KWallet cases, should fall back to actionable manual-cookie guidance.
 
 ## 5. User Interface and Local Operations
 

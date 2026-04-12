@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Speech bubble body -->
+  <path d="M14 6 L86 6 Q94 6 94 14 L94 60 Q94 68 86 68 L48 68 L38 84 L28 68 L14 68 Q6 68 6 60 L6 14 Q6 6 14 6 Z"
+        fill="white" stroke="black" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Usage bar 1 (Codex, ~30%) -->
+  <rect x="17" y="19" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
+  <rect x="17" y="19" width="20" height="10" rx="3" fill="black"/>
+  <!-- Usage bar 2 (Claude, ~70%) -->
+  <rect x="17" y="35" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
+  <rect x="17" y="35" width="46" height="10" rx="3" fill="black"/>
+  <!-- Usage bar 3 (Cursor, ~50%) -->
+  <rect x="17" y="51" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
+  <rect x="17" y="51" width="33" height="10" rx="3" fill="black"/>
+</svg>

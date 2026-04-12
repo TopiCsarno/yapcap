@@ -1,3 +1,4 @@
+use crate::usage_display;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -140,10 +141,17 @@ impl ProviderRuntimeState {
             return "Refreshing...".to_string();
         }
         if let Some(snapshot) = &self.snapshot {
+            let now = Utc::now();
             let headline = snapshot
                 .headline_window()
                 .as_ref()
-                .map(|window| format!("{} {:.0}%", window.label, window.used_percent))
+                .map(|window| {
+                    format!(
+                        "{} {:.0}%",
+                        window.label,
+                        usage_display::displayed_percent(window, now)
+                    )
+                })
                 .unwrap_or_else(|| "No usage window".to_string());
             return format!(
                 "{} via {}",

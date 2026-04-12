@@ -1,0 +1,69 @@
+use crate::model::UsageWindow;
+use chrono::{DateTime, Utc};
+
+pub fn displayed_percent(window: &UsageWindow, now: DateTime<Utc>) -> f64 {
+    if is_elapsed(window, now) {
+        0.0
+    } else {
+        window.used_percent.clamp(0.0, 100.0)
+    }
+}
+
+pub fn reset_label(window: &UsageWindow, now: DateTime<Utc>) -> Option<String> {
+    window
+        .reset_at
+        .map(|reset_at| format_reset_label(reset_at, now))
+}
+
+fn is_elapsed(window: &UsageWindow, now: DateTime<Utc>) -> bool {
+    window.reset_at.is_some_and(|reset_at| reset_at <= now)
+}
+
+fn format_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let remaining = reset_at - now;
+    if remaining.num_seconds() <= 0 {
+        return "Reset".to_string();
+    }
+    let days = remaining.num_days();
+    let hours = remaining.num_hours() % 24;
+    let mins = remaining.num_minutes() % 60;
+    if days > 0 {
+        format!("Resets in {}d {}h", days, hours)
+    } else if hours > 0 {
+        format!("Resets in {}h {}m", hours, mins)
+    } else {
+        format!("Resets in {}m", mins)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn window(reset_at: Option<DateTime<Utc>>, used_percent: f64) -> UsageWindow {
+        UsageWindow {
+            label: "5h".to_string(),
+            used_percent,
+            reset_at,
+            reset_description: None,
+        }
+    }
+
+    #[test]
+    fn zeroes_expired_window_percent() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let reset_at = Utc.with_ymd_and_hms(2026, 4, 12, 12, 0, 0).unwrap();
+        assert_eq!(displayed_percent(&window(Some(reset_at), 51.0), now), 0.0);
+    }
+
+    #[test]
+    fn marks_expired_window_as_reset() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let reset_at = Utc.with_ymd_and_hms(2026, 4, 12, 12, 0, 0).unwrap();
+        assert_eq!(
+            reset_label(&window(Some(reset_at), 51.0), now).as_deref(),
+            Some("Reset")
+        );
+    }
+}

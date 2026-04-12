@@ -3,6 +3,7 @@ use crate::model::{AppState, ProviderId};
 use crate::popup_view::popup_content;
 use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
 use crate::runtime;
+use crate::usage_display;
 use cosmic::app::{Core, Task};
 use cosmic::iced::time;
 use cosmic::iced::widget::{column, progress_bar};
@@ -240,7 +241,7 @@ fn selected_provider_percent(state: &AppState, selected_provider: ProviderId) ->
         .find(|provider| provider.provider == selected_provider)
         .and_then(|provider| provider.snapshot.as_ref())
         .and_then(|snapshot| snapshot.headline_window())
-        .map(|window| window.used_percent.clamp(0.0, 100.0) as f32)
+        .map(|window| usage_display::displayed_percent(window, chrono::Utc::now()) as f32)
         .unwrap_or(0.0)
 }
 

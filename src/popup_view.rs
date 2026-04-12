@@ -1,5 +1,6 @@
 use crate::model::{AppState, ProviderCost, ProviderId, ProviderRuntimeState, UsageWindow};
 use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
+use crate::usage_display;
 use cosmic::Element;
 use cosmic::iced::widget::{column, container, progress_bar, row, scrollable, text};
 use cosmic::iced::{Alignment, Background, Color, Length};
@@ -194,12 +195,12 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
 }
 
 fn usage_section(window: &UsageWindow) -> Element<'_, Message> {
-    let reset_text = window.reset_at.map(format_reset_label);
+    let now = chrono::Utc::now();
     usage_block(
         &window.label,
-        window.used_percent as f32,
-        format!("{:.1}% used", window.used_percent),
-        reset_text,
+        usage_display::displayed_percent(window, now) as f32,
+        format!("{:.1}% used", usage_display::displayed_percent(window, now)),
+        usage_display::reset_label(window, now),
     )
 }
 
@@ -281,7 +282,7 @@ fn tab_percent(provider: &ProviderRuntimeState) -> f32 {
         .snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.headline_window())
-        .map(|window| window.used_percent as f32)
+        .map(|window| usage_display::displayed_percent(window, chrono::Utc::now()) as f32)
         .unwrap_or(0.0)
 }
 
@@ -307,22 +308,5 @@ fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> Strin
         format!("Updated {}h ago", age.num_hours())
     } else {
         format!("Updated {}", last_success_at.format("%Y-%m-%d %H:%M"))
-    }
-}
-
-fn format_reset_label(reset_at: chrono::DateTime<chrono::Utc>) -> String {
-    let remaining = reset_at - chrono::Utc::now();
-    if remaining.num_seconds() <= 0 {
-        return "Resetting soon".to_string();
-    }
-    let days = remaining.num_days();
-    let hours = remaining.num_hours() % 24;
-    let mins = remaining.num_minutes() % 60;
-    if days > 0 {
-        format!("Resets in {}d {}h", days, hours)
-    } else if hours > 0 {
-        format!("Resets in {}h {}m", hours, mins)
-    } else {
-        format!("Resets in {}m", mins)
     }
 }

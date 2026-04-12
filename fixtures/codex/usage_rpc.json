@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "rateLimits": {
+      "limitId": "codex",
+      "limitName": null,
+      "primary": {
+        "usedPercent": 3,
+        "windowDurationMins": 300,
+        "resetsAt": 1775909492
+      },
+      "secondary": {
+        "usedPercent": 24,
+        "windowDurationMins": 10080,
+        "resetsAt": 1776361281
+      },
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "0"
+      },
+      "planType": "plus"
+    }
+  }
+}

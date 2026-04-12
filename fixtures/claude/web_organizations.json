@@ -1,0 +1,63 @@
+[
+  {
+    "id": 39270126,
+    "uuid": "b8b005d7-2019-4a81-a7f1-55a73737e6c3",
+    "name": "topi2236@gmail.com's Organization",
+    "settings": {
+      "claude_console_privacy": "default_private",
+      "allowed_invite_domains": null,
+      "workbench_completion_feedback_enabled": null,
+      "claude_ai_completion_feedback_enabled": null,
+      "claude_code_metrics_logging_enabled": true,
+      "claude_code_github_analytics_enabled": null,
+      "claude_code_remote_control_enabled": null,
+      "claude_code_trusted_devices_required": null,
+      "claude_code_penguin_mode_enabled": null,
+      "claude_code_quick_web_setup_enabled": null,
+      "oc_overage_credit_claimed": true,
+      "inline_visualizations_enabled": null,
+      "claude_ai_omelette_enabled": null,
+      "lti_course_projects_enabled": null,
+      "claude_ai_integration_sharing_enabled": true,
+      "claude_ai_chat_sharing_enabled": true,
+      "claude_ai_ccr_sharing_enabled": true,
+      "claude_ai_skill_sharing_enabled": null,
+      "claude_ai_skill_sharing_org_enabled": null,
+      "claude_ai_skill_creation_enabled": null,
+      "batches_download_ui_visibility": "all",
+      "batches_download_ui_enabled_workspace_ids": [],
+      "default_workspace_settings": {
+        "enable_api_keys": true
+      },
+      "sampling_restriction": null,
+      "work_across_apps_enabled": null,
+      "is_desktop_extension_allowlist_enabled": null,
+      "account_session_duration_seconds": null,
+      "vcs_connections": null,
+      "disabled_admin_request_types": null,
+      "system_preferences_prompt": null
+    },
+    "capabilities": [
+      "chat",
+      "claude_pro"
+    ],
+    "parent_organization_uuid": null,
+    "rate_limit_tier": "default_claude_ai",
+    "billing_type": "stripe_subscription",
+    "free_credits_status": "available",
+    "data_retention": "default",
+    "api_disabled_reason": null,
+    "api_disabled_until": null,
+    "created_at": "2025-03-02T10:27:49.767693Z",
+    "billable_usage_paused_until": null,
+    "raven_type": null,
+    "merchant_of_record": "anthropic",
+    "claude_ai_bootstrap_models_config": null,
+    "has_icon": false,
+    "external_mapping": null,
+    "visibility_status": null,
+    "updated_at": "2026-04-07T07:32:41.206643Z",
+    "active_flags": [],
+    "data_retention_periods": null
+  }
+]

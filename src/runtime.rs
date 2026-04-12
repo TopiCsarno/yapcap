@@ -33,7 +33,7 @@ pub async fn refresh_all(config: &AppConfig) -> AppState {
         async {
             codex::fetch(&client)
                 .await
-                .map(|snapshot| ("OAuth".to_string(), snapshot))
+                .map(|snapshot| (snapshot.source.clone(), snapshot))
         },
     );
     let claude_future = refresh_provider(

@@ -1,0 +1,450 @@
+{
+  "tagged_id": "user_01WYrFGJC4uW8rPqdrPan3eQ",
+  "uuid": "ef4b6d48-ac0f-415c-bde0-932d4da80ad9",
+  "email_address": "topi2236@gmail.com",
+  "full_name": "Why  do you need my full name",
+  "display_name": "Why  do you need my full",
+  "memberships": [
+    {
+      "organization": {
+        "id": 39270126,
+        "uuid": "b8b005d7-2019-4a81-a7f1-55a73737e6c3",
+        "name": "topi2236@gmail.com's Organization",
+        "settings": {
+          "claude_console_privacy": "default_private",
+          "allowed_invite_domains": null,
+          "workbench_completion_feedback_enabled": null,
+          "claude_ai_completion_feedback_enabled": true,
+          "claude_code_metrics_logging_enabled": true,
+          "claude_code_github_analytics_enabled": null,
+          "claude_code_remote_control_enabled": null,
+          "claude_code_trusted_devices_required": null,
+          "claude_code_penguin_mode_enabled": true,
+          "claude_code_quick_web_setup_enabled": null,
+          "oc_overage_credit_claimed": true,
+          "inline_visualizations_enabled": null,
+          "claude_ai_omelette_enabled": null,
+          "lti_course_projects_enabled": null,
+          "claude_ai_integration_sharing_enabled": true,
+          "claude_ai_chat_sharing_enabled": true,
+          "claude_ai_ccr_sharing_enabled": true,
+          "claude_ai_skill_sharing_enabled": null,
+          "claude_ai_skill_sharing_org_enabled": null,
+          "claude_ai_skill_creation_enabled": null,
+          "batches_download_ui_visibility": "all",
+          "batches_download_ui_enabled_workspace_ids": [],
+          "default_workspace_settings": {
+            "enable_api_keys": true
+          },
+          "sampling_restriction": null,
+          "work_across_apps_enabled": null,
+          "is_desktop_extension_allowlist_enabled": false,
+          "account_session_duration_seconds": null,
+          "vcs_connections": null,
+          "disabled_admin_request_types": null,
+          "system_preferences_prompt": null
+        },
+        "capabilities": [
+          "chat",
+          "claude_pro"
+        ],
+        "parent_organization_uuid": null,
+        "rate_limit_tier": "default_claude_ai",
+        "billing_type": "stripe_subscription",
+        "free_credits_status": "available",
+        "data_retention": "default",
+        "api_disabled_reason": null,
+        "api_disabled_until": null,
+        "created_at": "2025-03-02T10:27:49.767693Z",
+        "billable_usage_paused_until": null,
+        "raven_type": null,
+        "merchant_of_record": "anthropic",
+        "claude_ai_bootstrap_models_config": [
+          {
+            "model": "claude-opus-4-6",
+            "name": "Claude Opus 4.6",
+            "description": "Most capable for ambitious work",
+            "description_i18n_key": "opus-current-gen-description",
+            "notice_text": "Opus consumes usage limits faster than other models",
+            "notice_text_i18n_key": "opus-current-gen-notice",
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-sonnet-4-6",
+            "name": "Claude Sonnet 4.6",
+            "description": "Most efficient for everyday tasks",
+            "description_i18n_key": "sonnet-next-gen-description",
+            "notice_text_i18n_key": "sonnet-next-gen-notice",
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-haiku-4-5-20251001",
+            "name": "Claude Haiku 4.5",
+            "description": "Fastest for quick answers",
+            "description_i18n_key": "haiku-current-gen-description",
+            "notice_text_i18n_key": "haiku-current-gen-notice",
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-sonnet-4-20250514",
+            "name": "Claude Sonnet 4",
+            "inactive": true,
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-opus-4-1-20250805-claude-ai",
+            "name": "claude-opus-4-1-20250805-claude-ai",
+            "inactive": true,
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-opus-4-5-20251101",
+            "name": "Claude Opus 4.5",
+            "description": " ",
+            "overflow": true,
+            "description_i18n_key": "opus-past-gen-description",
+            "notice_text": "Opus consumes usage limits faster than other models",
+            "notice_text_i18n_key": "opus-past-gen-notice",
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          },
+          {
+            "model": "claude-3-opus-20240229",
+            "name": "Claude Opus 3",
+            "overflow": true,
+            "paprika_modes": [],
+            "thinking_modes": [],
+            "knowledgeCutoff": "August 2023",
+            "capabilities": {
+              "mm_pdf": false,
+              "mm_images": false,
+              "web_search": false,
+              "gsuite_tools": false,
+              "compass": false
+            }
+          },
+          {
+            "model": "claude-sonnet-4-5-20250929",
+            "name": "Claude Sonnet 4.5",
+            "overflow": true,
+            "description_i18n_key": "sonnet-past-gen-description",
+            "notice_text_i18n_key": "sonnet-past-gen-notice",
+            "paprika_modes": [
+              "extended"
+            ],
+            "thinking_modes": [
+              {
+                "id": "extended",
+                "title": "Extended thinking",
+                "title_key": "golden_forest_whisper",
+                "description": "Think longer for complex tasks",
+                "description_key": "amber_river_echo",
+                "paprika_mode_value": "extended",
+                "mode": "extended",
+                "selection_title": "Extended",
+                "selection_title_key": "crimson_peak_summit"
+              }
+            ]
+          }
+        ],
+        "has_icon": false,
+        "external_mapping": null,
+        "visibility_status": null,
+        "raven_configuration": null
+      },
+      "role": "admin",
+      "seat_tier": null,
+      "created_at": "2025-03-02T10:27:49.767693Z",
+      "updated_at": "2025-03-02T10:27:49.767693Z",
+      "notification_preferences": {
+        "feature_preference": {
+          "compass": {
+            "enable_email": true,
+            "enable_push": true
+          },
+          "bogosort": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "code_requires_action": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "completion": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "tool_notification": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "project_sharing": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "orbit_insight": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "dispatch": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "assist": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "conway": {
+            "enable_email": null,
+            "enable_push": null
+          },
+          "marketing": {
+            "enable_email": null,
+            "enable_push": null
+          }
+        }
+      }
+    }
+  ],
+  "workspace_memberships": [],
+  "invites": [],
+  "completed_verification_at": "2025-03-02T10:27:49.802531Z",
+  "accepted_clickwrap_versions": {},
+  "settings": {
+    "input_menu_pinned_items": null,
+    "has_seen_mm_examples": null,
+    "has_seen_starter_prompts": true,
+    "has_started_claudeai_onboarding": null,
+    "has_finished_claudeai_onboarding": true,
+    "dismissed_claudeai_banners": [
+      {
+        "banner_id": "model-selector-intro-1",
+        "dismissed_at": "2025-03-02T11:18:14.569000Z"
+      },
+      {
+        "banner_id": "coffee_announcement",
+        "dismissed_at": "2025-03-10T14:55:08.030000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_6-2-2026",
+        "dismissed_at": "2026-03-06T16:31:22.785000Z"
+      },
+      {
+        "banner_id": "install-hub-nux",
+        "dismissed_at": "2026-03-06T16:31:27.631000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_7-2-2026",
+        "dismissed_at": "2026-03-07T12:42:08.630000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_8-2-2026",
+        "dismissed_at": "2026-03-08T10:15:39.462000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_9-2-2026",
+        "dismissed_at": "2026-03-09T09:37:55.312000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_10-2-2026",
+        "dismissed_at": "2026-03-10T06:23:19.995000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_11-2-2026",
+        "dismissed_at": "2026-03-11T06:08:58.999000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_12-2-2026",
+        "dismissed_at": "2026-03-12T09:05:28.026000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_13-2-2026",
+        "dismissed_at": "2026-03-13T06:12:30.182000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_14-2-2026",
+        "dismissed_at": "2026-03-14T06:30:38.724000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_18-2-2026",
+        "dismissed_at": "2026-03-18T05:34:12.605000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_20-2-2026",
+        "dismissed_at": "2026-03-20T14:34:37.324000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_21-2-2026",
+        "dismissed_at": "2026-03-21T15:47:36.841000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_27-2-2026",
+        "dismissed_at": "2026-03-27T08:56:59.857000Z"
+      },
+      {
+        "banner_id": "mcp_directory_chin_29-2-2026",
+        "dismissed_at": "2026-03-29T09:05:13.734000Z"
+      }
+    ],
+    "dismissed_artifacts_announcement": null,
+    "preview_feature_uses_artifacts": null,
+    "preview_feature_uses_latex": null,
+    "preview_feature_uses_citations": null,
+    "preview_feature_uses_harmony": null,
+    "enabled_artifacts_attachments": false,
+    "enabled_turmeric": null,
+    "enable_chat_suggestions": null,
+    "dismissed_artifact_feedback_form": null,
+    "enabled_mm_pdfs": null,
+    "enabled_gdrive": null,
+    "enabled_bananagrams": null,
+    "enabled_gdrive_indexing": null,
+    "enabled_web_search": true,
+    "enabled_compass": null,
+    "enabled_sourdough": null,
+    "enabled_foccacia": null,
+    "enabled_yukon_gold": null,
+    "dismissed_claude_code_spotlight": true,
+    "enabled_geolocation": null,
+    "enabled_mcp_tools": null,
+    "enabled_cli_ops": null,
+    "enabled_megaminds": null,
+    "paprika_mode": null,
+    "tool_search_mode": "auto",
+    "enabled_monkeys_in_a_barrel": null,
+    "enabled_wiggle_egress": null,
+    "wiggle_egress_allowed_hosts": null,
+    "wiggle_egress_hosts_template": null,
+    "wiggle_egress_spotlight_viewed_at": "2026-03-10T17:26:26.395000Z",
+    "browser_extension_settings": null,
+    "enabled_saffron": true,
+    "enabled_saffron_search": null,
+    "enabled_melange": null,
+    "orbit_enabled": null,
+    "orbit_timezone": null,
+    "dismissed_saffron_themes": true,
+    "grove_enabled": true,
+    "grove_updated_at": "2026-02-23T21:21:20.408563Z",
+    "grove_notice_viewed_at": "2025-09-04T20:26:05.240000Z",
+    "internal_tier_org_type": null,
+    "internal_tier_rate_limit_tier": null,
+    "internal_tier_seat_tier": null,
+    "internal_tier_override_expires_at": null,
+    "has_acknowledged_mcp_app_dev_terms": null,
+    "onboarding_use_case": null,
+    "voice_preference": "buttery",
+    "voice_speed": null,
+    "ccr_sharing_enforce_repo_check": null,
+    "ccr_sharing_show_display_name": null,
+    "ccr_sharing_auto_share_on_pr": null,
+    "ccr_auto_archive_on_pr_close": null,
+    "ccr_autofix_on_pr_create": null,
+    "ccr_persistent_memory": null,
+    "ccr_plugins_mount": null,
+    "cowork_sms_enabled": null,
+    "cowork_onboarding_completed_at": null,
+    "dittos_mobile_onboarding_seen_at": null,
+    "internal_cowork_trial_started_at": null,
+    "internal_cowork_trial_ends_at": null
+  },
+  "created_at": "2025-03-02T10:27:49.685467Z",
+  "updated_at": "2026-03-29T09:05:13.881625Z",
+  "is_verified": true,
+  "age_is_verified": true,
+  "is_anonymous": false,
+  "verified_phone_number_last4": null,
+  "statsig": {
+    "user": {},
+    "values": {},
+    "values_hash": ""
+  }
+}

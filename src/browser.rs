@@ -19,6 +19,8 @@ use crate::error::{BrowserError, Result};
 
 const CURSOR_COOKIE_NAME: &str = "WorkosCursorSessionToken";
 const CURSOR_COOKIE_DOMAIN: &str = "cursor.com";
+const CLAUDE_COOKIE_NAME: &str = "sessionKey";
+const CLAUDE_COOKIE_DOMAIN: &str = "claude.ai";
 
 /// Load the Cursor session cookie from a Chromium-based browser (Brave, Chrome, Edge).
 /// `application` is the secret-service application name used to look up the Safe Storage key.
@@ -26,15 +28,55 @@ pub async fn load_cursor_cookie_chromium(
     cookie_db_path: &Path,
     application: &str,
 ) -> Result<String> {
+    load_chromium_cookie(
+        cookie_db_path,
+        application,
+        CURSOR_COOKIE_NAME,
+        CURSOR_COOKIE_DOMAIN,
+    )
+    .await
+}
+
+pub async fn load_claude_cookie_chromium(
+    cookie_db_path: &Path,
+    application: &str,
+) -> Result<String> {
+    load_chromium_cookie(
+        cookie_db_path,
+        application,
+        CLAUDE_COOKIE_NAME,
+        CLAUDE_COOKIE_DOMAIN,
+    )
+    .await
+}
+
+async fn load_chromium_cookie(
+    cookie_db_path: &Path,
+    application: &str,
+    cookie_name: &str,
+    cookie_domain: &str,
+) -> Result<String> {
     let password = load_safe_storage_password(application).await?;
-    let encrypted_cookie = read_cookie_blob(cookie_db_path)?;
+    let encrypted_cookie = read_cookie_blob(cookie_db_path, cookie_name, cookie_domain)?;
     let decrypted = decrypt_chromium_cookie(&encrypted_cookie, &password)?;
-    Ok(format!("{CURSOR_COOKIE_NAME}={decrypted}"))
+    Ok(format!("{cookie_name}={decrypted}"))
 }
 
 /// Load the Cursor session cookie from Firefox.
 /// Firefox on Linux stores cookies unencrypted in `moz_cookies`.
 pub fn load_cursor_cookie_firefox(cookie_db_path: &Path) -> Result<String> {
+    load_firefox_cookie(cookie_db_path, CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN)
+}
+
+pub fn load_claude_cookie_firefox(cookie_db_path: &Path) -> Result<String> {
+    load_firefox_cookie(cookie_db_path, CLAUDE_COOKIE_NAME, CLAUDE_COOKIE_DOMAIN)
+}
+
+fn load_firefox_cookie(
+    cookie_db_path: &Path,
+    cookie_name: &str,
+    cookie_domain: &str,
+) -> Result<String> {
     if !cookie_db_path.exists() {
         return Err(BrowserError::CookieDatabaseNotFound {
             path: cookie_db_path.to_path_buf(),
@@ -73,10 +115,10 @@ pub fn load_cursor_cookie_firefox(cookie_db_path: &Path) -> Result<String> {
         )
         .map_err(BrowserError::PrepareCookieLookup)?;
     let value: String = statement
-        .query_row((CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN), |row| row.get(0))
+        .query_row((cookie_name, cookie_domain), |row| row.get(0))
         .map_err(BrowserError::CookieNotFound)?;
 
-    Ok(format!("{CURSOR_COOKIE_NAME}={value}"))
+    Ok(format!("{cookie_name}={value}"))
 }
 
 async fn load_safe_storage_password(application: &str) -> Result<String> {
@@ -111,7 +153,11 @@ async fn load_safe_storage_password(application: &str) -> Result<String> {
     Ok(password)
 }
 
-fn read_cookie_blob(cookie_db_path: &Path) -> Result<Vec<u8>> {
+fn read_cookie_blob(
+    cookie_db_path: &Path,
+    cookie_name: &str,
+    cookie_domain: &str,
+) -> Result<Vec<u8>> {
     if !cookie_db_path.exists() {
         return Err(BrowserError::CookieDatabaseNotFound {
             path: cookie_db_path.to_path_buf(),
@@ -150,7 +196,7 @@ fn read_cookie_blob(cookie_db_path: &Path) -> Result<Vec<u8>> {
         )
         .map_err(BrowserError::PrepareCookieLookup)?;
     let (value, encrypted_value): (String, Vec<u8>) = statement
-        .query_row((CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN), |row| {
+        .query_row((cookie_name, cookie_domain), |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
         .map_err(BrowserError::CookieNotFound)?;
@@ -357,7 +403,7 @@ mod tests {
     fn chromium_read_cookie_blob_returns_encrypted_bytes() {
         let encrypted = vec![1u8, 2, 3, 4];
         let db = chromium_cookies_db(CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN, "", &encrypted);
-        let blob = read_cookie_blob(db.path()).unwrap();
+        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
         assert_eq!(blob, encrypted);
     }
 
@@ -371,7 +417,7 @@ mod tests {
             "plain_session",
             &[],
         );
-        let blob = read_cookie_blob(db.path()).unwrap();
+        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
         assert_eq!(blob, b"plain_session");
     }
 
@@ -384,7 +430,7 @@ mod tests {
             "",
             &encrypted,
         );
-        let blob = read_cookie_blob(db.path()).unwrap();
+        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
         assert_eq!(blob, encrypted);
     }
 
@@ -402,8 +448,10 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        let err = read_cookie_blob(file.path()).unwrap_err().to_string();
-        assert!(err.contains("cursor cookie not found"), "got: {err}");
+        let err = read_cookie_blob(file.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cookie not found"), "got: {err}");
     }
 
     #[test]
@@ -465,7 +513,7 @@ mod tests {
         let err = load_cursor_cookie_firefox(file.path())
             .unwrap_err()
             .to_string();
-        assert!(err.contains("cursor cookie not found"), "got: {err}");
+        assert!(err.contains("cookie not found"), "got: {err}");
     }
 
     #[test]

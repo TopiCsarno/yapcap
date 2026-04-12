@@ -51,7 +51,7 @@ impl cosmic::Application for DevApp {
             selected_provider: ProviderId::Codex,
         };
         let task = Task::perform(
-            async move { runtime::load_initial_state(&initial_config).await },
+            async move { runtime::refresh_all(&initial_config).await },
             |state| cosmic::Action::App(Message::Refreshed(state)),
         );
         (app, task)

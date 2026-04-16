@@ -8,3 +8,6 @@
 - Decide whether Claude web stays experimental long-term or gets a more browser-faithful request path.
 - Replace ad hoc source ordering logic with an explicit source-plan layer in runtime/config.
 - Codex: keep source order `OAuth -> RPC -> PTY`; `PTY` exists only as last-resort fallback when OAuth and RPC fail. Investigate a more reliable non-interactive or bounded-probe status path, because interactive `/status` footer scraping is fragile.
+- providers shoud show 5h usage when selected (instead of weekly) on the top
+- extra credits ui is ugly for codex
+- codex should be Oath first now its rcp first

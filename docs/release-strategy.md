@@ -1,14 +1,15 @@
 ---
-summary: 'Release strategy, launch plan, and DE expansion policy'
+summary: 'Release strategy, launch plan, distribution, and DE expansion policy'
 read_when:
   - 'planning the v1 launch'
+  - 'deciding how users should install and receive updates'
   - 'deciding whether to add another desktop frontend'
   - 'prioritizing scope against maintenance burden'
 ---
 
 # Release Strategy
 
-**Status:** Draft · **Last updated:** 2026-04-10
+**Status:** Draft · **Last updated:** 2026-04-16
 
 ## Thesis
 
@@ -39,9 +40,54 @@ These are not forever-nos. They are not-at-launch nos.
 - COSMIC applet works end-to-end for all three providers on a clean Pop!_OS install.
 - README has a short demo GIF (under 10 seconds, shows panel + popup + one refresh).
 - Install path is one command or one copy-paste block for the target distro.
+- GitHub release includes a tarball and at least a `.deb` package. `.rpm` is useful if Fedora/COSMIC testing is ready, but not required for the first public push.
+- The app surfaces a lightweight update notice when a newer GitHub release exists. No self-update execution in v1.
 - CodexBar credit is prominent in README, About dialog, and `--version` output.
 - `doctor` command works and produces useful output when things break.
 - At least one external tester (not the author) has installed it successfully from the README alone.
+
+### Distribution and update policy
+
+The day-1 channel is **GitHub Releases with native Linux artifacts plus in-app update awareness**, not a full package repository.
+
+YapCap is a COSMIC panel applet, not a plain Rust CLI. A useful install must place the binary, desktop entry, icon, and metadata in the right XDG locations, then account for COSMIC panel/app launcher discovery. `cargo install` only installs binaries and does not handle desktop integration.
+
+Day-1 artifacts:
+
+- `.tar.gz` archive for manual installs and debugging.
+- `.deb` package for Pop!_OS, Ubuntu, and Debian-family users. This is the primary polished artifact because the initial audience is COSMIC/Pop-oriented.
+- `checksums.txt` for release asset verification.
+
+Do not build an APT repo before interest is proven. A third-party apt source adds signing-key management, repository metadata, CI publishing, install-doc complexity, and a support surface when apt sources break. It also asks brand-new users to trust a repository before the project has earned that trust. A downloadable `.deb` plus in-app update notice is enough for the first public push.
+
+Day-1 update reach comes from three layers:
+
+1. **In-app update notice.** Check GitHub Releases periodically and show a small notice in the applet popup when a newer version exists. This reaches users who downloaded a binary and still run it. It should link to the release page or copy an upgrade command. It must not auto-execute installers.
+2. **GitHub release notifications.** Tell interested users to watch releases. This is weak but free and honest.
+3. **AUR if cheap.** Add `yapcap-bin` if it is less than roughly half a day of work. It fits Arch user expectations and updates reach users through helpers such as `yay` or `paru`, but it is not required for the first announcement.
+
+Package-manager escalation rules:
+
+- Add an APT repository only if `.deb` downloads, user issues, or direct requests show Pop!_OS/Ubuntu users are sticking around.
+- Add `.rpm` and eventually DNF repo support only after Fedora/COSMIC testing is real.
+- Treat package repositories as retention infrastructure after early demand is visible, not as a launch prerequisite.
+
+Do not optimize v1 around crates.io:
+
+- Current COSMIC stack dependencies include Git dependencies, especially `libcosmic`, which blocks normal crates.io publishing.
+- Even if crates.io publishing becomes possible later, `cargo install` is still a poor primary UX for a desktop applet because it skips desktop entry and icon installation.
+- `cargo install --git` can remain a contributor/testing path, not the public recommendation.
+
+Do not prioritize Flathub/Snap for v1. They may be useful later, but sandboxing and host integration are awkward for a panel applet that reads local CLI auth, browser cookies, keyring state, and desktop session data.
+
+Package-manager cost model:
+
+- Publishing release assets on GitHub is free.
+- `.deb`/`.rpm` files are free to produce and attach to releases.
+- AUR is free, but shifts build/update work to Arch-style user workflows.
+- APT/DNF repos can be hosted cheaply or free on static hosting, but require signing and maintenance discipline.
+- Flathub submission is free, but review/sandbox maintenance is the cost.
+- Homebrew taps are free, but Homebrew is not a good fit for COSMIC panel integration and should not be a v1 target.
 
 ### Announcement targets (launch day)
 

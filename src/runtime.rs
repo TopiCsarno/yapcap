@@ -19,56 +19,59 @@ pub async fn load_initial_state(config: &AppConfig) -> AppState {
     state
 }
 
-pub async fn refresh_all(config: &AppConfig) -> AppState {
-    let previous = load_cached_state()
-        .ok()
-        .flatten()
-        .unwrap_or_else(AppState::empty);
+pub async fn refresh_one(
+    config: AppConfig,
+    provider: ProviderId,
+    previous: Option<ProviderRuntimeState>,
+) -> ProviderRuntimeState {
     let client = reqwest::Client::new();
+    match provider {
+        ProviderId::Codex => {
+            refresh_provider(
+                provider,
+                config.provider_enabled(provider),
+                previous.as_ref(),
+                async {
+                    codex::fetch(&client)
+                        .await
+                        .map(|snapshot| (snapshot.source.clone(), snapshot))
+                },
+            )
+            .await
+        }
+        ProviderId::Claude => {
+            refresh_provider(
+                provider,
+                config.provider_enabled(provider),
+                previous.as_ref(),
+                async {
+                    claude::fetch_with_browser(&client, config.claude_browser)
+                        .await
+                        .map(|snapshot| (snapshot.source.clone(), snapshot))
+                },
+            )
+            .await
+        }
+        ProviderId::Cursor => {
+            refresh_provider(
+                provider,
+                config.provider_enabled(provider),
+                previous.as_ref(),
+                async {
+                    cursor::fetch(&client, config.cursor_browser)
+                        .await
+                        .map(|snapshot| (config.cursor_browser.label().to_string(), snapshot))
+                },
+            )
+            .await
+        }
+    }
+}
 
-    let codex_future = refresh_provider(
-        ProviderId::Codex,
-        config.provider_enabled(ProviderId::Codex),
-        previous_provider(&previous, ProviderId::Codex),
-        async {
-            codex::fetch(&client)
-                .await
-                .map(|snapshot| (snapshot.source.clone(), snapshot))
-        },
-    );
-    let claude_future = refresh_provider(
-        ProviderId::Claude,
-        config.provider_enabled(ProviderId::Claude),
-        previous_provider(&previous, ProviderId::Claude),
-        async {
-            claude::fetch_with_browser(&client, config.claude_browser)
-                .await
-                .map(|snapshot| (snapshot.source.clone(), snapshot))
-        },
-    );
-    let cursor_future = refresh_provider(
-        ProviderId::Cursor,
-        config.provider_enabled(ProviderId::Cursor),
-        previous_provider(&previous, ProviderId::Cursor),
-        async {
-            cursor::fetch(&client, config.cursor_browser)
-                .await
-                .map(|snapshot| (config.cursor_browser.label().to_string(), snapshot))
-        },
-    );
-    let (codex_state, claude_state, cursor_state) =
-        tokio::join!(codex_future, claude_future, cursor_future);
-
-    let app_state = AppState {
-        providers: vec![codex_state, claude_state, cursor_state],
-        updated_at: Utc::now(),
-    };
-
-    if let Err(error_value) = save_cached_state(&app_state) {
+pub fn persist_state(state: &AppState) {
+    if let Err(error_value) = save_cached_state(state) {
         error!(error = %error_value, "failed to save snapshot cache");
     }
-
-    app_state
 }
 
 async fn refresh_provider<F>(
@@ -120,13 +123,6 @@ where
     }
 
     state
-}
-
-fn previous_provider(state: &AppState, provider: ProviderId) -> Option<&ProviderRuntimeState> {
-    state
-        .providers
-        .iter()
-        .find(|entry| entry.provider == provider)
 }
 
 fn classify_auth_state(error: &AppError) -> AuthState {

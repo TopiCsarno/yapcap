@@ -4,6 +4,7 @@
 /// No panel required. All providers refresh on the same schedule as the real
 /// applet so you can iterate on UI without reinstalling.
 use yapcap::{
+    app_refresh::refresh_provider_tasks,
     config::AppConfig,
     cosmic_app::Message,
     logging,
@@ -51,7 +52,7 @@ impl cosmic::Application for DevApp {
             selected_provider: ProviderId::Codex,
         };
         let task = Task::perform(
-            async move { runtime::refresh_all(&initial_config).await },
+            async move { runtime::load_initial_state(&initial_config).await },
             |state| cosmic::Action::App(Message::Refreshed(state)),
         );
         (app, task)
@@ -74,14 +75,24 @@ impl cosmic::Application for DevApp {
                 self.selected_provider = provider;
             }
             Message::Tick | Message::RefreshNow => {
-                let config = self.config.clone();
-                return Task::perform(
-                    async move { runtime::refresh_all(&config).await },
-                    |state| cosmic::Action::App(Message::Refreshed(state)),
-                );
+                return refresh_provider_tasks(&self.config, &mut self.state);
             }
             Message::Refreshed(state) => {
                 self.state = state;
+                if !self
+                    .state
+                    .providers
+                    .iter()
+                    .any(|p| p.provider == self.selected_provider)
+                {
+                    if let Some(first) = self.state.providers.first() {
+                        self.selected_provider = first.provider;
+                    }
+                }
+            }
+            Message::ProviderRefreshed(provider_state) => {
+                self.state.upsert_provider(provider_state);
+                runtime::persist_state(&self.state);
                 if !self
                     .state
                     .providers

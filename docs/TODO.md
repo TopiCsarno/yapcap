@@ -1,10 +1,22 @@
 # TODO
 
-- Make provider refreshes independent in the UI. The popup should update providers one by one as each refresh completes instead of waiting for the whole batch. Right now one slow source blocks the visible update for everything.
-- Add per-provider source mode in config instead of relying only on env vars for manual source forcing.
-- Improve runtime/status messaging for partial refresh failure so users can tell which providers are stale vs freshly updated.
-- Decide whether Claude web stays experimental long-term or gets a more browser-faithful request path.
-- Replace ad hoc source ordering logic with an explicit source-plan layer in runtime/config.
-- Codex: keep source order `OAuth -> RPC -> PTY`; `PTY` exists only as last-resort fallback when OAuth and RPC fail. Investigate a more reliable non-interactive or bounded-probe status path, because interactive `/status` footer scraping is fragile.
-- extra credits ui is ugly for codex
-- Add `update-informer` crate to print a one-line notice on launch when a newer GitHub release is available. No auto-exec — just a nudge for users who download a binary and never check back. Longer term: publish to crates.io and submit an AUR package.
+## Runtime
+
+- Add runtime staleness state. Users should be able to tell which provider data is fresh, stale-but-cached, or failed on the last refresh.
+- Replace ad hoc provider fallback code with an explicit source-plan layer in runtime/config.
+- Add per-provider source mode in config instead of relying only on `YAPCAP_*_FORCE_SOURCE` env vars.
+
+## Providers
+
+- Codex: keep auto order `OAuth -> RPC -> PTY`. PTY should remain last-resort only.
+- Codex: investigate a more reliable non-interactive status path. Interactive `/status` footer scraping is fragile.
+- Claude web: decide whether it stays experimental/forced-only or gets a browser-faithful request path for normal fallback.
+
+## UI
+
+- Redesign Codex credits display. Current `credits0.00 spent`-style presentation is ugly and unclear.
+
+## Release
+
+- Add a one-line update notice when a newer GitHub release exists. No auto-exec; link/copy upgrade instructions only.
+- Longer term: publish to crates.io when COSMIC dependencies allow it, and consider an AUR package.

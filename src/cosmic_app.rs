@@ -1,5 +1,6 @@
+use crate::app_refresh::refresh_provider_tasks;
 use crate::config::AppConfig;
-use crate::model::{AppState, ProviderId};
+use crate::model::{AppState, ProviderId, ProviderRuntimeState};
 use crate::popup_view::popup_content;
 use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
 use crate::runtime;
@@ -30,6 +31,7 @@ pub enum Message {
     Tick,
     RefreshNow,
     Refreshed(AppState),
+    ProviderRefreshed(ProviderRuntimeState),
     Quit,
 }
 
@@ -166,14 +168,15 @@ impl cosmic::Application for AppModel {
                 self.selected_provider = provider;
             }
             Message::Tick | Message::RefreshNow => {
-                let config = self.config.clone();
-                return Task::perform(
-                    async move { runtime::refresh_all(&config).await },
-                    |state| cosmic::Action::App(Message::Refreshed(state)),
-                );
+                return refresh_provider_tasks(&self.config, &mut self.state);
             }
             Message::Refreshed(state) => {
                 self.state = state;
+                self.selected_provider = select_provider(self.selected_provider, &self.state);
+            }
+            Message::ProviderRefreshed(provider_state) => {
+                self.state.upsert_provider(provider_state);
+                runtime::persist_state(&self.state);
                 self.selected_provider = select_provider(self.selected_provider, &self.state);
             }
             Message::Quit => {

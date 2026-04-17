@@ -161,11 +161,11 @@ fn normalize(
         provider: ProviderId::Claude,
         source: "Web Cookie".to_string(),
         updated_at: Utc::now(),
-        headline: if secondary.is_some() {
-            UsageHeadline::Secondary
-        } else {
-            UsageHeadline::Primary
-        },
+        headline: UsageHeadline::primary_first(
+            primary.as_ref(),
+            secondary.as_ref(),
+            tertiary.as_ref(),
+        ),
         primary,
         secondary,
         tertiary,

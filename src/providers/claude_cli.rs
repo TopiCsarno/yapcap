@@ -83,11 +83,11 @@ pub(crate) fn parse_usage_snapshot(transcript: &str) -> Result<UsageSnapshot> {
         provider: ProviderId::Claude,
         source: "CLI".to_string(),
         updated_at: Utc::now(),
-        headline: if secondary.is_some() {
-            UsageHeadline::Secondary
-        } else {
-            UsageHeadline::Primary
-        },
+        headline: UsageHeadline::primary_first(
+            primary.as_ref(),
+            secondary.as_ref(),
+            tertiary.as_ref(),
+        ),
         primary,
         secondary,
         tertiary,

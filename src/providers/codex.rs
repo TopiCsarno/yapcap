@@ -170,11 +170,7 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot> {
         provider: ProviderId::Codex,
         source: "OAuth".to_string(),
         updated_at: Utc::now(),
-        headline: if secondary.is_some() {
-            UsageHeadline::Secondary
-        } else {
-            UsageHeadline::Primary
-        },
+        headline: UsageHeadline::primary_first(primary.as_ref(), secondary.as_ref(), None),
         primary,
         secondary,
         tertiary: None,
@@ -326,11 +322,7 @@ fn normalize_rpc(response: &serde_json::Value) -> Result<UsageSnapshot> {
         provider: ProviderId::Codex,
         source: "RPC".to_string(),
         updated_at: Utc::now(),
-        headline: if secondary.is_some() {
-            UsageHeadline::Secondary
-        } else {
-            UsageHeadline::Primary
-        },
+        headline: UsageHeadline::primary_first(primary.as_ref(), secondary.as_ref(), None),
         primary,
         secondary,
         tertiary: None,
@@ -429,11 +421,7 @@ pub(crate) fn parse_pty_snapshot(transcript: &str) -> Result<UsageSnapshot> {
         provider: ProviderId::Codex,
         source: "PTY".to_string(),
         updated_at: Utc::now(),
-        headline: if secondary.is_some() {
-            UsageHeadline::Secondary
-        } else {
-            UsageHeadline::Primary
-        },
+        headline: UsageHeadline::primary_first(primary.as_ref(), secondary.as_ref(), None),
         primary,
         secondary,
         tertiary: None,

@@ -30,3 +30,6 @@ Notes:
 - Logs are written under the XDG state directory, typically `~/.local/state/yapcap/logs/yapcap.log`.
 - Config is stored at `~/.config/yapcap/config.toml`.
 - Snapshot cache is stored at `~/.cache/yapcap/snapshots.json`.
+- Browser cookie imports are configured per provider with `claude_browser` and `cursor_browser`.
+  Supported values are `brave`, `chrome`, `edge`, and `firefox`.
+- For one-off testing, override browser selection with `YAPCAP_CLAUDE_BROWSER` or `YAPCAP_CURSOR_BROWSER`.

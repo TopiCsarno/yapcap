@@ -41,7 +41,7 @@ pub async fn refresh_all(config: &AppConfig) -> AppState {
         config.provider_enabled(ProviderId::Claude),
         previous_provider(&previous, ProviderId::Claude),
         async {
-            claude::fetch_with_browser(&client, config.cursor_browser)
+            claude::fetch_with_browser(&client, config.claude_browser)
                 .await
                 .map(|snapshot| (snapshot.source.clone(), snapshot))
         },

@@ -151,11 +151,6 @@ fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<Usage
         .as_ref()
         .map(|window| normalize_window("7d", window))
         .transpose()?;
-    let headline = if secondary.is_some() {
-        UsageHeadline::Secondary
-    } else {
-        UsageHeadline::Primary
-    };
     if primary.is_none() && secondary.is_none() {
         return Err(ClaudeError::NoUsageData.into());
     }
@@ -174,7 +169,11 @@ fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<Usage
         provider: ProviderId::Claude,
         source: "OAuth".to_string(),
         updated_at: Utc::now(),
-        headline,
+        headline: UsageHeadline::primary_first(
+            primary.as_ref(),
+            secondary.as_ref(),
+            tertiary.as_ref(),
+        ),
         primary,
         secondary,
         tertiary,

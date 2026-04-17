@@ -39,6 +39,24 @@ pub enum UsageHeadline {
     Tertiary,
 }
 
+impl UsageHeadline {
+    pub fn primary_first(
+        primary: Option<&UsageWindow>,
+        secondary: Option<&UsageWindow>,
+        tertiary: Option<&UsageWindow>,
+    ) -> Self {
+        if primary.is_some() {
+            Self::Primary
+        } else if secondary.is_some() {
+            Self::Secondary
+        } else if tertiary.is_some() {
+            Self::Tertiary
+        } else {
+            Self::Primary
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderCost {
     pub used: f64,
@@ -231,5 +249,45 @@ mod tests {
         let snapshot = snapshot(ProviderId::Cursor);
         let (_, secondary) = snapshot.applet_windows();
         assert_eq!(secondary.map(|w| w.label.as_str()), Some("tertiary"));
+    }
+
+    #[test]
+    fn headline_prefers_primary_usage_window() {
+        let snapshot = snapshot(ProviderId::Codex);
+        assert_eq!(
+            UsageHeadline::primary_first(
+                snapshot.primary.as_ref(),
+                snapshot.secondary.as_ref(),
+                snapshot.tertiary.as_ref(),
+            ),
+            UsageHeadline::Primary
+        );
+    }
+
+    #[test]
+    fn status_line_uses_five_hour_headline_when_present() {
+        let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let mut snapshot = snapshot(ProviderId::Codex);
+        snapshot.primary = Some(UsageWindow {
+            label: "5h".to_string(),
+            used_percent: 31.0,
+            reset_at: None,
+            reset_description: None,
+        });
+        snapshot.secondary = Some(UsageWindow {
+            label: "7d".to_string(),
+            used_percent: 88.0,
+            reset_at: None,
+            reset_description: None,
+        });
+        snapshot.headline = UsageHeadline::primary_first(
+            snapshot.primary.as_ref(),
+            snapshot.secondary.as_ref(),
+            snapshot.tertiary.as_ref(),
+        );
+        state.snapshot = Some(snapshot);
+        state.source_label = Some("OAuth".to_string());
+
+        assert_eq!(state.status_line(), "5h 31% via OAuth");
     }
 }

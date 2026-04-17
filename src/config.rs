@@ -5,12 +5,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+const CLAUDE_BROWSER_ENV: &str = "YAPCAP_CLAUDE_BROWSER";
+const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub refresh_interval_seconds: u64,
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
+    pub claude_browser: CursorBrowser,
     pub cursor_browser: CursorBrowser,
     pub log_level: String,
 }
@@ -22,6 +27,7 @@ impl Default for AppConfig {
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
+            claude_browser: CursorBrowser::Firefox,
             cursor_browser: CursorBrowser::Brave,
             log_level: "info".to_string(),
         }
@@ -34,13 +40,15 @@ impl AppConfig {
         if !path.exists() {
             let config = Self::default();
             config.save()?;
-            return Ok(config);
+            return Ok(config.with_env_overrides());
         }
         let raw = fs::read_to_string(&path).map_err(|source| ConfigError::ReadConfigFile {
             path: path.clone(),
             source,
         })?;
-        Ok(toml::from_str(&raw).map_err(ConfigError::ParseConfig)?)
+        Ok(toml::from_str::<Self>(&raw)
+            .map_err(ConfigError::ParseConfig)?
+            .with_env_overrides())
     }
 
     pub fn save(&self) -> Result<()> {
@@ -64,6 +72,16 @@ impl AppConfig {
             ProviderId::Cursor => self.cursor_enabled,
         }
     }
+
+    fn with_env_overrides(mut self) -> Self {
+        if let Some(browser) = CursorBrowser::from_env(CLAUDE_BROWSER_ENV) {
+            self.claude_browser = browser;
+        }
+        if let Some(browser) = CursorBrowser::from_env(CURSOR_BROWSER_ENV) {
+            self.cursor_browser = browser;
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -75,7 +93,28 @@ pub enum CursorBrowser {
     Firefox,
 }
 
+impl Default for CursorBrowser {
+    fn default() -> Self {
+        Self::Brave
+    }
+}
+
 impl CursorBrowser {
+    fn from_env(name: &str) -> Option<Self> {
+        let raw = std::env::var(name).ok()?;
+        Self::parse(&raw)
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "brave" => Some(Self::Brave),
+            "chrome" | "chromium" => Some(Self::Chrome),
+            "edge" | "microsoft-edge" => Some(Self::Edge),
+            "firefox" => Some(Self::Firefox),
+            _ => None,
+        }
+    }
+
     pub fn cookie_db_path(self) -> Result<PathBuf> {
         let home = dirs::home_dir().ok_or(ConfigError::MissingHomeDir)?;
         Ok(match self {
@@ -145,7 +184,6 @@ fn parse_firefox_profile_cookie_db(ini: &str, firefox_dir: &std::path::Path) -> 
     for line in ini.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            // Flush previous section state.
             if is_profile_default {
                 if let Some(dir) = current_path.take() {
                     profile_default = Some(dir.join("cookies.sqlite"));
@@ -170,7 +208,6 @@ fn parse_firefox_profile_cookie_db(ini: &str, firefox_dir: &std::path::Path) -> 
             }
         }
     }
-    // Flush the last section.
     if is_profile_default {
         if let Some(dir) = current_path {
             profile_default = Some(dir.join("cookies.sqlite"));
@@ -218,5 +255,45 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Claude));
         assert!(config.provider_enabled(ProviderId::Cursor));
         assert_eq!(config.refresh_interval_seconds, 60);
+    }
+
+    #[test]
+    fn config_keeps_separate_claude_and_cursor_browsers() {
+        let config = AppConfig::default();
+        assert_eq!(config.claude_browser.label(), "Firefox");
+        assert_eq!(config.cursor_browser.label(), "Brave");
+    }
+
+    #[test]
+    fn config_deserializes_without_claude_browser() {
+        let raw = r#"
+refresh_interval_seconds = 30
+codex_enabled = true
+claude_enabled = true
+cursor_enabled = true
+cursor_browser = "chrome"
+log_level = "debug"
+"#;
+        let config: AppConfig = toml::from_str(raw).unwrap();
+        assert_eq!(config.claude_browser.label(), "Firefox");
+        assert_eq!(config.cursor_browser.label(), "Chrome");
+    }
+
+    #[test]
+    fn browser_env_overrides_are_provider_specific() {
+        unsafe {
+            std::env::set_var(CLAUDE_BROWSER_ENV, "brave");
+            std::env::set_var(CURSOR_BROWSER_ENV, "firefox");
+        }
+
+        let config = AppConfig::default().with_env_overrides();
+
+        unsafe {
+            std::env::remove_var(CLAUDE_BROWSER_ENV);
+            std::env::remove_var(CURSOR_BROWSER_ENV);
+        }
+
+        assert_eq!(config.claude_browser.label(), "Brave");
+        assert_eq!(config.cursor_browser.label(), "Firefox");
     }
 }

@@ -14,10 +14,11 @@
 
 ## UI
 
-- Redesign Codex credits display. Current `credits0.00 spent`-style presentation is ugly and unclear.
+- Add richer Codex credit state later if needed (`has_credits`, `unlimited`, `overage_limit_reached`, approximate local/cloud messages).
 
 ## Done
 
+- Fixed Codex credits display to show balance as `available` instead of `spent`.
 - Stabilized popup sizing during provider switches to avoid COSMIC/Wayland resize flicker.
 
 ## Release

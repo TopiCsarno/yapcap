@@ -181,7 +181,7 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
         if let Some(tertiary) = &snapshot.tertiary {
             content = content.push(extra_section(tertiary, snapshot.provider_cost.as_ref()));
         } else if let Some(cost) = &snapshot.provider_cost {
-            content = content.push(cost_section(cost));
+            content = content.push(cost_section(provider.provider, cost));
         }
         if let Some(email) = &snapshot.identity.email {
             content = content.push(info_block("Account", email.clone(), None));
@@ -223,7 +223,11 @@ fn extra_section<'a>(
     )
 }
 
-fn cost_section(cost: &ProviderCost) -> Element<'_, Message> {
+fn cost_section(provider: ProviderId, cost: &ProviderCost) -> Element<'_, Message> {
+    if provider == ProviderId::Codex {
+        return credit_section(cost);
+    }
+
     let text_str = match cost.limit {
         Some(limit) => format!(
             "{}{:.2} / {}{:.2}",
@@ -232,6 +236,21 @@ fn cost_section(cost: &ProviderCost) -> Element<'_, Message> {
         None => format!("{}{:.2} spent", cost.units, cost.used),
     };
     info_block("Extra", text_str, None)
+}
+
+fn credit_section(cost: &ProviderCost) -> Element<'_, Message> {
+    let balance = if cost.used.fract() == 0.0 {
+        format!("{:.0}", cost.used)
+    } else {
+        format!("{:.2}", cost.used)
+    };
+    let body = text(format!("{balance} available")).size(14);
+
+    Element::from(
+        container(column![text("Credits").size(18), body].spacing(6))
+            .width(Length::Fill)
+            .padding([4, 0]),
+    )
 }
 
 fn usage_block(

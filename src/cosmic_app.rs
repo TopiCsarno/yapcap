@@ -9,11 +9,25 @@ use cosmic::app::{Core, Task};
 use cosmic::iced::time;
 use cosmic::iced::widget::{column, progress_bar, row};
 use cosmic::iced::window::Id;
-use cosmic::iced::{Alignment, Length, Rectangle, Subscription};
+use cosmic::iced::{Alignment, Background, Length, Rectangle, Subscription};
 use cosmic::surface::action::{app_popup, destroy_popup};
 use cosmic::theme::Button as CosmicButton;
 use cosmic::{Element, iced, task, widget};
 use std::time::Duration;
+
+const POPUP_WIDTH: u32 = 420;
+const POPUP_MIN_HEIGHT: f32 = 240.0;
+const POPUP_MAX_HEIGHT: f32 = 900.0;
+const POPUP_VERTICAL_PADDING: u32 = 32;
+const POPUP_HEADER_HEIGHT: u32 = 32;
+const POPUP_TAB_ROW_HEIGHT: u32 = 72;
+const POPUP_FOOTER_HEIGHT: u32 = 32;
+const POPUP_OUTER_SPACING: u32 = 42;
+const DETAIL_HEADER_HEIGHT: u32 = 64;
+const DETAIL_BLOCK_SPACING: u32 = 14;
+const DETAIL_USAGE_HEIGHT: u32 = 92;
+const DETAIL_INFO_HEIGHT: u32 = 58;
+const DETAIL_STATUS_HEIGHT: u32 = 76;
 
 pub struct AppModel {
     pub(crate) core: Core,
@@ -93,20 +107,24 @@ impl cosmic::Application for AppModel {
                     move |state: &mut AppModel| {
                         let popup_id = Id::unique();
                         state.popup = Some(popup_id);
+                        let popup_height = state.popup_height();
                         let mut popup_settings =
                             if let Some(main_window_id) = state.core.main_window_id() {
                                 state.core.applet.get_popup_settings(
                                     main_window_id,
                                     popup_id,
-                                    None,
+                                    Some((POPUP_WIDTH, popup_height)),
                                     None,
                                     None,
                                 )
                             } else {
-                                state
-                                    .core
-                                    .applet
-                                    .get_popup_settings(popup_id, popup_id, None, None, None)
+                                state.core.applet.get_popup_settings(
+                                    popup_id,
+                                    popup_id,
+                                    Some((POPUP_WIDTH, popup_height)),
+                                    None,
+                                    None,
+                                )
                             };
                         popup_settings.positioner.anchor_rect = Rectangle {
                             x: (bounds.x - offset.x) as i32,
@@ -114,17 +132,15 @@ impl cosmic::Application for AppModel {
                             width: bounds.width as i32,
                             height: bounds.height as i32,
                         };
+                        popup_settings.positioner.size = Some((POPUP_WIDTH, popup_height));
                         popup_settings.positioner.size_limits = cosmic::iced::Limits::NONE
-                            .min_width(380.0)
-                            .max_width(520.0)
-                            .min_height(420.0)
-                            .max_height(900.0);
+                            .width(POPUP_WIDTH as f32)
+                            .height(popup_height as f32);
                         popup_settings
                     },
                     Some(Box::new(move |state: &AppModel| {
                         let content = popup_content(&state.state, state.selected_provider);
-                        Element::from(state.core.applet.popup_container(content))
-                            .map(cosmic::Action::App)
+                        popup_container(content, state.popup_height()).map(cosmic::Action::App)
                     })),
                 ))
             }
@@ -189,6 +205,108 @@ impl cosmic::Application for AppModel {
     fn style(&self) -> Option<iced::theme::Style> {
         Some(cosmic::applet::style())
     }
+}
+
+impl AppModel {
+    fn popup_height(&self) -> u32 {
+        self.state
+            .providers
+            .iter()
+            .map(|provider| ProviderPanelShape::from(provider).popup_height())
+            .max()
+            .unwrap_or_else(|| ProviderPanelShape::StatusOnly.popup_height())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ProviderPanelShape {
+    StatusOnly,
+    Usage {
+        usage_sections: u32,
+        info_sections: u32,
+    },
+}
+
+impl ProviderPanelShape {
+    fn from(provider: &ProviderRuntimeState) -> Self {
+        let Some(snapshot) = &provider.snapshot else {
+            return Self::StatusOnly;
+        };
+
+        let mut usage_sections = 0;
+        if snapshot.primary.is_some() {
+            usage_sections += 1;
+        }
+        if snapshot.secondary.is_some() {
+            usage_sections += 1;
+        }
+        if snapshot.tertiary.is_some() || snapshot.provider_cost.is_some() {
+            usage_sections += 1;
+        }
+
+        let mut info_sections = 1;
+        if snapshot.identity.email.is_some() {
+            info_sections += 1;
+        }
+
+        Self::Usage {
+            usage_sections,
+            info_sections,
+        }
+    }
+
+    fn popup_height(self) -> u32 {
+        let detail_height = match self {
+            Self::StatusOnly => detail_height(0, 1, DETAIL_STATUS_HEIGHT),
+            Self::Usage {
+                usage_sections,
+                info_sections,
+            } => detail_height(usage_sections, info_sections, 0),
+        };
+
+        let height = POPUP_VERTICAL_PADDING
+            + POPUP_HEADER_HEIGHT
+            + POPUP_TAB_ROW_HEIGHT
+            + POPUP_FOOTER_HEIGHT
+            + POPUP_OUTER_SPACING
+            + detail_height;
+
+        height.clamp(POPUP_MIN_HEIGHT as u32, POPUP_MAX_HEIGHT as u32)
+    }
+}
+
+fn detail_height(usage_sections: u32, info_sections: u32, status_height: u32) -> u32 {
+    let visible_blocks = 2 + usage_sections + info_sections;
+    let spacing = visible_blocks.saturating_sub(1) * DETAIL_BLOCK_SPACING;
+
+    DETAIL_HEADER_HEIGHT
+        + usage_sections * DETAIL_USAGE_HEIGHT
+        + info_sections * DETAIL_INFO_HEIGHT
+        + status_height
+        + spacing
+}
+
+fn popup_container<'a>(content: Element<'a, Message>, height: u32) -> Element<'a, Message> {
+    Element::from(
+        widget::container(content)
+            .width(Length::Fixed(POPUP_WIDTH as f32))
+            .height(Length::Fixed(height as f32))
+            .class(cosmic::theme::Container::custom(|theme| {
+                let cosmic = theme.cosmic();
+                let corners = cosmic.corner_radii;
+                cosmic::iced::widget::container::Style {
+                    text_color: Some(cosmic.background.on.into()),
+                    background: Some(Background::Color(cosmic.background.base.into())),
+                    border: cosmic::iced::Border {
+                        radius: corners.radius_m.into(),
+                        width: 1.0,
+                        color: cosmic.background.divider.into(),
+                    },
+                    icon_color: Some(cosmic.background.on.into()),
+                    ..Default::default()
+                }
+            })),
+    )
 }
 
 fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {

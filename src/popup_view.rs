@@ -96,7 +96,7 @@ fn provider_tab_style(
 
     style.background = Some(Background::Color(apply_alpha(surface.base.into(), opacity)));
     style.border_radius = cosmic.corner_radii.radius_s.into();
-    style.border_width = if selected { 2.0 } else { 1.0 };
+    style.border_width = 2.0;
     style.border_color = if selected {
         apply_alpha(cosmic.accent.base.into(), opacity)
     } else {

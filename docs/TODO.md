@@ -16,6 +16,10 @@
 
 - Redesign Codex credits display. Current `credits0.00 spent`-style presentation is ugly and unclear.
 
+## Done
+
+- Stabilized popup sizing during provider switches to avoid COSMIC/Wayland resize flicker.
+
 ## Release
 
 - Add a one-line update notice when a newer GitHub release exists. No auto-exec; link/copy upgrade instructions only.

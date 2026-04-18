@@ -1,7 +1,5 @@
 use super::claude_cli;
-use super::claude_web;
 use crate::auth::load_claude_auth;
-use crate::config::CursorBrowser;
 use crate::error::{ClaudeError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
@@ -13,14 +11,6 @@ use tracing::warn;
 
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const REQUIRED_SCOPE: &str = "user:profile";
-const FORCE_SOURCE_ENV: &str = "YAPCAP_CLAUDE_FORCE_SOURCE";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClaudeSource {
-    Oauth,
-    Cli,
-    Web,
-}
 
 #[derive(Debug, Deserialize)]
 struct ClaudeUsageResponse {
@@ -47,54 +37,7 @@ pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot> {
         Ok(snapshot) => Ok(snapshot),
         Err(error) => {
             warn!(error = %error, "claude oauth failed; trying CLI fallback");
-            fetch_without_oauth(client, CursorBrowser::Firefox).await
-        }
-    }
-}
-
-pub async fn fetch_with_browser(
-    client: &reqwest::Client,
-    browser: CursorBrowser,
-) -> Result<UsageSnapshot> {
-    if let Some(source) = forced_source() {
-        warn!(source = ?source, "forcing claude source via env var");
-        return fetch_forced_source(client, browser, source).await;
-    }
-
-    match fetch_oauth(client).await {
-        Ok(snapshot) => Ok(snapshot),
-        Err(error) => {
-            warn!(error = %error, "claude oauth failed; trying CLI fallback");
-            fetch_without_oauth(client, browser).await
-        }
-    }
-}
-
-async fn fetch_forced_source(
-    client: &reqwest::Client,
-    browser: CursorBrowser,
-    source: ClaudeSource,
-) -> Result<UsageSnapshot> {
-    match source {
-        ClaudeSource::Oauth => fetch_oauth(client).await,
-        ClaudeSource::Cli => claude_cli::fetch().await,
-        ClaudeSource::Web => claude_web::fetch(client, browser).await,
-    }
-}
-
-async fn fetch_without_oauth(
-    client: &reqwest::Client,
-    browser: CursorBrowser,
-) -> Result<UsageSnapshot> {
-    let _ = (client, browser);
-    match claude_cli::fetch().await {
-        Ok(snapshot) => Ok(snapshot),
-        Err(cli_error) => {
-            warn!(
-                error = %cli_error,
-                "claude CLI failed; web cookie path is experimental and only available via forced source"
-            );
-            Err(cli_error)
+            claude_cli::fetch().await
         }
     }
 }
@@ -200,16 +143,6 @@ fn normalize_window(label: &str, window: &ClaudeWindow) -> Result<UsageWindow> {
     })
 }
 
-fn forced_source() -> Option<ClaudeSource> {
-    let raw = std::env::var(FORCE_SOURCE_ENV).ok()?;
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "oauth" => Some(ClaudeSource::Oauth),
-        "cli" => Some(ClaudeSource::Cli),
-        "web" => Some(ClaudeSource::Web),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,32 +184,5 @@ mod tests {
                 .unwrap();
 
         assert_usage_equivalent(&oauth_snapshot, &cli_snapshot);
-    }
-
-    #[test]
-    fn parses_forced_source_env_values() {
-        unsafe {
-            std::env::set_var(FORCE_SOURCE_ENV, "oauth");
-        }
-        assert_eq!(forced_source(), Some(ClaudeSource::Oauth));
-
-        unsafe {
-            std::env::set_var(FORCE_SOURCE_ENV, "cli");
-        }
-        assert_eq!(forced_source(), Some(ClaudeSource::Cli));
-
-        unsafe {
-            std::env::set_var(FORCE_SOURCE_ENV, "web");
-        }
-        assert_eq!(forced_source(), Some(ClaudeSource::Web));
-
-        unsafe {
-            std::env::set_var(FORCE_SOURCE_ENV, "unknown");
-        }
-        assert_eq!(forced_source(), None);
-
-        unsafe {
-            std::env::remove_var(FORCE_SOURCE_ENV);
-        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::browser::{load_cursor_cookie_chromium, load_cursor_cookie_firefox};
-use crate::config::CursorBrowser;
+use crate::config::Browser;
 use crate::error::{CursorError, Result};
 use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow};
 use chrono::{DateTime, Utc};
@@ -40,7 +40,7 @@ struct CursorIdentityResponse {
     pub name: Option<String>,
 }
 
-pub async fn fetch(client: &reqwest::Client, browser: CursorBrowser) -> Result<UsageSnapshot> {
+pub async fn fetch(client: &reqwest::Client, browser: Browser) -> Result<UsageSnapshot> {
     let cookie_db = browser.cookie_db_path()?;
     let cookie_header = match browser.keyring_application() {
         Some(application) => load_cursor_cookie_chromium(&cookie_db, application).await?,

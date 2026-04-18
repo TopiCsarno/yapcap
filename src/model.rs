@@ -180,11 +180,16 @@ impl ProviderRuntimeState {
                     )
                 })
                 .unwrap_or_else(|| "No usage window".to_string());
-            return format!(
-                "{} via {}",
-                headline,
-                self.source_label.as_deref().unwrap_or("unknown source")
-            );
+            let is_stale = self.health == ProviderHealth::Error
+                || self
+                    .last_success_at
+                    .is_none_or(|t| now - t >= chrono::Duration::minutes(10));
+            let source = self.source_label.as_deref().unwrap_or("unknown source");
+            return if is_stale {
+                format!("{headline} via {source} (stale)")
+            } else {
+                format!("{headline} via {source}")
+            };
         }
         self.error
             .clone()
@@ -287,7 +292,28 @@ mod tests {
         );
         state.snapshot = Some(snapshot);
         state.source_label = Some("OAuth".to_string());
+        state.health = ProviderHealth::Ok;
+        state.last_success_at = Some(Utc::now());
 
         assert_eq!(state.status_line(), "5h 31% via OAuth");
+    }
+
+    #[test]
+    fn status_line_marks_stale_when_refresh_failed() {
+        let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let mut snap = snapshot(ProviderId::Codex);
+        snap.primary = Some(UsageWindow {
+            label: "5h".to_string(),
+            used_percent: 31.0,
+            reset_at: None,
+            reset_description: None,
+        });
+        snap.headline = UsageHeadline::Primary;
+        state.snapshot = Some(snap);
+        state.source_label = Some("OAuth".to_string());
+        state.health = ProviderHealth::Error;
+        state.last_success_at = Some(Utc::now());
+
+        assert_eq!(state.status_line(), "5h 31% via OAuth (stale)");
     }
 }

@@ -312,8 +312,6 @@ mod tests {
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-
     /// Create a minimal Chromium cookies SQLite database.
     fn chromium_cookies_db(
         name: &str,
@@ -373,8 +371,6 @@ mod tests {
         blob
     }
 
-    // ── existing tests ────────────────────────────────────────────────────────
-
     #[test]
     fn derive_key_has_expected_size() {
         let key = derive_chromium_key("secret");
@@ -397,8 +393,6 @@ mod tests {
         assert_eq!(normalized, "session-value");
     }
 
-    // ── Chromium cookie extraction ────────────────────────────────────────────
-
     #[test]
     fn chromium_read_cookie_blob_returns_encrypted_bytes() {
         let encrypted = vec![1u8, 2, 3, 4];
@@ -409,8 +403,6 @@ mod tests {
 
     #[test]
     fn chromium_read_cookie_blob_falls_back_to_plaintext_value() {
-        // When `value` is non-empty the function returns it as bytes (the
-        // plaintext-storage fallback path).
         let db = chromium_cookies_db(
             CURSOR_COOKIE_NAME,
             CURSOR_COOKIE_DOMAIN,
@@ -436,7 +428,6 @@ mod tests {
 
     #[test]
     fn chromium_read_cookie_blob_returns_error_when_missing() {
-        // Empty database — cookie row absent.
         let file = NamedTempFile::new().unwrap();
         let conn = Connection::open(file.path()).unwrap();
         conn.execute_batch(
@@ -465,16 +456,12 @@ mod tests {
 
     #[test]
     fn chromium_decrypt_rejects_unrecognized_blob_prefix() {
-        // A blob that is neither v10/v11 nor valid UTF-8 should produce an error.
         let bad = vec![0xff, 0xfe, 0x00, 0x01];
         let err = decrypt_chromium_cookie(&bad, "secret")
             .unwrap_err()
             .to_string();
-        // Falls through the version-prefix check and tries UTF-8; should fail.
         assert!(!err.is_empty());
     }
-
-    // ── Firefox cookie extraction ─────────────────────────────────────────────
 
     #[test]
     fn firefox_extracts_cookie_exact_domain() {

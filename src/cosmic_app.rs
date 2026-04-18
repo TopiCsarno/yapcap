@@ -38,6 +38,10 @@ pub struct AppModel {
 }
 
 #[derive(Debug, Clone)]
+// `Surface` carries cosmic's Action struct, which is ~64 bytes larger than the other
+// variants. Boxing it would break the `Message::Surface` fn-pointer handoff to
+// `applet_tooltip`, so we accept the size delta here.
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     PopupClosed(Id),
     Surface(cosmic::surface::Action),

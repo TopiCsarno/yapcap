@@ -1,4 +1,6 @@
-use crate::model::{AppState, ProviderCost, ProviderId, ProviderRuntimeState, UsageWindow};
+use crate::model::{
+    AppState, ProviderCost, ProviderHealth, ProviderId, ProviderRuntimeState, UsageWindow,
+};
 use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
 use crate::usage_display;
 use cosmic::Element;
@@ -128,7 +130,6 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
         return Element::from(container(text("No providers available")).width(Length::Fill));
     };
 
-    // Title: provider name (left) + plan (right)
     let plan_label = provider
         .snapshot
         .as_ref()
@@ -153,7 +154,6 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
     ]
     .align_y(Alignment::Center);
 
-    // Subtitle: "Updated Xm ago" (left) + status badge (right)
     let updated_label = provider
         .last_success_at
         .map(format_updated_label)
@@ -177,7 +177,6 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
         if let Some(secondary) = &snapshot.secondary {
             content = content.push(usage_section(secondary));
         }
-        // Tertiary + cost: combined Extra usage section
         if let Some(tertiary) = &snapshot.tertiary {
             content = content.push(extra_section(tertiary, snapshot.provider_cost.as_ref()));
         } else if let Some(cost) = &snapshot.provider_cost {
@@ -308,13 +307,27 @@ fn tab_percent(provider: &ProviderRuntimeState) -> f32 {
         .unwrap_or(0.0)
 }
 
+/// Max age for a successful snapshot to still be considered "Live".
+/// Anything older — whether from cache on startup or a stretch of failed refreshes —
+/// is shown as "Stale" so the badge never contradicts the "Updated Xh ago" label.
+const STALE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
+
 fn provider_status_badge(provider: &ProviderRuntimeState) -> &'static str {
     if !provider.enabled {
-        "Disabled"
-    } else if provider.snapshot.is_some() {
-        "Live"
-    } else {
-        "Error"
+        return "Disabled";
+    }
+    if provider.is_refreshing {
+        return "Refreshing";
+    }
+    let now = chrono::Utc::now();
+    let recent = provider
+        .last_success_at
+        .is_some_and(|t| now - t < STALE_AFTER);
+    match (&provider.health, provider.snapshot.is_some(), recent) {
+        (ProviderHealth::Ok, true, true) => "Live",
+        (_, true, _) => "Stale",
+        (ProviderHealth::Error, false, _) => "Error",
+        (ProviderHealth::Ok, false, _) => "…",
     }
 }
 

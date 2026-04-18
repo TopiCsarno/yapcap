@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const CLAUDE_BROWSER_ENV: &str = "YAPCAP_CLAUDE_BROWSER";
 const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,8 +14,7 @@ pub struct AppConfig {
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
-    pub claude_browser: CursorBrowser,
-    pub cursor_browser: CursorBrowser,
+    pub cursor_browser: Browser,
     pub log_level: String,
 }
 
@@ -27,8 +25,7 @@ impl Default for AppConfig {
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
-            claude_browser: CursorBrowser::Firefox,
-            cursor_browser: CursorBrowser::Brave,
+            cursor_browser: Browser::Brave,
             log_level: "info".to_string(),
         }
     }
@@ -74,32 +71,24 @@ impl AppConfig {
     }
 
     fn with_env_overrides(mut self) -> Self {
-        if let Some(browser) = CursorBrowser::from_env(CLAUDE_BROWSER_ENV) {
-            self.claude_browser = browser;
-        }
-        if let Some(browser) = CursorBrowser::from_env(CURSOR_BROWSER_ENV) {
+        if let Some(browser) = Browser::from_env(CURSOR_BROWSER_ENV) {
             self.cursor_browser = browser;
         }
         self
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CursorBrowser {
+pub enum Browser {
+    #[default]
     Brave,
     Chrome,
     Edge,
     Firefox,
 }
 
-impl Default for CursorBrowser {
-    fn default() -> Self {
-        Self::Brave
-    }
-}
-
-impl CursorBrowser {
+impl Browser {
     fn from_env(name: &str) -> Option<Self> {
         let raw = std::env::var(name).ok()?;
         Self::parse(&raw)
@@ -147,8 +136,6 @@ impl CursorBrowser {
 }
 
 fn find_firefox_cookie_db(home: &std::path::Path) -> Result<PathBuf> {
-    // Firefox uses ~/.mozilla/firefox/ traditionally, but XDG-compliant installs
-    // (e.g. on newer distros or Flatpak) place it under ~/.config/mozilla/firefox/.
     let candidates = [
         home.join(".mozilla/firefox"),
         home.join(".config/mozilla/firefox"),
@@ -184,10 +171,8 @@ fn parse_firefox_profile_cookie_db(ini: &str, firefox_dir: &std::path::Path) -> 
     for line in ini.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            if is_profile_default {
-                if let Some(dir) = current_path.take() {
-                    profile_default = Some(dir.join("cookies.sqlite"));
-                }
+            if is_profile_default && let Some(dir) = current_path.take() {
+                profile_default = Some(dir.join("cookies.sqlite"));
             }
             current_path = None;
             is_profile_default = false;
@@ -196,22 +181,18 @@ fn parse_firefox_profile_cookie_db(ini: &str, firefox_dir: &std::path::Path) -> 
             if let Some(rel) = line.strip_prefix("Default=") {
                 install_default = Some(firefox_dir.join(rel).join("cookies.sqlite"));
             }
-        } else {
-            if let Some(rel) = line.strip_prefix("Path=") {
-                let profile_dir = firefox_dir.join(rel);
-                if first_path.is_none() {
-                    first_path = Some(profile_dir.join("cookies.sqlite"));
-                }
-                current_path = Some(profile_dir);
-            } else if line == "Default=1" {
-                is_profile_default = true;
+        } else if let Some(rel) = line.strip_prefix("Path=") {
+            let profile_dir = firefox_dir.join(rel);
+            if first_path.is_none() {
+                first_path = Some(profile_dir.join("cookies.sqlite"));
             }
+            current_path = Some(profile_dir);
+        } else if line == "Default=1" {
+            is_profile_default = true;
         }
     }
-    if is_profile_default {
-        if let Some(dir) = current_path {
-            profile_default = Some(dir.join("cookies.sqlite"));
-        }
+    if is_profile_default && let Some(dir) = current_path {
+        profile_default = Some(dir.join("cookies.sqlite"));
     }
 
     install_default.or(profile_default).or(first_path)
@@ -258,42 +239,23 @@ mod tests {
     }
 
     #[test]
-    fn config_keeps_separate_claude_and_cursor_browsers() {
+    fn cursor_browser_default_is_brave() {
         let config = AppConfig::default();
-        assert_eq!(config.claude_browser.label(), "Firefox");
         assert_eq!(config.cursor_browser.label(), "Brave");
     }
 
     #[test]
-    fn config_deserializes_without_claude_browser() {
-        let raw = r#"
-refresh_interval_seconds = 30
-codex_enabled = true
-claude_enabled = true
-cursor_enabled = true
-cursor_browser = "chrome"
-log_level = "debug"
-"#;
-        let config: AppConfig = toml::from_str(raw).unwrap();
-        assert_eq!(config.claude_browser.label(), "Firefox");
-        assert_eq!(config.cursor_browser.label(), "Chrome");
-    }
-
-    #[test]
-    fn browser_env_overrides_are_provider_specific() {
+    fn cursor_browser_env_override() {
         unsafe {
-            std::env::set_var(CLAUDE_BROWSER_ENV, "brave");
             std::env::set_var(CURSOR_BROWSER_ENV, "firefox");
         }
 
         let config = AppConfig::default().with_env_overrides();
 
         unsafe {
-            std::env::remove_var(CLAUDE_BROWSER_ENV);
             std::env::remove_var(CURSOR_BROWSER_ENV);
         }
 
-        assert_eq!(config.claude_browser.label(), "Brave");
         assert_eq!(config.cursor_browser.label(), "Firefox");
     }
 }

@@ -84,10 +84,9 @@ impl cosmic::Application for DevApp {
                     .providers
                     .iter()
                     .any(|p| p.provider == self.selected_provider)
+                    && let Some(first) = self.state.providers.first()
                 {
-                    if let Some(first) = self.state.providers.first() {
-                        self.selected_provider = first.provider;
-                    }
+                    self.selected_provider = first.provider;
                 }
             }
             Message::ProviderRefreshed(provider_state) => {
@@ -98,14 +97,12 @@ impl cosmic::Application for DevApp {
                     .providers
                     .iter()
                     .any(|p| p.provider == self.selected_provider)
+                    && let Some(first) = self.state.providers.first()
                 {
-                    if let Some(first) = self.state.providers.first() {
-                        self.selected_provider = first.provider;
-                    }
+                    self.selected_provider = first.provider;
                 }
             }
             Message::Quit => return cosmic::iced::exit(),
-            // Applet-only messages — no-op in standalone mode.
             Message::Surface(_) | Message::PopupClosed(_) => {}
         }
         Task::none()

@@ -45,7 +45,7 @@ pub async fn refresh_one(
                 config.provider_enabled(provider),
                 previous.as_ref(),
                 async {
-                    claude::fetch_with_browser(&client, config.claude_browser)
+                    claude::fetch(&client)
                         .await
                         .map(|snapshot| (snapshot.source.clone(), snapshot))
                 },

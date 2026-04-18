@@ -293,8 +293,6 @@ pub enum ClaudeError {
     MissingProfileScope,
     #[error("invalid claude bearer header")]
     InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
-    #[error("invalid claude cookie header")]
-    InvalidCookieHeader(#[source] reqwest::header::InvalidHeaderValue),
     #[error("claude usage request failed")]
     UsageRequest(#[source] reqwest::Error),
     #[error("Claude token unauthorized or expired")]
@@ -321,28 +319,6 @@ pub enum ClaudeError {
     CliTimeout { timeout: Duration },
     #[error("failed to parse claude CLI usage output")]
     CliParse,
-    #[error("claude web organizations request failed")]
-    WebOrganizationsRequest(#[source] reqwest::Error),
-    #[error("claude web organizations endpoint returned error")]
-    WebOrganizationsEndpoint(#[source] reqwest::Error),
-    #[error("failed to decode claude web organizations response")]
-    DecodeWebOrganizations(#[source] reqwest::Error),
-    #[error("claude web usage request failed")]
-    WebUsageRequest(#[source] reqwest::Error),
-    #[error("claude web usage endpoint returned error")]
-    WebUsageEndpoint(#[source] reqwest::Error),
-    #[error("failed to decode claude web usage response")]
-    DecodeWebUsage(#[source] reqwest::Error),
-    #[error("claude web account request failed")]
-    WebAccountRequest(#[source] reqwest::Error),
-    #[error("failed to decode claude web account response")]
-    DecodeWebAccount(#[source] reqwest::Error),
-    #[error("claude web returned no organization id")]
-    WebOrganizationMissing,
-    #[error("claude web session unauthorized")]
-    WebUnauthorized,
-    #[error("claude web response shape was not recognized")]
-    DecodeWebSchema,
     #[error("invalid claude reset timestamp {value}")]
     InvalidResetTimestamp {
         value: String,
@@ -355,7 +331,7 @@ impl ClaudeError {
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
-            Self::Auth(_) | Self::MissingProfileScope | Self::Unauthorized | Self::WebUnauthorized
+            Self::Auth(_) | Self::MissingProfileScope | Self::Unauthorized
         )
     }
 

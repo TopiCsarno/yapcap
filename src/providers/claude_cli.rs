@@ -4,8 +4,14 @@ use crate::model::{
 };
 use chrono::Utc;
 use serde::Deserialize;
-use std::process::{Command, Stdio};
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 
+const CLI_TIMEOUT: Duration = Duration::from_secs(25);
 const USAGE_PROMPT: &str = "Return only JSON with this exact shape: \
 {\"session_percent\": number|null, \"week_percent\": number|null, \"extra_usage_percent\": number|null}. \
 Use percentages from my current Claude usage. Do not include markdown, explanations, or code fences.";
@@ -29,12 +35,12 @@ fn fetch_blocking() -> Result<UsageSnapshot> {
 }
 
 fn run_print_command() -> Result<String> {
-    let output = Command::new("claude")
+    let mut child = Command::new("claude")
         .arg("-p")
         .arg(USAGE_PROMPT)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .spawn()
         .map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
                 ClaudeError::CliUnavailable(source)
@@ -43,14 +49,41 @@ fn run_print_command() -> Result<String> {
             }
         })?;
 
-    let mut transcript = String::from_utf8_lossy(&output.stdout).to_string();
-    transcript.push_str(&String::from_utf8_lossy(&output.stderr));
+    let started_at = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(ClaudeError::CliIo)? {
+            break status;
+        }
 
-    if !output.status.success() {
+        if started_at.elapsed() >= CLI_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ClaudeError::CliTimeout {
+                timeout: CLI_TIMEOUT,
+            }
+            .into());
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    let mut output = Vec::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        stdout
+            .read_to_end(&mut output)
+            .map_err(ClaudeError::CliIo)?;
+    }
+    if let Some(mut stderr) = child.stderr.take() {
+        stderr
+            .read_to_end(&mut output)
+            .map_err(ClaudeError::CliIo)?;
+    }
+
+    if !status.success() {
         return Err(ClaudeError::CliParse.into());
     }
 
-    Ok(transcript)
+    Ok(String::from_utf8_lossy(&output).to_string())
 }
 
 pub(crate) fn parse_usage_snapshot(transcript: &str) -> Result<UsageSnapshot> {

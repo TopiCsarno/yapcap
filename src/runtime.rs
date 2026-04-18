@@ -15,6 +15,7 @@ pub async fn load_initial_state(config: &AppConfig) -> AppState {
         .unwrap_or_else(AppState::empty);
     for provider in &mut state.providers {
         provider.enabled = config.provider_enabled(provider.provider);
+        provider.is_refreshing = false;
     }
     state
 }
@@ -69,7 +70,12 @@ pub async fn refresh_one(
 }
 
 pub fn persist_state(state: &AppState) {
-    if let Err(error_value) = save_cached_state(state) {
+    let mut cached_state = state.clone();
+    for provider in &mut cached_state.providers {
+        provider.is_refreshing = false;
+    }
+
+    if let Err(error_value) = save_cached_state(&cached_state) {
         error!(error = %error_value, "failed to save snapshot cache");
     }
 }

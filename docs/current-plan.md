@@ -67,15 +67,15 @@ Future work should be pulled by actual personal need or user feedback, not by th
 
 Release-critical:
 
-- Fix stale/fresh/error UI semantics. If refresh fails but cached data remains, the UI must say stale or failed, not live.
-- Create a tagged `v0.1.0` GitHub release.
+- Create a tagged `v0.1.0` GitHub release. Once tagged, the in-app update checker will start notifying existing installs when a `v0.1.1`+ release lands.
 
 Done:
 
 - README rewritten for release users, with screenshot, install steps, config paths, troubleshooting, and limitations.
+- Stale/fresh/error UI semantics: cached snapshots survive transient failures and are visibly marked; "Refreshing" no longer sticks.
 - `yapcap-dev` debug binary removed; `yapcap-cosmic` is the only binary and the crate's `default-run`.
 - Settings popup added: per-provider enable toggles and an About section showing the installed version.
-- Update checker hits GitHub releases API on startup; Settings → About shows "Up to date" or a link to the new release.
+- Update checker hits GitHub releases API on startup and surfaces a link in Settings → About when a newer `tag_name` is returned. Verified end-to-end against a mock server (`YAPCAP_UPDATE_URL` env override).
 
 Release-nice:
 

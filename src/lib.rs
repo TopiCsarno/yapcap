@@ -12,4 +12,5 @@ pub mod popup_view;
 pub mod provider_assets;
 pub mod providers;
 pub mod runtime;
+pub mod updates;
 pub mod usage_display;

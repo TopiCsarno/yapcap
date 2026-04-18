@@ -2,6 +2,7 @@ use crate::model::{
     AppState, ProviderCost, ProviderHealth, ProviderId, ProviderRuntimeState, UsageWindow,
 };
 use crate::provider_assets::{ProviderIconVariant, provider_icon_handle};
+use crate::updates::UpdateStatus;
 use crate::usage_display;
 use cosmic::Element;
 use cosmic::iced::widget::{column, container, progress_bar, row, scrollable, text};
@@ -10,7 +11,12 @@ use cosmic::widget;
 
 use crate::cosmic_app::Message;
 
-pub fn popup_content(state: &AppState, selected_provider: ProviderId) -> Element<'_, Message> {
+pub fn popup_content<'a>(
+    state: &'a AppState,
+    selected_provider: ProviderId,
+    show_settings: bool,
+    update_status: &'a UpdateStatus,
+) -> Element<'a, Message> {
     let selected = selected_state(state, selected_provider);
 
     let header = row![
@@ -24,6 +30,7 @@ pub fn popup_content(state: &AppState, selected_provider: ProviderId) -> Element
     let tab_row = state
         .providers
         .iter()
+        .filter(|provider| provider.enabled)
         .fold(row![].spacing(8), |row, provider| {
             row.push(provider_tab(
                 provider,
@@ -31,20 +38,96 @@ pub fn popup_content(state: &AppState, selected_provider: ProviderId) -> Element
             ))
         });
 
-    let detail = selected_provider_view(selected);
-    let footer = widget::button::text("Quit").on_press(Message::Quit);
+    let body: Element<'_, Message> = if show_settings {
+        settings_view(state, update_status)
+    } else {
+        selected_provider_view(selected)
+    };
+
+    let settings_label = if show_settings { "Done" } else { "Settings" };
+    let footer = row![
+        widget::button::text("Quit").on_press(Message::Quit),
+        cosmic::iced::widget::Space::new().width(Length::Fill),
+        widget::button::text(settings_label).on_press(Message::ToggleSettings),
+    ]
+    .align_y(Alignment::Center);
 
     Element::from(
         column![
             header,
             tab_row,
-            scrollable(detail).height(Length::Fill),
+            scrollable(body).height(Length::Fill),
             footer
         ]
         .spacing(14)
         .padding(16)
         .width(Length::Fill)
         .height(Length::Fill),
+    )
+}
+
+const SETTINGS_INDENT: u16 = 24;
+
+fn settings_view<'a>(state: &'a AppState, update_status: &'a UpdateStatus) -> Element<'a, Message> {
+    let providers_title = text("Providers").size(16);
+    let provider_rows = state.providers.iter().fold(
+        column![].spacing(10).width(Length::Fill),
+        |col, provider| {
+            let id = provider.provider;
+            col.push(
+                widget::toggler(provider.enabled)
+                    .label(id.label().to_string())
+                    .width(Length::Fill)
+                    .on_toggle(move |enabled| Message::SetProviderEnabled(id, enabled)),
+            )
+        },
+    );
+    let providers_section = column![
+        providers_title,
+        container(provider_rows).padding([0, 0, 0, SETTINGS_INDENT]),
+    ]
+    .spacing(10)
+    .width(Length::Fill);
+
+    let about = about_section(update_status);
+
+    Element::from(
+        column![providers_section, about]
+            .spacing(22)
+            .padding([8, 0])
+            .width(Length::Fill),
+    )
+}
+
+fn about_section(update_status: &UpdateStatus) -> Element<'_, Message> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let display = update_status.describe();
+
+    let update_line: Element<'_, Message> = match display.link {
+        Some(url) => row![
+            text(display.text).size(12),
+            cosmic::iced::widget::Space::new().width(Length::Fixed(8.0)),
+            widget::button::link("Open release page").on_press(Message::OpenUrl(url)),
+        ]
+        .align_y(Alignment::Center)
+        .into(),
+        None => text(display.text).size(12).into(),
+    };
+
+    let inner = column![
+        text(format!("YapCap v{current_version}")).size(12),
+        update_line,
+    ]
+    .spacing(6)
+    .width(Length::Fill);
+
+    Element::from(
+        column![
+            text("About").size(16),
+            container(inner).padding([0, 0, 0, SETTINGS_INDENT]),
+        ]
+        .spacing(10)
+        .width(Length::Fill),
     )
 }
 
@@ -294,8 +377,8 @@ fn selected_state(
     state
         .providers
         .iter()
-        .find(|provider| provider.provider == selected_provider)
-        .or_else(|| state.providers.first())
+        .find(|provider| provider.provider == selected_provider && provider.enabled)
+        .or_else(|| state.providers.iter().find(|provider| provider.enabled))
 }
 
 fn tab_percent(provider: &ProviderRuntimeState) -> f32 {

@@ -68,11 +68,14 @@ Future work should be pulled by actual personal need or user feedback, not by th
 Release-critical:
 
 - Fix stale/fresh/error UI semantics. If refresh fails but cached data remains, the UI must say stale or failed, not live.
-- Rewrite `README.md` for release users: screenshots/GIF, COSMIC-only positioning, provider support, privacy boundary, install steps, config paths, troubleshooting, and limitations.
-- Add screenshots or a short GIF showing the panel and popup.
-- Run clean Pop!_OS / COSMIC manual testing from checkout through install.
-- Decide whether debug binaries should be documented as developer tools or excluded from release artifacts.
 - Create a tagged `v0.1.0` GitHub release.
+
+Done:
+
+- README rewritten for release users, with screenshot, install steps, config paths, troubleshooting, and limitations.
+- `yapcap-dev` debug binary removed; `yapcap-cosmic` is the only binary and the crate's `default-run`.
+- Settings popup added: per-provider enable toggles and an About section showing the installed version.
+- Update checker hits GitHub releases API on startup; Settings → About shows "Up to date" or a link to the new release.
 
 Release-nice:
 
@@ -83,7 +86,6 @@ Release-nice:
 
 Not required for v0.1:
 
-- Update notice in the app.
 - `doctor` command.
 - `.rpm`, AUR, APT repo, Flatpak, or Snap.
 - Full settings UI.
@@ -109,7 +111,6 @@ Medium value:
   - Firefox cookie DB parsing
   - shared cookie selection helpers
 - Reduce large UI files only when changing related UI behavior. Avoid style-only churn before release.
-- Consider moving debug binaries under an explicit developer-tool story.
 
 Low value before v0.1:
 
@@ -173,6 +174,7 @@ Minimum manual scenarios:
 - Fresh checkout build and install.
 - Applet visible in panel.
 - Popup opens and provider tabs switch without resize flicker.
+- Popup opens at full size even with an empty snapshot cache (no tiny/collapsed first open).
 - Manual refresh works.
 - Config file is created on first run.
 - Snapshot cache is created after successful refresh.

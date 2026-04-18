@@ -1,35 +1,106 @@
+<div align="center">
+
 # YapCap
 
-YapCap is a COSMIC panel applet for showing usage state for Codex, Claude Code, and Cursor.
+**A native COSMIC panel applet that shows local usage state for Codex, Claude Code, and Cursor.**
 
-Current implementation:
-- Codex via OAuth token from `~/.codex/auth.json`
-- Claude via OAuth token from `~/.claude/.credentials.json`
-- Cursor via Brave browser cookie import from `~/.config/BraveSoftware/Brave-Browser/Default/Cookies`
+<img src="resources/screenshot.jpg" alt="YapCap panel applet" width="420" />
 
-Build:
+[Download release](https://github.com/TopiCsarno/yapcap/releases/latest) ·
+[Report a bug](https://github.com/TopiCsarno/yapcap/issues) ·
+[License](LICENSE)
+
+</div>
+
+---
+
+## What it does
+
+YapCap lives in your COSMIC panel and reads local credentials to show how much of your AI coding quota you've used this session, week, or billing cycle — without sending anything to a third party.
+
+- **Codex** — 5-hour and weekly windows, credit balance
+- **Claude Code** — session utilization and reset time
+- **Cursor** — plan usage and billing cycle end
+
+All data is fetched directly from the provider APIs using credentials already on your machine. No telemetry, no cloud sync, no account needed beyond the ones you already have.
+
+## Requirements
+
+- Pop!_OS (or another distro running COSMIC)
+- Rust toolchain (stable) for building from source
+- At least one of: Codex, Claude Code, or Cursor logged in locally
+
+## Install
+
+### From source
 
 ```bash
-cargo build --release
+git clone https://github.com/TopiCsarno/yapcap
+cd yapcap
+./install.sh
 ```
 
-Run locally:
+The script builds the release binary, installs it to `~/.local/bin/yapcap-cosmic`, and registers the desktop entry and icon under `~/.local/share/`. Restart your COSMIC session (or log out and back in) so the panel picks up the new applet, then add **YapCap** from the panel applet picker.
 
-```bash
-./target/release/yapcap-cosmic
+### From release binary
+
+Grab the latest tarball from the [releases page](https://github.com/TopiCsarno/yapcap/releases), extract it, and run `./install.sh` from inside.
+
+## Providers
+
+### Codex
+Reads OAuth token from `~/.codex/auth.json` and calls `chatgpt.com/backend-api/wham/usage`.
+
+### Claude Code
+Reads OAuth token from `~/.claude/.credentials.json` (scope `user:profile`) and calls `api.anthropic.com/api/oauth/usage`.
+
+### Cursor
+Imports the `WorkosCursorSessionToken` cookie from a supported local browser and calls `cursor.com/api/usage-summary`. Supported browsers: Brave, Chrome, Edge, Firefox.
+
+## Configuration
+
+| Path | Purpose |
+| --- | --- |
+| `~/.config/yapcap/config.toml` | Per-provider enable flags, browser selection |
+| `~/.cache/yapcap/snapshots.json` | Last successful response per provider |
+| `~/.local/state/yapcap/logs/yapcap.log` | Log output |
+
+Browser selection can be overridden per-run with `YAPCAP_CLAUDE_BROWSER` or `YAPCAP_CURSOR_BROWSER` (`brave`, `chrome`, `edge`, `firefox`).
+
+To hide a provider you don't use, open the popup → **Settings** and toggle it off. The change is written straight to `config.toml`:
+
+```toml
+codex_enabled = true
+claude_enabled = true
+cursor_enabled = false
 ```
 
-Install for local COSMIC testing:
+Disabled providers are hidden from the popup entirely.
 
-1. Copy `target/release/yapcap-cosmic` somewhere on your `PATH`, for example `~/.local/bin/`.
-2. Copy `resources/com.topi.YapCap.desktop` to `~/.local/share/applications/`.
-3. Make sure the desktop entry `Exec=` line points to the installed binary path if needed.
-4. Restart the panel session or log out and back in so COSMIC rescans applets.
+## Updates
 
-Notes:
-- Logs are written under the XDG state directory, typically `~/.local/state/yapcap/logs/yapcap.log`.
-- Config is stored at `~/.config/yapcap/config.toml`.
-- Snapshot cache is stored at `~/.cache/yapcap/snapshots.json`.
-- Browser cookie imports are configured per provider with `claude_browser` and `cursor_browser`.
-  Supported values are `brave`, `chrome`, `edge`, and `firefox`.
-- For one-off testing, override browser selection with `YAPCAP_CLAUDE_BROWSER` or `YAPCAP_CURSOR_BROWSER`.
+YapCap checks GitHub for a newer release on startup and surfaces the result in **Settings → About**. If a new version is available, the About section shows a link to the release page. No automatic download or install — just a nudge so you know to pull.
+
+## Privacy
+
+YapCap reads local files and talks directly to provider APIs over HTTPS. It does not send data anywhere else. Logs avoid credentials, cookies, and bearer tokens — if you find one leaking, that's a bug, please file it.
+
+## Troubleshooting
+
+- **Applet doesn't appear after install** — restart the COSMIC session (log out and back in).
+- **"Auth required" on Codex or Claude** — log in with the respective CLI to refresh the OAuth token.
+- **Cursor shows no data** — make sure you're logged in to `cursor.com` in a supported browser, then quit that browser so YapCap can read its cookie DB.
+- **Stale data** — a transient refresh failure keeps the last good snapshot visible and marks it stale. Click refresh once the network or provider is back.
+
+Logs at `~/.local/state/yapcap/logs/yapcap.log` are usually the fastest way to see what's going on.
+
+## Limitations
+
+- COSMIC only. No GNOME, KDE, or tray fallback.
+- Three providers only. Not designed to be extensible.
+- No historical charts, notifications, or cost analytics.
+- Cursor cookie import requires the browser to be closed (its cookie DB is locked while running).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

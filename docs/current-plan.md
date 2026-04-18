@@ -35,10 +35,8 @@ Supported providers:
 Supported local data sources:
 
 - Codex OAuth token from `~/.codex/auth.json`
-- Codex CLI RPC / PTY fallback
+- Codex CLI RPC fallback
 - Claude OAuth token from `~/.claude/.credentials.json`
-- Claude CLI fallback
-- Claude web cookie path only as experimental forced-source/manual testing
 - Cursor browser session cookie from supported local browsers
 
 Current local state:
@@ -100,7 +98,6 @@ Highest value:
 - Split `src/providers/codex.rs`. It is the largest and riskiest provider file. Good final shape:
   - Codex OAuth fetch/normalize
   - Codex RPC fetch/normalize
-  - Codex PTY fetch/parse
   - Shared source selection and tests
 - Make runtime state explicitly represent fresh, stale cached, refreshing, disabled, auth-required, and failed states.
 - Keep cached snapshots on transient failure, but surface that state clearly in the panel and popup.
@@ -188,13 +185,12 @@ Provider scenarios:
 
 - Codex logged in with valid auth file.
 - Codex auth missing or expired.
-- Codex RPC unavailable while OAuth or PTY path still behaves predictably.
+- Codex RPC unavailable while OAuth still behaves predictably.
 - Claude credentials present and OAuth succeeds.
-- Claude OAuth fails and CLI fallback succeeds.
-- Claude CLI missing.
+- Claude OAuth succeeds, or failed OAuth leaves cached data visibly stale.
 - Cursor browser cookie import succeeds.
 - Cursor browser cookie missing or expired.
-- Browser selection override works with `YAPCAP_CLAUDE_BROWSER` and `YAPCAP_CURSOR_BROWSER`.
+- Browser selection override works with `YAPCAP_CURSOR_BROWSER`.
 
 Do not repeat provider QA across multiple desktop environments for v0.1. Other DEs are out of scope.
 
@@ -220,7 +216,6 @@ Fixture notes:
 - `reset_at` is a Unix timestamp.
 - `credits.balance` is a string.
 - Codex RPC can provide similar rate-limit data via JSON-RPC `account/rateLimits/read`.
-- PTY parsing is fragile and should remain last-resort.
 
 ### Claude
 
@@ -243,9 +238,6 @@ Fixture notes:
 - `utilization` is a float from 0 to 100, not 0 to 1.
 - `resets_at` is ISO 8601 with microseconds and UTC offset.
 - Extra usage appears only when enabled on the account.
-- Web fixtures are real manual captures from Brave DevTools.
-- Claude web should stay experimental/forced-only because valid cookie requests can still hit Cloudflare challenge behavior outside a browser.
-- Manual testing source override: `YAPCAP_CLAUDE_FORCE_SOURCE=web`.
 
 ### Cursor
 

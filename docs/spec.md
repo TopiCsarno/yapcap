@@ -47,7 +47,7 @@ read_when:
 | Provider | Primary | Fallback |
 | --- | --- | --- |
 | Codex | OAuth token at `~/.codex/auth.json` | Codex CLI `app-server` JSON-RPC |
-| Claude | OAuth token at `~/.claude/.credentials.json` | Claude CLI JSON output |
+| Claude | OAuth token at `~/.claude/.credentials.json` | — |
 | Cursor | `WorkosCursorSessionToken` cookie from a local browser | — |
 
 One primary path and at most one fallback per provider. There is no PTY parsing, no web-cookie path for Claude, and no forced-source environment variable.
@@ -66,7 +66,6 @@ flowchart LR
     Codex --> OpenAI[chatgpt.com/backend-api]
     Codex -.fallback.-> CodexCLI[codex app-server]
     Claude --> Anthropic[api.anthropic.com]
-    Claude -.fallback.-> ClaudeCLI[claude --json]
     Cursor --> CursorAPI[cursor.com]
     Panel --> Local[Local config, cache, logs]
 ```
@@ -89,7 +88,6 @@ Library modules under `src/`:
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
 | `providers::codex` | OAuth + JSON-RPC CLI fallback. |
 | `providers::claude` | OAuth path. |
-| `providers::claude_cli` | Claude CLI JSON fallback parser. |
 | `providers::cursor` | Cursor web API via imported browser cookie. |
 | `auth` | Parses `~/.codex/auth.json` and `~/.claude/.credentials.json`. |
 | `browser` | Chromium AES-GCM/CBC cookie decrypt; Firefox cookies.sqlite read. |
@@ -165,7 +163,7 @@ Response shape:
 - `extra_usage.utilization` → tertiary window.
 - `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` in dollars (both fields divided by 100).
 
-Fallback: `claude_cli` runs the Claude CLI and parses embedded JSON usage output. Only invoked when the OAuth call fails.
+Fallback: none. Claude usage is OAuth-only because the CLI does not expose reliable machine-readable usage data.
 
 HTTP 401 surfaces as `ClaudeError::Unauthorized` (user action required). HTTP 429 surfaces as `ClaudeError::RateLimited` and is marked transient so the badge shows "Stale" rather than "Error."
 

@@ -309,16 +309,6 @@ pub enum ClaudeError {
     DecodeUsage(#[source] reqwest::Error),
     #[error("Claude response had no usage windows")]
     NoUsageData,
-    #[error("claude CLI is not available")]
-    CliUnavailable(#[source] std::io::Error),
-    #[error("failed to run claude CLI")]
-    CliCommand(#[source] std::io::Error),
-    #[error("failed to communicate with claude CLI")]
-    CliIo(#[source] std::io::Error),
-    #[error("claude CLI timed out after {timeout:?}")]
-    CliTimeout { timeout: Duration },
-    #[error("failed to parse claude CLI usage output")]
-    CliParse,
     #[error("invalid claude reset timestamp {value}")]
     InvalidResetTimestamp {
         value: String,

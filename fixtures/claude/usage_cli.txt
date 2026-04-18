@@ -1,1 +1,0 @@
-{"session_percent":18,"week_percent":90,"extra_usage_percent":48.8}

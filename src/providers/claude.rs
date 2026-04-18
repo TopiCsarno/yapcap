@@ -1,4 +1,3 @@
-use super::claude_cli;
 use crate::auth::load_claude_auth;
 use crate::error::{ClaudeError, Result};
 use crate::model::{
@@ -27,19 +26,15 @@ struct ClaudeWindow {
 
 #[derive(Debug, Deserialize)]
 struct ClaudeExtraUsage {
-    pub monthly_limit: f64,
-    pub used_credits: f64,
-    pub utilization: f64,
+    #[serde(default)]
+    pub is_enabled: Option<bool>,
+    pub monthly_limit: Option<f64>,
+    pub used_credits: Option<f64>,
+    pub utilization: Option<f64>,
 }
 
 pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot> {
-    match fetch_oauth(client).await {
-        Ok(snapshot) => Ok(snapshot),
-        Err(error) => {
-            warn!(error = %error, "claude oauth failed; trying CLI fallback");
-            claude_cli::fetch().await
-        }
-    }
+    fetch_oauth(client).await
 }
 
 async fn fetch_oauth(client: &reqwest::Client) -> Result<UsageSnapshot> {
@@ -65,7 +60,7 @@ async fn fetch_oauth(client: &reqwest::Client) -> Result<UsageSnapshot> {
         .await
         .map_err(ClaudeError::UsageRequest)?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        warn!("claude usage endpoint returned 401; local CLI credentials may be stale");
+        warn!("claude usage endpoint returned 401; local OAuth credentials may be stale");
         return Err(ClaudeError::Unauthorized.into());
     }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -97,17 +92,32 @@ fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<Usage
     if primary.is_none() && secondary.is_none() {
         return Err(ClaudeError::NoUsageData.into());
     }
-    let tertiary = payload.extra_usage.as_ref().map(|extra| UsageWindow {
-        label: "Extra".to_string(),
-        used_percent: extra.utilization,
-        reset_at: None,
-        reset_description: None,
-    });
-    let provider_cost = payload.extra_usage.map(|usage| ProviderCost {
-        used: usage.used_credits / 100.0,
-        limit: Some(usage.monthly_limit / 100.0),
-        units: "$".to_string(),
-    });
+    let extra_enabled = payload
+        .extra_usage
+        .as_ref()
+        .is_some_and(|extra| extra.is_enabled.unwrap_or(true));
+    let tertiary = payload
+        .extra_usage
+        .as_ref()
+        .filter(|_| extra_enabled)
+        .and_then(|extra| {
+            extra.utilization.map(|utilization| UsageWindow {
+                label: "Extra".to_string(),
+                used_percent: utilization,
+                reset_at: None,
+                reset_description: None,
+            })
+        });
+    let provider_cost = payload
+        .extra_usage
+        .filter(|_| extra_enabled)
+        .and_then(|usage| {
+            usage.used_credits.map(|used| ProviderCost {
+                used: used / 100.0,
+                limit: usage.monthly_limit.map(|limit| limit / 100.0),
+                units: "$".to_string(),
+            })
+        });
     Ok(UsageSnapshot {
         provider: ProviderId::Claude,
         source: "OAuth".to_string(),
@@ -146,22 +156,6 @@ fn normalize_window(label: &str, window: &ClaudeWindow) -> Result<UsageWindow> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::claude_cli;
-
-    fn assert_usage_equivalent(left: &UsageSnapshot, right: &UsageSnapshot) {
-        assert_eq!(
-            left.primary.as_ref().map(|window| window.used_percent),
-            right.primary.as_ref().map(|window| window.used_percent)
-        );
-        assert_eq!(
-            left.secondary.as_ref().map(|window| window.used_percent),
-            right.secondary.as_ref().map(|window| window.used_percent)
-        );
-        assert_eq!(
-            left.tertiary.as_ref().map(|window| window.used_percent),
-            right.tertiary.as_ref().map(|window| window.used_percent)
-        );
-    }
 
     #[test]
     fn normalizes_fixture() {
@@ -175,14 +169,16 @@ mod tests {
     }
 
     #[test]
-    fn oauth_and_cli_fixtures_produce_same_usage_windows() {
-        let oauth_payload: ClaudeUsageResponse =
-            serde_json::from_str(include_str!("../../fixtures/claude/usage_oauth.json")).unwrap();
-        let oauth_snapshot = normalize(oauth_payload, Some("pro".to_string())).unwrap();
-        let cli_snapshot =
-            claude_cli::parse_usage_snapshot(include_str!("../../fixtures/claude/usage_cli.txt"))
-                .unwrap();
-
-        assert_usage_equivalent(&oauth_snapshot, &cli_snapshot);
+    fn normalizes_fixture_with_extra_usage_disabled() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
+            "../../fixtures/claude/usage_oauth_extra_disabled.json"
+        ))
+        .unwrap();
+        let snapshot = normalize(payload, Some("pro".to_string())).unwrap();
+        assert_eq!(snapshot.provider, ProviderId::Claude);
+        assert_eq!(snapshot.primary.as_ref().unwrap().used_percent, 83.0);
+        assert_eq!(snapshot.secondary.as_ref().unwrap().used_percent, 21.0);
+        assert!(snapshot.tertiary.is_none());
+        assert!(snapshot.provider_cost.is_none());
     }
 }

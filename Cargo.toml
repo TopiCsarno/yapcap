@@ -7,6 +7,24 @@ description = "COSMIC panel applet for Codex, Claude Code, and Cursor usage"
 repository = "https://github.com/TopiCsarno/yapcap"
 default-run = "yapcap-cosmic"
 
+[package.metadata.deb]
+name = "yapcap"
+maintainer = "Topi Csarno <topi2236@gmail.com>"
+depends = "$auto, libxkbcommon0, libwayland-client0, libfontconfig1"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/yapcap-cosmic", "usr/bin/", "755"],
+    ["resources/com.topi.YapCap.desktop", "usr/share/applications/", "644"],
+    ["resources/icon.svg", "usr/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg", "644"],
+    ["README.md", "usr/share/doc/yapcap/README.md", "644"],
+]
+extended-description = """
+YapCap is a native COSMIC panel applet that surfaces local usage limits for \
+Codex, Claude Code, and Cursor by reading locally available OAuth tokens \
+and browser session cookies.
+"""
+
 [lib]
 name = "yapcap"
 path = "src/lib.rs"

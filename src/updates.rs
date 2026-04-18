@@ -107,11 +107,7 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     let minor = parts.next()?.parse().ok()?;
     let patch_raw = parts.next()?;
     // Drop any pre-release/build suffix after the patch: 0.2.0-rc1 -> 0.2.0
-    let patch = patch_raw
-        .split(|c: char| c == '-' || c == '+')
-        .next()?
-        .parse()
-        .ok()?;
+    let patch = patch_raw.split(['-', '+']).next()?.parse().ok()?;
     Some((major, minor, patch))
 }
 

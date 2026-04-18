@@ -12,13 +12,19 @@ DESKTOP_SOURCE="$ROOT_DIR/resources/$APP_ID.desktop"
 DESKTOP_TARGET="$INSTALL_APPS_DIR/$APP_ID.desktop"
 ICON_SOURCE="$ROOT_DIR/resources/icon.svg"
 ICON_TARGET="$INSTALL_ICONS_DIR/$APP_ID.svg"
-BIN_SOURCE="$ROOT_DIR/target/release/$BIN_NAME"
+BUILT_BIN_SOURCE="$ROOT_DIR/target/release/$BIN_NAME"
+BUNDLED_BIN_SOURCE="$ROOT_DIR/$BIN_NAME"
 BIN_TARGET="$INSTALL_BIN_DIR/$BIN_NAME"
 
 mkdir -p "$INSTALL_BIN_DIR" "$INSTALL_APPS_DIR" "$INSTALL_ICONS_DIR"
 
-echo "Building release binary..."
-cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml"
+if [[ -x "$BUNDLED_BIN_SOURCE" ]]; then
+  BIN_SOURCE="$BUNDLED_BIN_SOURCE"
+else
+  echo "Building release binary..."
+  cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml"
+  BIN_SOURCE="$BUILT_BIN_SOURCE"
+fi
 
 echo "Installing binary to $BIN_TARGET"
 install -m 0755 "$BIN_SOURCE" "$BIN_TARGET"

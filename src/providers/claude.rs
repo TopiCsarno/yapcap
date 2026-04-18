@@ -82,12 +82,12 @@ fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<Usage
     let primary = payload
         .five_hour
         .as_ref()
-        .map(|window| normalize_window("5h", window))
+        .map(|window| normalize_window("Session", window))
         .transpose()?;
     let secondary = payload
         .seven_day
         .as_ref()
-        .map(|window| normalize_window("7d", window))
+        .map(|window| normalize_window("Weekly", window))
         .transpose()?;
     if primary.is_none() && secondary.is_none() {
         return Err(ClaudeError::NoUsageData.into());

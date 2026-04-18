@@ -274,13 +274,13 @@ mod tests {
         let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
         let mut snapshot = snapshot(ProviderId::Codex);
         snapshot.primary = Some(UsageWindow {
-            label: "5h".to_string(),
+            label: "Session".to_string(),
             used_percent: 31.0,
             reset_at: None,
             reset_description: None,
         });
         snapshot.secondary = Some(UsageWindow {
-            label: "7d".to_string(),
+            label: "Weekly".to_string(),
             used_percent: 88.0,
             reset_at: None,
             reset_description: None,
@@ -295,7 +295,7 @@ mod tests {
         state.health = ProviderHealth::Ok;
         state.last_success_at = Some(Utc::now());
 
-        assert_eq!(state.status_line(), "5h 31% via OAuth");
+        assert_eq!(state.status_line(), "Session 31% via OAuth");
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod tests {
         let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
         let mut snap = snapshot(ProviderId::Codex);
         snap.primary = Some(UsageWindow {
-            label: "5h".to_string(),
+            label: "Session".to_string(),
             used_percent: 31.0,
             reset_at: None,
             reset_description: None,
@@ -314,6 +314,6 @@ mod tests {
         state.health = ProviderHealth::Error;
         state.last_success_at = Some(Utc::now());
 
-        assert_eq!(state.status_line(), "5h 31% via OAuth (stale)");
+        assert_eq!(state.status_line(), "Session 31% via OAuth (stale)");
     }
 }

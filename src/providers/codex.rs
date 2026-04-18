@@ -89,12 +89,12 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot> {
         .rate_limit
         .as_ref()
         .and_then(|r| r.primary_window.as_ref())
-        .map(|w| normalize_window("5h", w.used_percent, w.reset_at));
+        .map(|w| normalize_window("Session", w.used_percent, w.reset_at));
     let secondary = payload
         .rate_limit
         .as_ref()
         .and_then(|r| r.secondary_window.as_ref())
-        .map(|w| normalize_window("7d", w.used_percent, w.reset_at));
+        .map(|w| normalize_window("Weekly", w.used_percent, w.reset_at));
 
     let provider_cost = payload.credits.as_ref().and_then(|c| {
         match c.balance.parse::<f64>() {
@@ -251,8 +251,10 @@ fn normalize_rpc(response: &serde_json::Value) -> Result<UsageSnapshot> {
         .and_then(|r| r.get("rateLimits"))
         .ok_or(CodexError::CliParse)?;
 
-    let primary = limits.get("primary").and_then(|w| rpc_window(w, "5h"));
-    let secondary = limits.get("secondary").and_then(|w| rpc_window(w, "7d"));
+    let primary = limits.get("primary").and_then(|w| rpc_window(w, "Session"));
+    let secondary = limits
+        .get("secondary")
+        .and_then(|w| rpc_window(w, "Weekly"));
     let credits = limits
         .get("credits")
         .and_then(|c| c.get("balance"))

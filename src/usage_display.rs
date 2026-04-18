@@ -43,7 +43,7 @@ mod tests {
 
     fn window(reset_at: Option<DateTime<Utc>>, used_percent: f64) -> UsageWindow {
         UsageWindow {
-            label: "5h".to_string(),
+            label: "Session".to_string(),
             used_percent,
             reset_at,
             reset_description: None,

@@ -6,13 +6,16 @@
 
 <img src="resources/screenshot.jpg" alt="YapCap panel applet" width="420" />
 
-[Download release](https://github.com/TopiCsarno/yapcap/releases/latest) ·
-[Report a bug](https://github.com/TopiCsarno/yapcap/issues) ·
-[License](LICENSE)
+[![CI](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml/badge.svg)](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/TopiCsarno/yapcap?label=release)](https://github.com/TopiCsarno/yapcap/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[Report a bug](https://github.com/TopiCsarno/yapcap/issues)
 
 </div>
 
 ---
+
 
 ## What it does
 
@@ -27,12 +30,36 @@ All data is fetched directly from the provider APIs using credentials already on
 ## Requirements
 
 - Pop!_OS (or another distro running COSMIC)
-- Rust toolchain (stable) for building from source
 - At least one of: Codex, Claude Code, or Cursor logged in locally
+- Rust toolchain (stable) only if you build from source
 
 ## Install
 
+### install with apt (recommended)
+
+Download the `.deb` package from the [latest release](https://github.com/TopiCsarno/yapcap/releases/latest), then install it:
+
+```bash
+sudo apt install ./yapcap_*.deb
+```
+
+Restart your COSMIC session (or log out and back in) so the panel picks up the new applet, then add **YapCap** from the panel applet picker.
+
+### Binary tarball + install script
+
+Download the binary tarball from the [latest release](https://github.com/TopiCsarno/yapcap/releases/latest), extract it, and run the included installer:
+
+```bash
+tar -xzf yapcap-*-x86_64-linux.tar.gz
+cd yapcap-*-x86_64-linux
+./install.sh
+```
+
+The script installs the bundled release binary to `~/.local/bin/yapcap-cosmic` and registers the desktop entry and icon under `~/.local/share/`.
+
 ### From source
+
+This path requires a local Rust toolchain.
 
 ```bash
 git clone https://github.com/TopiCsarno/yapcap
@@ -40,11 +67,7 @@ cd yapcap
 ./install.sh
 ```
 
-The script builds the release binary, installs it to `~/.local/bin/yapcap-cosmic`, and registers the desktop entry and icon under `~/.local/share/`. Restart your COSMIC session (or log out and back in) so the panel picks up the new applet, then add **YapCap** from the panel applet picker.
-
-### From release binary
-
-Grab the latest tarball from the [releases page](https://github.com/TopiCsarno/yapcap/releases), extract it, and run `./install.sh` from inside.
+For source checkouts, the script builds the release binary before installing it.
 
 ## Providers
 

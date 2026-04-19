@@ -9,7 +9,7 @@ default-run = "yapcap-cosmic"
 
 [package.metadata.deb]
 name = "yapcap"
-maintainer = "Topi Csarno <topi2236@gmail.com>"
+maintainer = "Topi Csarno <TopiCsarno@users.noreply.github.com>"
 depends = "$auto, libxkbcommon0, libwayland-client0, libfontconfig1"
 section = "utils"
 priority = "optional"

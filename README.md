@@ -31,11 +31,12 @@ All data is fetched directly from the provider APIs using credentials already on
 
 - Pop!_OS (or another distro running COSMIC)
 - At least one of: Codex, Claude Code, or Cursor logged in locally
+- COSMIC dependencies installed
 - Rust toolchain (stable) only if you build from source
 
 ## Install
 
-### install with apt (recommended)
+### Install with apt (recommended)
 
 Download the `.deb` package from the [latest release](https://github.com/TopiCsarno/yapcap/releases/latest), then install it:
 
@@ -59,7 +60,7 @@ The script installs the bundled release binary to `~/.local/bin/yapcap-cosmic` a
 
 ### From source
 
-This path requires a local Rust toolchain.
+This path requires COSMIC development dependencies and a local Rust toolchain.
 
 ```bash
 git clone https://github.com/TopiCsarno/yapcap

@@ -347,4 +347,4 @@ The popup's height is computed from visible sections to avoid flicker when switc
 - `cargo test` runs ~38 unit tests: provider normalizers against recorded fixtures (`fixtures/{codex,claude,cursor}/*.json`), browser cookie extraction against temporary SQLite DBs, stale/fresh status rules, and the `refresh_provider` snapshot-preservation behavior.
 - No integration tests hit real provider APIs; fixtures were captured from real responses and are committed alongside the code.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are expected clean on main. A single `#[allow(clippy::large_enum_variant)]` exists on `cosmic_app::Message` because the `Surface` variant is a function-pointer handoff to libcosmic.
-- Manual QA scenarios live in `docs/current-plan.md` under "Manual Testing."
+- Manual QA should cover install, provider auth refresh, transient provider failures, stale snapshot display, settings persistence, and update-check UI states.

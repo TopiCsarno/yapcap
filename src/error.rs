@@ -297,6 +297,16 @@ pub enum ClaudeError {
     UsageRequest(#[source] reqwest::Error),
     #[error("Claude token unauthorized or expired")]
     Unauthorized,
+    #[error("claude CLI binary not found")]
+    CliUnavailable,
+    #[error("failed to spawn claude CLI")]
+    CliCommand(#[source] std::io::Error),
+    #[error("failed to communicate with claude CLI")]
+    CliIo(#[source] std::io::Error),
+    #[error("claude CLI timed out after {timeout:?}")]
+    CliTimeout { timeout: Duration },
+    #[error("claude auth status failed with exit status {status}")]
+    CliStatusFailed { status: String },
     #[error("claude usage endpoint rate limited (429)")]
     RateLimited,
     #[error("claude usage endpoint returned HTTP {status}")]
@@ -321,7 +331,14 @@ impl ClaudeError {
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
-            Self::Auth(_) | Self::MissingProfileScope | Self::Unauthorized
+            Self::Auth(_)
+                | Self::MissingProfileScope
+                | Self::Unauthorized
+                | Self::CliUnavailable
+                | Self::CliCommand(_)
+                | Self::CliIo(_)
+                | Self::CliTimeout { .. }
+                | Self::CliStatusFailed { .. }
         )
     }
 

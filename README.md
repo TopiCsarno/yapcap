@@ -75,7 +75,9 @@ For source checkouts, the script builds the release binary before installing it.
 Reads OAuth token from `~/.codex/auth.json` and calls `chatgpt.com/backend-api/wham/usage`.
 
 ### Claude Code
-Reads OAuth token from `~/.claude/.credentials.json` (scope `user:profile`) and calls `api.anthropic.com/api/oauth/usage`.
+Reads OAuth token from `~/.claude/.credentials.json` or `$CLAUDE_CONFIG_DIR/.credentials.json` (scope `user:profile`) and calls `api.anthropic.com/api/oauth/usage`.
+
+If the Claude Code access token is expired or close to expiring, YapCap runs `claude auth status --json` and then rereads the credentials file. Claude Code owns the OAuth refresh flow and may update `.credentials.json`; YapCap does not call Claude's private token endpoint directly.
 
 ### Cursor
 Imports the `WorkosCursorSessionToken` cookie from a supported local browser and calls `cursor.com/api/usage-summary`. Supported browsers: Brave, Chrome, Edge, Firefox.
@@ -106,12 +108,12 @@ YapCap checks GitHub for a newer release on startup and surfaces the result in *
 
 ## Privacy
 
-YapCap reads local files and talks directly to provider APIs over HTTPS. It does not send data anywhere else. Logs avoid credentials, cookies, and bearer tokens — if you find one leaking, that's a bug, please file it.
+YapCap reads local files and talks directly to provider APIs over HTTPS. For Claude Code, it may also run `claude auth status --json` to let Claude Code refresh its own local credentials. Logs avoid credentials, cookies, and bearer tokens — if you find one leaking, that's a bug, please file it.
 
 ## Troubleshooting
 
 - **Applet doesn't appear after install** — restart the COSMIC session (log out and back in).
-- **"Auth required" on Codex or Claude** — log in with the respective CLI to refresh the OAuth token.
+- **"Auth required" on Codex or Claude** — log in with the respective CLI. For Claude, `claude auth status --json` is used automatically when possible, but `/login` may still be needed if Claude Code reports the refresh token is revoked or expired.
 - **Cursor shows no data** — make sure you're logged in to `cursor.com` in a supported browser, then quit that browser so YapCap can read its cookie DB.
 - **Stale data** — a transient refresh failure keeps the last good snapshot visible and marks it stale. Click refresh once the network or provider is back.
 

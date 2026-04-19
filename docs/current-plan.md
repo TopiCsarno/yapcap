@@ -36,7 +36,7 @@ Supported local data sources:
 
 - Codex OAuth token from `~/.codex/auth.json`
 - Codex CLI RPC fallback
-- Claude OAuth token from `~/.claude/.credentials.json`
+- Claude OAuth token from `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`
 - Cursor browser session cookie from supported local browsers
 
 Current local state:
@@ -223,9 +223,12 @@ Fixture notes:
 
 Auth source:
 
-- OAuth token from `~/.claude/.credentials.json`
-- Field: `claudeAiOauth.accessToken`
+- OAuth token from `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`
+- Fields: `claudeAiOauth.accessToken`, `scopes`, `subscriptionType`, `expiresAt`
 - Required scope: `user:profile`
+- If `expiresAt` is within 5 minutes, YapCap runs `claude auth status --json` and rereads the credential file before calling the usage endpoint.
+- If the usage endpoint returns 401, YapCap runs `claude auth status --json` once, rereads the credential file, and retries once.
+- YapCap delegates refresh to Claude Code instead of calling Claude's private token endpoint directly.
 
 OAuth request:
 

@@ -47,7 +47,7 @@ read_when:
 | Provider | Primary | Fallback |
 | --- | --- | --- |
 | Codex | OAuth token at `~/.codex/auth.json` | Codex CLI `app-server` JSON-RPC |
-| Claude | OAuth token at `~/.claude/.credentials.json` | — |
+| Claude | OAuth token at `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json` | Claude Code credential refresh via `claude auth status --json` |
 | Cursor | `WorkosCursorSessionToken` cookie from a local browser | — |
 
 One primary path and at most one fallback per provider. There is no PTY parsing, no web-cookie path for Claude, and no forced-source environment variable.
@@ -89,7 +89,7 @@ Library modules under `src/`:
 | `providers::codex` | OAuth + JSON-RPC CLI fallback. |
 | `providers::claude` | OAuth path. |
 | `providers::cursor` | Cursor web API via imported browser cookie. |
-| `auth` | Parses `~/.codex/auth.json` and `~/.claude/.credentials.json`. |
+| `auth` | Parses `~/.codex/auth.json` and Claude Code `.credentials.json`. |
 | `browser` | Chromium AES-GCM/CBC cookie decrypt; Firefox cookies.sqlite read. |
 | `config` | `AppConfig`, `Browser`, XDG paths. |
 | `cache` | Load/save `snapshots.json`. |
@@ -155,6 +155,8 @@ Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 - `Authorization: Bearer <claudeAiOauth.accessToken>`
 - `anthropic-beta: oauth-2025-04-20`
 - Token must carry scope `user:profile`; otherwise `MissingProfileScope` is returned before the request.
+- Before the request, YapCap checks `claudeAiOauth.expiresAt`. If the access token expires within 5 minutes, it runs `claude auth status --json`, then reloads `.credentials.json`.
+- If the usage endpoint returns HTTP 401, YapCap runs `claude auth status --json` once, reloads `.credentials.json`, and retries the usage request once.
 
 Response shape:
 
@@ -163,9 +165,11 @@ Response shape:
 - `extra_usage.utilization` → tertiary window.
 - `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` in dollars (both fields divided by 100).
 
-Fallback: none. Claude usage is OAuth-only because the CLI does not expose reliable machine-readable usage data.
+Usage fallback: none. Claude usage is OAuth-only because the CLI does not expose reliable machine-readable usage data.
 
-HTTP 401 surfaces as `ClaudeError::Unauthorized` (user action required). HTTP 429 surfaces as `ClaudeError::RateLimited` and is marked transient so the badge shows "Stale" rather than "Error."
+Credential refresh is delegated to Claude Code. YapCap shells out directly to the `claude` binary, without a shell, and lets Claude Code manage its own OAuth refresh flow and credential file. YapCap does not call Claude's private token endpoint directly.
+
+HTTP 401 surfaces as `ClaudeError::Unauthorized` after the one refresh retry fails (user action required). HTTP 429 surfaces as `ClaudeError::RateLimited` and is marked transient so the badge shows "Stale" rather than "Error."
 
 ### 3.3 Cursor
 
@@ -191,10 +195,10 @@ HTTP 401 surfaces as `ClaudeError::Unauthorized` (user action required). HTTP 42
 
 `auth::load_claude_auth`:
 
-- Respects `CLAUDE_HOME`, otherwise `~/.claude`.
-- Reads `.credentials.json` and extracts `claudeAiOauth.{accessToken, scopes, subscriptionType}`.
+- Respects `CLAUDE_CONFIG_DIR`, then `CLAUDE_HOME`, otherwise `~/.claude`.
+- Reads `.credentials.json` and extracts `claudeAiOauth.{accessToken, scopes, subscriptionType, expiresAt}`.
 
-Neither file is ever written by YapCap. Errors are typed (`AuthError`) and bubble up as `requires_user_action = true`.
+YapCap never writes these credential files directly. It can run `claude auth status --json`, which may cause Claude Code to update its own `.credentials.json`. Errors are typed (`AuthError` / provider errors) and bubble up as `requires_user_action = true` when user login or local CLI repair is needed.
 
 ### 4.2 Browser Cookie Import
 

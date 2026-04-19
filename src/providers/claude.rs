@@ -1,8 +1,9 @@
-use crate::auth::load_claude_auth;
+use crate::auth::{ClaudeAuth, claude_credentials_path, load_claude_auth_from_path};
 use crate::error::{ClaudeError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
 };
+use crate::providers::claude_refresh::{load_fresh_auth, refresh_claude_credentials};
 use chrono::{DateTime, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
@@ -38,7 +39,27 @@ pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot> {
 }
 
 async fn fetch_oauth(client: &reqwest::Client) -> Result<UsageSnapshot> {
-    let auth = load_claude_auth()?;
+    let credentials_path = claude_credentials_path()?;
+    let auth = load_fresh_auth(&credentials_path, Utc::now())?;
+    match request_oauth(client, &auth).await {
+        Err(error)
+            if matches!(
+                error,
+                crate::error::AppError::Provider(crate::error::ProviderError::Claude(
+                    ClaudeError::Unauthorized
+                ))
+            ) =>
+        {
+            warn!("claude usage endpoint returned 401; attempting Claude Code credential refresh");
+            refresh_claude_credentials(&credentials_path)?;
+            let auth = load_claude_auth_from_path(&credentials_path)?;
+            request_oauth(client, &auth).await
+        }
+        result => result,
+    }
+}
+
+async fn request_oauth(client: &reqwest::Client, auth: &ClaudeAuth) -> Result<UsageSnapshot> {
     let subscription_type = auth.subscription_type.clone();
     if !auth.scopes.iter().any(|scope| scope == REQUIRED_SCOPE) {
         return Err(ClaudeError::MissingProfileScope.into());

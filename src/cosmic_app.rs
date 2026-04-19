@@ -92,7 +92,7 @@ impl cosmic::Application for AppModel {
                 ),
                 Task::perform(
                     async move {
-                        let client = reqwest::Client::new();
+                        let client = runtime::http_client();
                         updates::check(&client).await
                     },
                     |status| cosmic::Action::App(Message::UpdateChecked(status)),
@@ -204,8 +204,12 @@ impl cosmic::Application for AppModel {
                 return refresh_provider_tasks(&self.config, &mut self.state);
             }
             Message::Refreshed(state) => {
-                self.state = state;
-                self.selected_provider = select_provider(self.selected_provider, &self.state);
+                return apply_refreshed_state(
+                    &self.config,
+                    &mut self.state,
+                    &mut self.selected_provider,
+                    state,
+                );
             }
             Message::ProviderRefreshed(provider_state) => {
                 self.state.upsert_provider(provider_state);
@@ -290,6 +294,17 @@ fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {
             .map(|provider| provider.provider)
             .unwrap_or(ProviderId::Codex)
     }
+}
+
+fn apply_refreshed_state(
+    config: &AppConfig,
+    current_state: &mut AppState,
+    selected_provider: &mut ProviderId,
+    loaded_state: AppState,
+) -> Task<Message> {
+    *current_state = loaded_state;
+    *selected_provider = select_provider(*selected_provider, current_state);
+    refresh_provider_tasks(config, current_state)
 }
 
 fn applet_indicator<'a>(
@@ -379,5 +394,69 @@ fn provider_icon_variant() -> ProviderIconVariant {
         ProviderIconVariant::Reversed
     } else {
         ProviderIconVariant::Default
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refreshed_state_immediately_marks_enabled_providers_refreshing() {
+        let config = AppConfig::default();
+        let loaded_state = AppState::empty();
+        let mut current_state = AppState::empty();
+        let mut selected_provider = ProviderId::Codex;
+
+        let _task = apply_refreshed_state(
+            &config,
+            &mut current_state,
+            &mut selected_provider,
+            loaded_state,
+        );
+
+        for provider in ProviderId::ALL {
+            let state = current_state.provider(provider).unwrap();
+            assert!(state.enabled);
+            assert!(state.is_refreshing);
+        }
+    }
+
+    #[test]
+    fn refreshed_state_keeps_disabled_provider_out_of_initial_refresh() {
+        let config = AppConfig {
+            cursor_enabled: false,
+            ..AppConfig::default()
+        };
+        let mut loaded_state = AppState::empty();
+        for provider in &mut loaded_state.providers {
+            provider.enabled = config.provider_enabled(provider.provider);
+        }
+        let mut current_state = AppState::empty();
+        let mut selected_provider = ProviderId::Cursor;
+
+        let _task = apply_refreshed_state(
+            &config,
+            &mut current_state,
+            &mut selected_provider,
+            loaded_state,
+        );
+
+        assert_eq!(selected_provider, ProviderId::Codex);
+        assert!(
+            current_state
+                .provider(ProviderId::Codex)
+                .unwrap()
+                .is_refreshing
+        );
+        assert!(
+            current_state
+                .provider(ProviderId::Claude)
+                .unwrap()
+                .is_refreshing
+        );
+        let cursor = current_state.provider(ProviderId::Cursor).unwrap();
+        assert!(!cursor.enabled);
+        assert!(!cursor.is_refreshing);
     }
 }

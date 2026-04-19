@@ -6,7 +6,11 @@ use crate::model::{
 };
 use crate::providers::{claude, codex, cursor};
 use chrono::Utc;
+use std::time::Duration;
 use tracing::{error, info, warn};
+
+pub(crate) const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn load_initial_state(config: &AppConfig) -> AppState {
     let mut state = load_cached_state()
@@ -25,7 +29,7 @@ pub async fn refresh_one(
     provider: ProviderId,
     previous: Option<ProviderRuntimeState>,
 ) -> ProviderRuntimeState {
-    let client = reqwest::Client::new();
+    let client = http_client();
     match provider {
         ProviderId::Codex => {
             refresh_provider(
@@ -67,6 +71,17 @@ pub async fn refresh_one(
             .await
         }
     }
+}
+
+pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .build()
+        .unwrap_or_else(|error| {
+            warn!(error = %error, "failed to build timed HTTP client; using reqwest default");
+            reqwest::Client::new()
+        })
 }
 
 pub fn persist_state(state: &AppState) {
@@ -182,5 +197,12 @@ mod tests {
     fn classifies_unauthorized_as_action_required() {
         let state = classify_auth_state(&CodexError::Unauthorized.into());
         assert_eq!(state, AuthState::ActionRequired);
+    }
+
+    #[test]
+    fn http_client_uses_short_timeouts() {
+        assert_eq!(HTTP_CONNECT_TIMEOUT, Duration::from_secs(5));
+        assert_eq!(HTTP_TIMEOUT, Duration::from_secs(20));
+        let _client = http_client();
     }
 }

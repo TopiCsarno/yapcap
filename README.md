@@ -27,6 +27,8 @@ YapCap lives in your COSMIC panel and reads local credentials to show how much o
 
 All data is fetched directly from the provider APIs using credentials already on your machine. No telemetry, no cloud sync, no account needed beyond the ones you already have.
 
+On startup, YapCap shows any cached snapshot immediately, then refreshes enabled providers in the background. Provider API calls have short network timeouts so a stalled request does not leave the applet stuck refreshing forever.
+
 ## Requirements
 
 - Pop!_OS (or another distro running COSMIC)
@@ -91,7 +93,7 @@ Imports the `WorkosCursorSessionToken` cookie from a supported local browser and
 | `~/.cache/yapcap/snapshots.json` | Last successful response per provider |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
-Browser selection can be overridden per-run with `YAPCAP_CLAUDE_BROWSER` or `YAPCAP_CURSOR_BROWSER` (`brave`, `chrome`, `edge`, `firefox`).
+Cursor browser selection can be overridden per-run with `YAPCAP_CURSOR_BROWSER` (`brave`, `chrome`, `edge`, `firefox`).
 
 To hide a provider you don't use, open the popup → **Settings** and toggle it off. The change is written straight to `config.toml`:
 

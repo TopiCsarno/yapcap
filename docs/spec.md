@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.1 · **Last updated:** 2026-04-18
+**Status:** As-built v0.1 · **Last updated:** 2026-04-19
 
 ## Document Metadata
 
@@ -40,7 +40,7 @@ read_when:
 - YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, and Cursor.
 - Ships only on COSMIC. No GNOME, KDE, tray, or generic indicator paths exist.
 - Reads locally available credentials and caches. No user account, no cloud sync, no telemetry.
-- Out of scope: additional providers, historical charts, notifications, plugin architecture, update checks, doctor command, secret vault, alternative DEs.
+- Out of scope: additional providers, historical charts, notifications, plugin architecture, doctor command, secret vault, alternative DEs.
 
 ### 1.2 Supported Sources
 
@@ -72,10 +72,9 @@ flowchart LR
 
 ### 2.2 Crate Layout
 
-Single-crate workspace. Binaries:
+Single-crate workspace. Binary:
 
 - `yapcap-cosmic` — the released applet, driven by libcosmic's applet runtime.
-- `yapcap-dev` — the same `AppModel` run as a standalone cosmic window, for faster iteration without reinstalling the applet.
 
 Library modules under `src/`:
 
@@ -105,11 +104,15 @@ The applet is a libcosmic `Application`. Messages flow:
 
 ```mermaid
 sequenceDiagram
+    participant Cache as cache
     participant Timer as iced time::every
     participant App as AppModel::update
     participant Refresh as app_refresh
     participant Task as Task::perform
     participant Provider as providers::*
+    App->>Cache: load_initial_state()
+    Cache-->>App: Message::Refreshed(state)
+    App->>Refresh: refresh_provider_tasks(config, state)
     App->>Timer: subscription()
     Timer-->>App: Message::Tick
     App->>Refresh: refresh_provider_tasks(config, state)
@@ -120,8 +123,10 @@ sequenceDiagram
     App->>App: state.upsert_provider(state); persist_state
 ```
 
+- On startup, `Message::Refreshed` loads cached state and immediately dispatches a refresh for enabled providers.
 - `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
 - `Message::RefreshNow` is the popup's "Refresh now" button and uses the same dispatcher.
+- Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Per-provider results arrive independently; the popup rerenders on each.
 - `runtime::refresh_provider` keeps the previous snapshot on error so the UI never drops data on a transient failure. It instead flips `ProviderHealth::Error`.
 
@@ -312,7 +317,7 @@ All paths come from `config::paths()`:
 - Snapshot cache: `~/.cache/yapcap/snapshots.json`
 - Logs: `~/.local/state/yapcap/logs/yapcap.log`
 
-Snapshot cache serializes `AppState` (providers + `updated_at`) via `serde_json`. It is rewritten whenever any provider state changes and loaded on startup so the popup has something to show before the first refresh completes.
+Snapshot cache serializes `AppState` (providers + `updated_at`) via `serde_json`. It is rewritten whenever any provider state changes and loaded on startup so the popup has something to show while the immediate startup refresh runs.
 
 Logging uses `tracing` with `tracing-subscriber` `EnvFilter` (level from config) and `tracing-appender` for the log file. No credentials, bearer tokens, or cookie values are logged.
 
@@ -340,11 +345,11 @@ Logging uses `tracing` with `tracing-subscriber` `EnvFilter` (level from config)
   - Error body when no snapshot is available.
 - Footer: "Quit".
 
-The popup's height is computed from visible sections to avoid flicker when switching tabs.
+The popup uses a fixed 420x720 surface because xdg-popup surfaces cannot grow after creation.
 
 ## 8. Testing
 
-- `cargo test` runs ~38 unit tests: provider normalizers against recorded fixtures (`fixtures/{codex,claude,cursor}/*.json`), browser cookie extraction against temporary SQLite DBs, stale/fresh status rules, and the `refresh_provider` snapshot-preservation behavior.
+- `cargo test` runs ~50 unit tests: provider normalizers against recorded fixtures (`fixtures/{codex,claude,cursor}/*.json`), browser cookie extraction against temporary SQLite DBs, stale/fresh status rules, update display/version comparison, and the `refresh_provider` snapshot-preservation behavior.
 - No integration tests hit real provider APIs; fixtures were captured from real responses and are committed alongside the code.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are expected clean on main. A single `#[allow(clippy::large_enum_variant)]` exists on `cosmic_app::Message` because the `Surface` variant is a function-pointer handoff to libcosmic.
 - Manual QA should cover install, provider auth refresh, transient provider failures, stale snapshot display, settings persistence, and update-check UI states.

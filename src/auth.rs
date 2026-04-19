@@ -78,7 +78,7 @@ pub fn claude_credentials_path() -> Result<PathBuf> {
 }
 
 pub fn load_claude_auth_from_path(path: &Path) -> Result<ClaudeAuth> {
-    let raw = fs::read_to_string(&path).map_err(|source| AuthError::ReadClaudeCredentials {
+    let raw = fs::read_to_string(path).map_err(|source| AuthError::ReadClaudeCredentials {
         path: path.to_path_buf(),
         source,
     })?;

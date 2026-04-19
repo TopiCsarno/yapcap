@@ -44,14 +44,9 @@ async fn fetch_oauth(client: &reqwest::Client) -> Result<UsageSnapshot> {
     let credentials_path = claude_credentials_path()?;
     let auth = load_fresh_auth(&credentials_path, Utc::now())?;
     match request_oauth(client, &auth).await {
-        Err(error)
-            if matches!(
-                error,
-                crate::error::AppError::Provider(crate::error::ProviderError::Claude(
-                    ClaudeError::Unauthorized
-                ))
-            ) =>
-        {
+        Err(crate::error::AppError::Provider(crate::error::ProviderError::Claude(
+            ClaudeError::Unauthorized,
+        ))) => {
             warn!("claude usage endpoint returned 401; attempting Claude Code credential refresh");
             refresh_claude_credentials(&credentials_path)?;
             let auth = load_claude_auth_from_path(&credentials_path)?;

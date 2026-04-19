@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=YapCap
+Comment=Provider usage panel applet for COSMIC
+Type=Application
+Icon=com.topi.YapCap
+Exec=yapcap
+Terminal=false
+StartupNotify=true
+Categories=COSMIC;
+Keywords=COSMIC;Usage;Quota;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=

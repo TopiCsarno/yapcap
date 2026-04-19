@@ -1,0 +1,18 @@
+{
+  "membershipType": "pro",
+  "paymentId": "cus_REDACTED",
+  "subscriptionStatus": "active",
+  "verifiedStudent": false,
+  "trialEligible": false,
+  "trialLengthDays": 7,
+  "isOnStudentPlan": false,
+  "isOnBillableAuto": true,
+  "customerBalance": null,
+  "trialWasCancelled": false,
+  "isTeamMember": false,
+  "teamMembershipType": null,
+  "individualMembershipType": "pro",
+  "lastPaymentFailed": false,
+  "pendingCancellationDate": null,
+  "isYearlyPlan": false
+}

@@ -241,7 +241,8 @@ Fixture notes:
 
 - `fixtures/claude/usage_oauth.json` is a real `/api/oauth/usage` response captured 2026-04-11.
 - `utilization` is a float from 0 to 100, not 0 to 1.
-- `resets_at` is ISO 8601 with microseconds and UTC offset.
+- `resets_at` is ISO 8601 with microseconds and UTC offset when present.
+- Windows with null/missing `utilization` are skipped; windows with `utilization` but null/missing `resets_at` are still shown without reset metadata.
 - Extra usage appears only when enabled on the account.
 
 ### Cursor

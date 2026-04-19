@@ -21,8 +21,10 @@ struct ClaudeUsageResponse {
 
 #[derive(Debug, Deserialize)]
 struct ClaudeWindow {
-    pub utilization: f64,
-    pub resets_at: String,
+    #[serde(default)]
+    pub utilization: Option<f64>,
+    #[serde(default)]
+    pub resets_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,16 +102,8 @@ async fn request_oauth(client: &reqwest::Client, auth: &ClaudeAuth) -> Result<Us
 }
 
 fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<UsageSnapshot> {
-    let primary = payload
-        .five_hour
-        .as_ref()
-        .map(|window| normalize_window("Session", window))
-        .transpose()?;
-    let secondary = payload
-        .seven_day
-        .as_ref()
-        .map(|window| normalize_window("Weekly", window))
-        .transpose()?;
+    let primary = normalize_window("Session", payload.five_hour.as_ref())?;
+    let secondary = normalize_window("Weekly", payload.seven_day.as_ref())?;
     if primary.is_none() && secondary.is_none() {
         return Err(ClaudeError::NoUsageData.into());
     }
@@ -159,19 +153,31 @@ fn normalize(payload: ClaudeUsageResponse, plan: Option<String>) -> Result<Usage
     })
 }
 
-fn normalize_window(label: &str, window: &ClaudeWindow) -> Result<UsageWindow> {
-    let reset_at = DateTime::parse_from_rfc3339(&window.resets_at)
-        .map_err(|source| ClaudeError::InvalidResetTimestamp {
-            value: window.resets_at.clone(),
-            source,
-        })?
-        .with_timezone(&Utc);
-    Ok(UsageWindow {
+fn normalize_window(label: &str, window: Option<&ClaudeWindow>) -> Result<Option<UsageWindow>> {
+    let Some(window) = window else {
+        return Ok(None);
+    };
+    let Some(used_percent) = window.utilization else {
+        return Ok(None);
+    };
+    let reset_at = window
+        .resets_at
+        .as_ref()
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value)
+                .map(|value| value.with_timezone(&Utc))
+                .map_err(|source| ClaudeError::InvalidResetTimestamp {
+                    value: value.clone(),
+                    source,
+                })
+        })
+        .transpose()?;
+    Ok(Some(UsageWindow {
         label: label.to_string(),
-        used_percent: window.utilization,
-        reset_at: Some(reset_at),
-        reset_description: Some(reset_at.to_rfc3339()),
-    })
+        used_percent,
+        reset_at,
+        reset_description: reset_at.map(|value| value.to_rfc3339()),
+    }))
 }
 
 #[cfg(test)]
@@ -201,5 +207,29 @@ mod tests {
         assert_eq!(snapshot.secondary.as_ref().unwrap().used_percent, 21.0);
         assert!(snapshot.tertiary.is_none());
         assert!(snapshot.provider_cost.is_none());
+    }
+
+    #[test]
+    fn normalizes_window_without_reset_time() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {
+                    "utilization": 42.0,
+                    "resets_at": null
+                },
+                "seven_day": {
+                    "utilization": null,
+                    "resets_at": null
+                },
+                "extra_usage": null
+            }"#,
+        )
+        .unwrap();
+
+        let snapshot = normalize(payload, None).unwrap();
+        let primary = snapshot.primary.as_ref().unwrap();
+        assert_eq!(primary.used_percent, 42.0);
+        assert!(primary.reset_at.is_none());
+        assert!(snapshot.secondary.is_none());
     }
 }

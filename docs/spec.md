@@ -165,7 +165,7 @@ Response shape:
 - `extra_usage.utilization` → tertiary window.
 - `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` in dollars (both fields divided by 100).
 
-Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. If both primary windows are absent after normalization, the provider returns `NoUsageData`.
+Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. For the `five_hour` session window, `utilization = 0` with `resets_at = null` is treated in display code as a reset/inactive session and labeled `Reset`. If both primary windows are absent after normalization, the provider returns `NoUsageData`.
 
 Usage fallback: none. Claude usage is OAuth-only because the CLI does not expose reliable machine-readable usage data.
 

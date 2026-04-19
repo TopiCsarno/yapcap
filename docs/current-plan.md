@@ -243,6 +243,7 @@ Fixture notes:
 - `utilization` is a float from 0 to 100, not 0 to 1.
 - `resets_at` is ISO 8601 with microseconds and UTC offset when present.
 - Windows with null/missing `utilization` are skipped; windows with `utilization` but null/missing `resets_at` are still shown without reset metadata.
+- For the `five_hour` session window, `utilization = 0` with `resets_at = null` means Claude has reset the 5-hour window and no new session has started yet; the popup labels this state as `Reset`.
 - Extra usage appears only when enabled on the account.
 
 ### Cursor

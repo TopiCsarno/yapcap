@@ -10,13 +10,21 @@ pub fn displayed_percent(window: &UsageWindow, now: DateTime<Utc>) -> f64 {
 }
 
 pub fn reset_label(window: &UsageWindow, now: DateTime<Utc>) -> Option<String> {
-    window
-        .reset_at
-        .map(|reset_at| format_reset_label(reset_at, now))
+    if let Some(reset_at) = window.reset_at {
+        return Some(format_reset_label(reset_at, now));
+    }
+    if is_inactive_session(window) {
+        return Some("Reset".to_string());
+    }
+    None
 }
 
 fn is_elapsed(window: &UsageWindow, now: DateTime<Utc>) -> bool {
     window.reset_at.is_some_and(|reset_at| reset_at <= now)
+}
+
+fn is_inactive_session(window: &UsageWindow) -> bool {
+    window.label == "Session" && window.used_percent <= 0.0
 }
 
 fn format_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -65,5 +73,22 @@ mod tests {
             reset_label(&window(Some(reset_at), 51.0), now).as_deref(),
             Some("Reset")
         );
+    }
+
+    #[test]
+    fn marks_zero_session_without_reset_time_as_reset() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        assert_eq!(
+            reset_label(&window(None, 0.0), now).as_deref(),
+            Some("Reset")
+        );
+    }
+
+    #[test]
+    fn leaves_non_session_without_reset_time_unlabeled() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let mut weekly = window(None, 0.0);
+        weekly.label = "Weekly".to_string();
+        assert_eq!(reset_label(&weekly, now), None);
     }
 }

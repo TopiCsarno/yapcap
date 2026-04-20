@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libfontconfig-dev \
+            libexpat1-dev \
+            libfreetype6-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG="yapcap-${VERSION}-x86_64-linux"
+          mkdir -p "dist/${PKG}"
+          cp target/release/yapcap "dist/${PKG}/"
+          cp README.md LICENSE "dist/${PKG}/"
+          cp -r resources "dist/${PKG}/"
+          tar -czf "dist/${PKG}.tar.gz" -C dist "${PKG}"
+
+      - name: Build .deb
+        run: cargo deb --no-build --output dist/
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          shopt -s nullglob
+          sha256sum *.tar.gz *.deb > checksums.txt
+          cat checksums.txt
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/checksums.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true

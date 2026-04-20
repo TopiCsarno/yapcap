@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::model::UsageWindow;
 use crate::fl;
+use crate::model::UsageWindow;
 use chrono::{DateTime, Utc};
 
 #[must_use]
@@ -55,7 +55,7 @@ mod tests {
     use chrono::TimeZone;
 
     fn strip_isolation_marks(s: &str) -> String {
-        s.replace('\u{2068}', "").replace('\u{2069}', "")
+        s.replace(['\u{2068}', '\u{2069}'], "")
     }
 
     fn window(reset_at: Option<DateTime<Utc>>, used_percent: f32) -> UsageWindow {

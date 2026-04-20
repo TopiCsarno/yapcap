@@ -170,8 +170,8 @@ mod tests {
             serde_json::from_str(include_str!("../../fixtures/cursor/auth_me.json")).unwrap();
         let snapshot = normalize(usage, Some(identity)).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Cursor);
-        assert_eq!(snapshot.windows[0].used_percent, 68.71794871794872);
-        assert_eq!(snapshot.windows[1].used_percent, 56.333333333333336);
+        assert_eq!(snapshot.windows[0].used_percent, 68.717_95);
+        assert_eq!(snapshot.windows[1].used_percent, 56.333_332);
         assert_eq!(snapshot.windows[2].used_percent, 100.0);
         assert_eq!(snapshot.identity.plan.as_deref(), Some("pro"));
     }

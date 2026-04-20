@@ -312,9 +312,7 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
                 content = content.push(usage_section(window));
             }
         }
-        if !cost_shown
-            && let Some(cost) = &snapshot.provider_cost
-        {
+        if !cost_shown && let Some(cost) = &snapshot.provider_cost {
             content = content.push(cost_section(provider.provider, cost));
         }
         if let Some(email) = &snapshot.identity.email {

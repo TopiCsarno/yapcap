@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn headline_selects_by_index() {
         let snapshot = snapshot(ProviderId::Codex);
-        assert_eq!(UsageHeadline::first_available(&snapshot.windows), UsageHeadline(0));
+        assert_eq!(
+            UsageHeadline::first_available(&snapshot.windows),
+            UsageHeadline(0)
+        );
     }
 
     #[test]

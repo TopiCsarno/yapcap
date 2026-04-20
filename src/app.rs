@@ -143,7 +143,7 @@ impl cosmic::Application for AppModel {
             .applet
             .popup_container(content)
             .max_height(f32::from(POPUP_MAX_HEIGHT))
-        .into()
+            .into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {

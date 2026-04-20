@@ -172,10 +172,12 @@ Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 
 Response shape:
 
-- `five_hour.utilization` / `resets_at` → 5h window (utilization is 0..100).
-- `seven_day.utilization` / `resets_at` → 7d window.
-- `extra_usage.utilization` → tertiary window.
-- `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` in dollars (both fields divided by 100).
+- `five_hour.utilization` / `resets_at` → Session window (utilization is 0..100).
+- `seven_day.utilization` / `resets_at` → Weekly window.
+- `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` → model-specific weekly windows (Max plan only; null on Pro).
+- `extra_usage.utilization` → Extra window.
+- `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` (both fields divided by 100).
+- `extra_usage.currency` → cost display units (e.g. `"EUR"`); defaults to `"$"` if absent.
 
 Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. For the `five_hour` session window, `utilization = 0` with `resets_at = null` is treated in display code as a reset/inactive session and labeled `Reset`. If both primary windows are absent after normalization, the provider returns `NoUsageData`.
 
@@ -269,7 +271,7 @@ log_level = "info"
 
 The runtime state is intentionally layered. `AppState` is the cacheable root,
 each provider has one `ProviderRuntimeState`, and successful refreshes attach a
-`UsageSnapshot` with one to three usage windows.
+`UsageSnapshot` with a dynamic number of usage windows.
 
 ```text
 AppState
@@ -290,12 +292,10 @@ AppState
                   provider: ProviderId
                   source
                   updated_at
-                  headline: UsageHeadline
+                  headline: UsageHeadline(usize)
                     |
-                    +-- selects one of:
-                          primary: Option<UsageWindow>
-                          secondary: Option<UsageWindow>
-                          tertiary: Option<UsageWindow>
+                    +-- index into windows
+                  windows: Vec<UsageWindow>
                   provider_cost: Option<ProviderCost>
                   identity: ProviderIdentity
 
@@ -308,9 +308,8 @@ UsageWindow
 
 `ProviderRuntimeState` describes refresh/auth health around the data.
 `UsageSnapshot` is the provider's last successful usage payload normalized into
-YapCap's common shape. `UsageHeadline` is not another window; it is a selector
-that says which optional window should drive the status line and headline
-percentage.
+YapCap's common shape. `UsageHeadline` is a newtype index into `windows` that
+says which window should drive the status line and headline percentage.
 
 ### 5.1 UsageSnapshot
 
@@ -319,16 +318,14 @@ struct UsageSnapshot {
     provider: ProviderId,          // Codex | Claude | Cursor
     source: String,                // "OAuth" | "RPC" | "Brave" | ...
     updated_at: DateTime<Utc>,
-    headline: UsageHeadline,       // which window drives the panel badge
-    primary: Option<UsageWindow>,  // 5h for Codex/Claude; total for Cursor
-    secondary: Option<UsageWindow>,// 7d for Codex/Claude
-    tertiary: Option<UsageWindow>, // Extra/Auto for Claude/Cursor
+    headline: UsageHeadline,       // index into windows for the panel badge
+    windows: Vec<UsageWindow>,     // variable-length; providers push what they have
     provider_cost: Option<ProviderCost>,
     identity: ProviderIdentity,    // email, account_id, plan, display_name
 }
 
 struct UsageWindow {
-    label: String,                 // "5h" | "7d" | "Extra"
+    label: String,                 // "Session" | "Weekly" | "Sonnet" | "Extra"
     used_percent: f64,
     reset_at: Option<DateTime<Utc>>,
     reset_description: Option<String>,
@@ -337,7 +334,7 @@ struct UsageWindow {
 struct ProviderCost { used: f64, limit: Option<f64>, units: String }
 ```
 
-`UsageSnapshot::applet_windows` returns `(primary, secondary)` for Codex/Claude and `(primary, tertiary)` for Cursor. The panel shows at most two bars.
+`UsageSnapshot::applet_windows` returns the first two windows for the panel bars. The popup iterates all windows dynamically.
 
 ### 5.2 ProviderRuntimeState and Health
 
@@ -415,16 +412,12 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
   - Title row: provider name + plan.
   - Subtitle row: "Updated Xm ago" + status badge (Live / Stale / Refreshing / Error / Disabled).
   - Source label.
-  - Primary window bar (e.g. "Session", "Total") with reset description.
-  - Secondary window bar (e.g. "Weekly").
-  - Tertiary + cost block (Claude "Extra", Cursor "Auto").
+  - Usage bars: iterates all `snapshot.windows` dynamically. Each window gets a labeled progress bar with reset description. If a window is labeled "Extra" and `provider_cost` exists, cost is merged into that section. Otherwise cost is shown standalone.
   - Error body when no snapshot is available.
 - Settings view with provider toggles and About/update-check status.
 - Footer: "Quit" + "Settings" / "Done".
 
-The popup uses a fixed 420×720 surface because xdg-popup surfaces cannot grow after creation. Content overflow is handled by a scrollable region.
-
-To avoid visual jitter on open and when switching tabs, YapCap pins both the Wayland popup size limits and libcosmic's autosize measurement limits to the fixed popup height. This ensures layout and compositor constraints match from the first frame.
+The popup width is fixed at 420px and the height grows dynamically with content, capped at 1080px. This accommodates providers with varying numbers of usage bars (e.g. Claude Max with model-specific windows).
 
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
@@ -441,7 +434,7 @@ Most user-visible strings in `popup_view.rs` use the `fl!()` macro backed by `i1
 
 ## 9. Testing
 
-- `cargo test` runs 87 unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, and app-level state transitions.
+- `cargo test` runs 86 unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, and app-level state transitions.
 - No tests hit real provider APIs. Provider response fixtures under `fixtures/{codex,claude,cursor}/*.json` cover the OAuth response shapes and edge cases.
 - Browser cookie fixtures under `fixtures/browser/*.sql` are synthetic and sanitized. Real browser databases must not be committed.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.

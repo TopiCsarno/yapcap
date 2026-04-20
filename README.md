@@ -1,18 +1,18 @@
-
+<div align="center">
 
 # YapCap
 
 **A native COSMIC panel applet that shows local usage state for Codex, Claude Code, and Cursor.**
 
+<img src="resources/screenshot.png" alt="YapCap panel applet" width="780" />
 
-
-[CI](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml)
-[Release](https://github.com/TopiCsarno/yapcap/releases/latest)
-[License: MPL-2.0](LICENSE)
+[![CI](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml/badge.svg)](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/TopiCsarno/yapcap?label=release)](https://github.com/TopiCsarno/yapcap/releases/latest)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 
 [Report a bug](https://github.com/TopiCsarno/yapcap/issues)
 
-
+</div>
 
 ---
 

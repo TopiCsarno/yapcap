@@ -1,10 +1,10 @@
 # Repository Guidance
 
-- Files should be ~300 lines (soft rule), break up large surce files. 
-- Functions should fit on one screen, break up large functions
-- Treat `~/projects/yapcap_old` as proof-of-concept reference material, not target architecture.
-- Preserve intentional user-facing behavior, but refactor boundaries during the port when the template shape is cleaner.
+- Files should be ~300 lines as a soft rule; split large source files when there is a clear boundary.
+- Functions should fit on one screen; split large functions around behavior.
+- Do not add clippy exceptions by default. Prefer changing code, visibility, tests, or module structure. If needed, keep the exception narrow and justify it in the commit, PR, or final handoff.
 - Do not add comments in source code. Prefer clear names, smaller functions, and tests over inline explanations.
-- Remove existing comments from source code.
+- Remove existing comments from touched source code when they are no longer needed. MPL-2.0 license headers (`// SPDX-License-Identifier: MPL-2.0`) are fine and should be kept.
 - Do not edit the template `justfile` unless explicitly asked.
-- Leave changes uncommitted until they are reviewed and explicitly reviewed.
+- Before committing, update `docs/spec.md` when behavior or user-facing expectations change.
+- Before committing, run `cargo check` and `just test`, then fix all warnings, errors, and failures.

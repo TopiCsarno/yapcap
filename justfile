@@ -48,7 +48,7 @@ run *args:
     env RUST_BACKTRACE=full cargo run --release {{args}}
 
 # Installs files
-install:
+install: build-release
     install -Dm0755 {{ cargo-target-dir / 'release' / name }} {{bin-dst}}
     install -Dm0644 resources/app.desktop {{desktop-dst}}
     install -Dm0644 resources/app.metainfo.xml {{appdata-dst}}

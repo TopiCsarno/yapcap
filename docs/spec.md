@@ -47,7 +47,7 @@ read_when:
 
 | Provider | Primary | Fallback |
 | --- | --- | --- |
-| Codex | OAuth token at `~/.codex/auth.json` | Codex CLI `app-server` JSON-RPC |
+| Codex | OAuth token at `~/.codex/auth.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` (one retry on 401/403 when `refresh_token` exists) |
 | Claude | OAuth token at `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json` | Claude Code credential refresh via `claude auth status --json` |
 | Cursor | `WorkosCursorSessionToken` cookie from a local browser | — |
 
@@ -65,7 +65,7 @@ flowchart LR
     Panel --> Claude[Claude module]
     Panel --> Cursor[Cursor module]
     Codex --> OpenAI[chatgpt.com/backend-api]
-    Codex -.fallback.-> CodexCLI[codex app-server]
+    Codex -.refresh.-> OpenAIAuth[auth.openai.com]
     Claude --> Anthropic[api.anthropic.com]
     Cursor --> CursorAPI[cursor.com]
     Panel --> Local[Local config, cache, logs]
@@ -93,7 +93,7 @@ Library modules (`src/`, also usable from tests):
 | --- | --- |
 | `app_state` | Methods on `AppState` for provider upsert and "mark refreshing." |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
-| `providers::codex` | OAuth + JSON-RPC CLI fallback. |
+| `providers::codex` | OAuth + refresh-on-401/403. |
 | `providers::claude` | OAuth path + credential refresh via `claude auth status`. |
 | `providers::claude_refresh` | Token expiry check and `claude` CLI credential refresh. |
 | `providers::cursor` | Cursor web API via imported browser cookie. |
@@ -155,13 +155,10 @@ Response shape (subset consumed):
 - `rate_limit.secondary_window.used_percent` / `reset_at` → 7d window.
 - `credits.balance` (string) → parsed into a `ProviderCost { units: "credits" }`.
 
-Fallback: `codex -s read-only -a untrusted app-server` spoken over stdio JSON-RPC.
+OAuth refresh (one retry):
 
-- Sends `initialize` (id 1) then `account/rateLimits/read` (id 2).
-- Reader thread over an mpsc channel enforces the 8s timeout.
-- Returns the same `UsageSnapshot` shape as OAuth with `source = "RPC"`.
-
-Codex binary lookup: PATH → `bash -lc which` → `~/.volta/bin` → `~/.local/share/fnm/current/bin` → `$NVM_DIR/versions/node/*/bin` (newest first) → `~/.npm-global/bin`.
+- If the usage endpoint returns HTTP 401 or 403 and `tokens.refresh_token` exists in `~/.codex/auth.json`, YapCap calls `POST https://auth.openai.com/oauth/token` with `grant_type=refresh_token` and the Codex client id, updates `auth.json`, and retries the usage request once.
+- If no refresh token is available, YapCap reports an actionable error prompting the user to run `codex login` (or `codex login --device-auth` on headless/remote machines).
 
 ### 3.2 Claude
 
@@ -392,17 +389,20 @@ Snapshot cache serializes `AppState` (providers + `updated_at`) via `serde_json`
 
 Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. No credentials, bearer tokens, or cookie values are logged.
 
-Log level is hardcoded to `"info"` in `main` because `AppModel::init` is called by the COSMIC runtime — config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
+Log level is hardcoded to `"info"` in `main` because config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
 
-`tracing_appender::non_blocking` returns a `WorkerGuard` that must stay alive for background log flushing. It is held in `main` as `let _log_guard`; `cosmic::applet::run` blocks until process exit so the guard lives for the full process lifetime.
+`tracing_appender::non_blocking` returns a `WorkerGuard` that must stay alive for background log flushing. It is held in `main` as `let _log_guard`; the applet runtime blocks until process exit so the guard lives for the full process lifetime.
 
 ## 7. User Interface
 
 ### 7.1 Panel
 
 - A single button with the selected provider icon and two compact usage bars.
+- Installed panel applets launch through `cosmic::applet::run` with `LaunchMode::Panel`; the panel view wraps the button in `core.applet.autosize_window` so COSMIC can size the applet surface around the rectangular icon-plus-bars content.
+- Local `cargo run` launches through `cosmic::app::run` with `LaunchMode::Standalone`; `applet_settings()` gives the standalone preview the same calculated button dimensions without using the applet autosize wrapper.
+- Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_percent` so fully-elapsed windows render as 0%.
-- Clicking toggles the popup. `applet_tooltip` shows "YapCap" on hover.
+- Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
 
 ### 7.2 Popup
@@ -424,22 +424,24 @@ Log level is hardcoded to `"info"` in `main` because `AppModel::init` is called 
 
 The popup uses a fixed 420×720 surface because xdg-popup surfaces cannot grow after creation. Content overflow is handled by a scrollable region.
 
+To avoid visual jitter on open and when switching tabs, YapCap pins both the Wayland popup size limits and libcosmic's autosize measurement limits to the fixed popup height. This ensures layout and compositor constraints match from the first frame.
+
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
 ## 8. Localization
 
-All user-visible strings in `popup_view.rs` use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent.
+Most user-visible strings in `popup_view.rs` use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent. (Some provider-facing status strings are still produced in the model layer.)
 
-- String catalog: `i18n/en/yapcap.ftl` — 35 messages covering buttons, section titles, status badges, update-check states, and last-updated timestamps.
+- String catalog: `i18n/en/yapcap.ftl` — buttons, section titles, status badges, update-check states, last-updated timestamps, and usage reset labels.
 - The `i18n/` directory is compiled into the binary at build time via `rust-embed`; no runtime file access is needed.
 - `i18n::init()` in `main` reads the system's requested languages and selects the best match. If no match, falls back to `en`.
 - Adding a language requires only creating `i18n/<lang>/yapcap.ftl`; the binary picks it up automatically on a matching system locale.
-- `fl!()` keys are validated at compile time by rust-analyzer. A missing or misspelled key is a build error.
+- Missing Fluent messages are typically caught during development (e.g. by tooling/editor diagnostics), but the safest way to validate coverage is to build and run the app while exercising the UI paths.
 - UI helper functions that build elements (`info_block`, `usage_block`, `credit_section`, etc.) take `String` for their title parameter and return `Element<'static, Message>`. This avoids tying the element lifetime to a temporary `fl!()` result.
 
 ## 9. Testing
 
-- `cargo test` runs 90 unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, and app-level state transitions.
+- `cargo test` runs 87 unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, and app-level state transitions.
 - No tests hit real provider APIs. Provider response fixtures under `fixtures/{codex,claude,cursor}/*.json` cover the OAuth response shapes and edge cases.
 - Browser cookie fixtures under `fixtures/browser/*.sql` are synthetic and sanitized. Real browser databases must not be committed.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.

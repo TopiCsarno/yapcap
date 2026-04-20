@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::app::Message;
+use crate::config::Config;
+use crate::model::{AppState, ProviderId};
+use crate::runtime;
 use cosmic::app::Task;
-use yapcap::config::Config;
-use yapcap::model::{AppState, ProviderId};
-use yapcap::runtime;
 
 pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Message> {
     let mut tasks = Vec::new();
@@ -21,7 +21,9 @@ pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Mes
             let previous = state.provider(provider).cloned();
             tasks.push(Task::perform(
                 async move { runtime::refresh_one(config, provider, previous).await },
-                |provider_state| cosmic::Action::App(Message::ProviderRefreshed(provider_state)),
+                |provider_state| {
+                    cosmic::Action::App(Message::ProviderRefreshed(Box::new(provider_state)))
+                },
             ));
         }
     }

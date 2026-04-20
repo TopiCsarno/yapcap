@@ -1,4 +1,5 @@
 .cargo/
+.codex
 *.pdb
 **/*.rs.bk
 debug/

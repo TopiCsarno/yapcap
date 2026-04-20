@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.1 · **Last updated:** 2026-04-19
+**Status:** As-built v0.2 · **Last updated:** 2026-04-20
 
 ## Document Metadata
 
@@ -31,7 +31,8 @@ read_when:
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
 | 7. User Interface | 7.1 Panel<br>7.2 Popup |
-| 8. Testing |  |
+| 8. Localization | |
+| 9. Testing | |
 
 ## 1. Product Definition
 
@@ -74,27 +75,35 @@ flowchart LR
 
 Single-crate workspace. Binary:
 
-- `yapcap-cosmic` — the released applet, driven by libcosmic's applet runtime.
+- `yapcap` — the released applet, driven by libcosmic's applet runtime.
 
-Library modules under `src/`:
+Binary-only modules (`src/`, compiled only into the applet binary):
 
 | Module | Purpose |
 | --- | --- |
-| `cosmic_app` | `AppModel`, `Message`, libcosmic `Application` impl. Panel button, popup open/close, tick scheduling. |
-| `popup_view` | `popup_content` renders the popup. Tabs, status badge, usage bars, cost block. |
-| `app_state` | Methods on `AppState` for provider upsert and "mark refreshing." |
+| `app` | `AppModel`, `Message`, libcosmic `Application` impl. Panel button, popup open/close, tick scheduling. |
 | `app_refresh` | Dispatches one `Task::perform` per enabled provider. |
+| `popup_view` | `popup_content` renders the popup. Tabs, status badge, usage bars, cost block. All strings via `fl!()`. |
+| `provider_assets` | Embedded SVG icon handles; dark/light variant selection. |
+| `i18n` | `fl!()` macro, `i18n_embed` loader wired to `i18n/en/yapcap.ftl`. |
+
+Library modules (`src/`, also usable from tests):
+
+| Module | Purpose |
+| --- | --- |
+| `app_state` | Methods on `AppState` for provider upsert and "mark refreshing." |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
 | `providers::codex` | OAuth + JSON-RPC CLI fallback. |
-| `providers::claude` | OAuth path. |
+| `providers::claude` | OAuth path + credential refresh via `claude auth status`. |
+| `providers::claude_refresh` | Token expiry check and `claude` CLI credential refresh. |
 | `providers::cursor` | Cursor web API via imported browser cookie. |
 | `auth` | Parses `~/.codex/auth.json` and Claude Code `.credentials.json`. |
 | `browser` | Chromium AES-GCM/CBC cookie decrypt; Firefox cookies.sqlite read. |
-| `config` | `AppConfig`, `Browser`, XDG paths. |
+| `config` | COSMIC config entry, provider toggles, browser choice, browser profile discovery. |
 | `cache` | Load/save `snapshots.json`. |
 | `model` | `UsageSnapshot`, `ProviderRuntimeState`, `ProviderHealth`, `AuthState`, `AppState`. |
+| `updates` | GitHub release check; `UpdateStatus` and `UpdateDisplay` types. |
 | `usage_display` | Shared "expired window" percent/label formatting. |
-| `provider_assets` | Embedded SVG icon handles. |
 | `logging` | `tracing` subscriber + file appender init. |
 | `error` | `thiserror` enums: `AppError` and per-subsystem types. |
 
@@ -105,11 +114,11 @@ The applet is a libcosmic `Application`. Messages flow:
 ```mermaid
 sequenceDiagram
     participant Cache as cache
-    participant Timer as iced time::every
-    participant App as AppModel::update
+    participant Timer as "iced time::every"
+    participant App as "AppModel::update"
     participant Refresh as app_refresh
-    participant Task as Task::perform
-    participant Provider as providers::*
+    participant Task as "Task::perform"
+    participant Provider as "providers::*"
     App->>Cache: load_initial_state()
     Cache-->>App: Message::Refreshed(state)
     App->>Refresh: refresh_provider_tasks(config, state)
@@ -120,7 +129,8 @@ sequenceDiagram
     Task->>Provider: runtime::refresh_one(provider, previous)
     Provider-->>Task: ProviderRuntimeState
     Task-->>App: Message::ProviderRefreshed(state)
-    App->>App: state.upsert_provider(state); persist_state
+    App->>App: state.upsert_provider(state)
+    App->>App: persist_state
 ```
 
 - On startup, `Message::Refreshed` loads cached state and immediately dispatches a refresh for enabled providers.
@@ -180,7 +190,7 @@ HTTP 401 surfaces as `ClaudeError::Unauthorized` after the one refresh retry fai
 
 ### 3.3 Cursor
 
-- Resolves a `WorkosCursorSessionToken` cookie from the configured browser (`config.cursor_browser`).
+- Resolves a `WorkosCursorSessionToken` cookie from the configured browser (`config.cursor_browser`) and optional profile (`config.cursor_profile_id`).
 - Sends `Cookie: WorkosCursorSessionToken=<value>` to:
   - `GET https://cursor.com/api/usage-summary`
   - `GET https://cursor.com/api/auth/me`
@@ -225,9 +235,22 @@ Firefox:
 - Accepts both `~/.mozilla/firefox` and `~/.config/mozilla/firefox` (XDG/Flatpak layouts).
 - Reads the cookie value directly; Firefox does not encrypt cookies at rest.
 
+Browser profile selection:
+
+- Chromium-family browsers discover every profile directory under the browser root that contains a `Cookies` database, with `Default` tried first and other profiles tried in sorted order.
+- Firefox discovers profiles from `profiles.ini` in priority order: install default, profile default, then remaining profile paths.
+- If exactly one discovered profile contains the Cursor cookie, YapCap can use it automatically.
+- If multiple profiles contain Cursor cookies and no `cursor_profile_id` is configured, the provider should require explicit profile selection rather than picking an arbitrary account.
+- Browser cookie tests should use synthetic SQLite fixtures under `fixtures/browser` instead of real browser databases.
+
 ### 4.3 Configuration
 
-File: `~/.config/yapcap/config.toml`. Created with defaults on first run.
+Provider settings are stored through the COSMIC template's `cosmic_config`
+entry for app ID `com.topi.YapCap`. The template rebuild intentionally expands
+the existing `Config` entry instead of carrying over the old standalone TOML
+config file. The settings keep the same user-facing function as before:
+refresh interval, provider enable toggles, Cursor browser selection, and log
+level.
 
 ```toml
 refresh_interval_seconds = 60
@@ -235,14 +258,62 @@ codex_enabled = true
 claude_enabled = true
 cursor_enabled = true
 cursor_browser = "brave"
+cursor_profile_id = null
 log_level = "info"
 ```
 
-- `cursor_browser` ∈ `brave | chrome | edge | firefox` (also accepts `chromium`, `microsoft-edge`).
+- `cursor_browser` ∈ `brave | chrome | chromium | edge | firefox` (also accepts `microsoft-edge`).
+- `cursor_profile_id = null` means automatic profile discovery.
+- If `cursor_profile_id` is set, Cursor cookie import uses only that discovered profile.
 - `YAPCAP_CURSOR_BROWSER` overrides `cursor_browser` at runtime.
 - The refresh interval is clamped to a 10-second floor at subscription time.
 
 ## 5. Data Model
+
+The runtime state is intentionally layered. `AppState` is the cacheable root,
+each provider has one `ProviderRuntimeState`, and successful refreshes attach a
+`UsageSnapshot` with one to three usage windows.
+
+```text
+AppState
+  updated_at
+  providers: Vec<ProviderRuntimeState>
+    |
+    +-- ProviderRuntimeState
+          provider: ProviderId
+          enabled / is_refreshing
+          health: ProviderHealth
+          auth_state: AuthState
+          source_label
+          last_success_at
+          error
+          snapshot: Option<UsageSnapshot>
+            |
+            +-- UsageSnapshot
+                  provider: ProviderId
+                  source
+                  updated_at
+                  headline: UsageHeadline
+                    |
+                    +-- selects one of:
+                          primary: Option<UsageWindow>
+                          secondary: Option<UsageWindow>
+                          tertiary: Option<UsageWindow>
+                  provider_cost: Option<ProviderCost>
+                  identity: ProviderIdentity
+
+UsageWindow
+  label
+  used_percent
+  reset_at
+  reset_description
+```
+
+`ProviderRuntimeState` describes refresh/auth health around the data.
+`UsageSnapshot` is the provider's last successful usage payload normalized into
+YapCap's common shape. `UsageHeadline` is not another window; it is a selector
+that says which optional window should drive the status line and headline
+percentage.
 
 ### 5.1 UsageSnapshot
 
@@ -313,13 +384,17 @@ struct ProviderRuntimeState {
 
 All paths come from `config::paths()`:
 
-- Config: `~/.config/yapcap/config.toml`
+- Config: managed by `cosmic_config` under app ID `com.topi.YapCap` (not a hand-rolled file)
 - Snapshot cache: `~/.cache/yapcap/snapshots.json`
 - Logs: `~/.local/state/yapcap/logs/yapcap.log`
 
 Snapshot cache serializes `AppState` (providers + `updated_at`) via `serde_json`. It is rewritten whenever any provider state changes and loaded on startup so the popup has something to show while the immediate startup refresh runs.
 
-Logging uses `tracing` with `tracing-subscriber` `EnvFilter` (level from config) and `tracing-appender` for the log file. No credentials, bearer tokens, or cookie values are logged.
+Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. No credentials, bearer tokens, or cookie values are logged.
+
+Log level is hardcoded to `"info"` in `main` because `AppModel::init` is called by the COSMIC runtime — config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
+
+`tracing_appender::non_blocking` returns a `WorkerGuard` that must stay alive for background log flushing. It is held in `main` as `let _log_guard`; `cosmic::applet::run` blocks until process exit so the guard lives for the full process lifetime.
 
 ## 7. User Interface
 
@@ -328,6 +403,7 @@ Logging uses `tracing` with `tracing-subscriber` `EnvFilter` (level from config)
 - A single button with the selected provider icon and two compact usage bars.
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_percent` so fully-elapsed windows render as 0%.
 - Clicking toggles the popup. `applet_tooltip` shows "YapCap" on hover.
+- Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
 
 ### 7.2 Popup
 
@@ -346,11 +422,25 @@ Logging uses `tracing` with `tracing-subscriber` `EnvFilter` (level from config)
 - Settings view with provider toggles and About/update-check status.
 - Footer: "Quit" + "Settings" / "Done".
 
-The popup uses a fixed 420x720 surface because xdg-popup surfaces cannot grow after creation.
+The popup uses a fixed 420×720 surface because xdg-popup surfaces cannot grow after creation. Content overflow is handled by a scrollable region.
 
-## 8. Testing
+Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
-- `cargo test` runs 50+ unit tests: provider normalizers against recorded fixtures (`fixtures/{codex,claude,cursor}/*.json`), browser cookie extraction against temporary SQLite DBs, stale/fresh status rules, update display/version comparison, and the `refresh_provider` snapshot-preservation behavior.
-- No integration tests hit real provider APIs; fixtures were captured from real responses and are committed alongside the code.
-- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are expected clean on main. A single `#[allow(clippy::large_enum_variant)]` exists on `cosmic_app::Message` because the `Surface` variant is a function-pointer handoff to libcosmic.
-- Manual QA should cover install, provider auth refresh, transient provider failures, stale snapshot display, settings persistence, and update-check UI states.
+## 8. Localization
+
+All user-visible strings in `popup_view.rs` use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent.
+
+- String catalog: `i18n/en/yapcap.ftl` — 35 messages covering buttons, section titles, status badges, update-check states, and last-updated timestamps.
+- The `i18n/` directory is compiled into the binary at build time via `rust-embed`; no runtime file access is needed.
+- `i18n::init()` in `main` reads the system's requested languages and selects the best match. If no match, falls back to `en`.
+- Adding a language requires only creating `i18n/<lang>/yapcap.ftl`; the binary picks it up automatically on a matching system locale.
+- `fl!()` keys are validated at compile time by rust-analyzer. A missing or misspelled key is a build error.
+- UI helper functions that build elements (`info_block`, `usage_block`, `credit_section`, etc.) take `String` for their title parameter and return `Element<'static, Message>`. This avoids tying the element lifetime to a temporary `fl!()` result.
+
+## 9. Testing
+
+- `cargo test` runs 90 unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, and app-level state transitions.
+- No tests hit real provider APIs. Provider response fixtures under `fixtures/{codex,claude,cursor}/*.json` cover the OAuth response shapes and edge cases.
+- Browser cookie fixtures under `fixtures/browser/*.sql` are synthetic and sanitized. Real browser databases must not be committed.
+- `cargo clippy` and `cargo fmt --check` are expected clean on main.
+- Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.

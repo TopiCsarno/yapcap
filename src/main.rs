@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 
 mod app;
-mod config;
+mod app_refresh;
 mod i18n;
+mod popup_view;
+mod provider_assets;
 
 fn main() -> cosmic::iced::Result {
-    // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
-
-    // Enable localizations to be applied.
     i18n::init(&requested_languages);
 
-    // Starts the applet's event loop with `()` as the application's flags.
+    // Guard must stay alive until process exits to flush background log writer.
+    let _log_guard = yapcap::logging::init("info").ok();
+
     cosmic::applet::run::<app::AppModel>(())
 }

@@ -2,7 +2,7 @@ name := 'yapcap'
 appid := 'com.topi.YapCap'
 
 rootdir := ''
-prefix := '/usr'
+prefix := home_directory() / '.local'
 
 # Installation paths
 base-dir := absolute_path(clean(rootdir / prefix))
@@ -56,7 +56,7 @@ install:
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{icon-dst}}
+    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
 # Vendor dependencies locally
 vendor:

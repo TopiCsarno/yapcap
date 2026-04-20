@@ -1,28 +1,29 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::app_refresh::refresh_provider_tasks;
+use crate::config::Config;
+use crate::model::{AppState, ProviderId, ProviderRuntimeState};
 use crate::popup_view;
 use crate::provider_assets::{provider_icon_handle, provider_icon_variant};
+use crate::runtime;
+use crate::updates::UpdateStatus;
+use crate::usage_display;
 use cosmic::app::Task;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::time;
 use cosmic::iced::widget::{column, progress_bar, row};
 use cosmic::iced::window::Id;
-use cosmic::iced::{Alignment, Length, Limits, Subscription};
+use cosmic::iced::{Alignment, Length, Limits, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::surface::action::{app_popup, destroy_popup};
 use cosmic::theme::Button as CosmicButton;
 use cosmic::widget;
 use std::time::Duration;
-use yapcap::config::Config;
-use yapcap::model::{AppState, ProviderId, ProviderRuntimeState};
-use yapcap::runtime;
-use yapcap::updates::UpdateStatus;
-use yapcap::usage_display;
 
 const REFRESH_INTERVAL_MIN_SECS: u64 = 10;
-const POPUP_WIDTH: u32 = 420;
-const POPUP_HEIGHT: u32 = 720;
+const POPUP_WIDTH: u16 = 420;
+const POPUP_MAX_HEIGHT: u16 = 1080;
+const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 
 pub struct AppModel {
     core: cosmic::Core,
@@ -32,21 +33,28 @@ pub struct AppModel {
     selected_provider: ProviderId,
     show_settings: bool,
     update_status: UpdateStatus,
+    launch_mode: LaunchMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchMode {
+    Panel,
+    Standalone,
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum Message {
     TogglePopup,
     PopupClosed(Id),
     UpdateConfig(Config),
     Tick,
     RefreshNow,
-    Refreshed(AppState),
-    ProviderRefreshed(ProviderRuntimeState),
+    Refreshed(Box<AppState>),
+    ProviderRefreshed(Box<ProviderRuntimeState>),
     SelectProvider(ProviderId),
     ToggleSettings,
     SetProviderEnabled(ProviderId, bool),
+    SetRefreshInterval(u64),
     UpdateChecked(UpdateStatus),
     OpenUrl(String),
     Quit,
@@ -54,7 +62,7 @@ pub enum Message {
 
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
-    type Flags = ();
+    type Flags = LaunchMode;
     type Message = Message;
 
     const APP_ID: &'static str = "com.topi.YapCap";
@@ -67,7 +75,13 @@ impl cosmic::Application for AppModel {
         &mut self.core
     }
 
-    fn init(core: cosmic::Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
+    fn init(mut core: cosmic::Core, launch_mode: Self::Flags) -> (Self, Task<Self::Message>) {
+        core.window.show_headerbar = false;
+        core.window.sharp_corners = true;
+        core.window.show_maximize = false;
+        core.window.show_minimize = false;
+        core.window.use_template = false;
+
         let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
             .map(|ctx| match Config::get_entry(&ctx) {
                 Ok(cfg) => cfg.with_env_overrides(),
@@ -76,6 +90,8 @@ impl cosmic::Application for AppModel {
             .unwrap_or_default();
 
         let initial_config = config.clone();
+        let (applet_width, applet_height) = applet_button_size(&core);
+        core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
         let app = AppModel {
             core,
             popup: None,
@@ -84,14 +100,15 @@ impl cosmic::Application for AppModel {
             selected_provider: ProviderId::Codex,
             show_settings: false,
             update_status: UpdateStatus::Unchecked,
+            launch_mode,
         };
 
         let load_task = Task::perform(
-            async move { runtime::load_initial_state(&initial_config).await },
-            |state| cosmic::Action::App(Message::Refreshed(state)),
+            async move { runtime::load_initial_state(&initial_config) },
+            |state| cosmic::Action::App(Message::Refreshed(Box::new(state))),
         );
         let update_task = Task::perform(
-            async { yapcap::updates::check(&runtime::http_client()).await },
+            async { crate::updates::check(&runtime::http_client()).await },
             |status| cosmic::Action::App(Message::UpdateChecked(status)),
         );
 
@@ -104,19 +121,29 @@ impl cosmic::Application for AppModel {
 
     fn view(&self) -> Element<'_, Self::Message> {
         let indicator = applet_indicator(&self.state, self.selected_provider, &self.core);
-        applet_button(&self.core, indicator)
+        let button: Element<'_, Message> = applet_button(&self.core, indicator)
             .on_press(Message::TogglePopup)
-            .into()
+            .into();
+
+        match self.launch_mode {
+            LaunchMode::Panel => self.core.applet.autosize_window(button).into(),
+            LaunchMode::Standalone => button,
+        }
     }
 
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
         let content = popup_view::popup_content(
             &self.state,
+            &self.config,
             self.selected_provider,
             self.show_settings,
             &self.update_status,
         );
-        self.core.applet.popup_container(content).into()
+        self.core
+            .applet
+            .popup_container(content)
+            .max_height(f32::from(POPUP_MAX_HEIGHT))
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
@@ -158,10 +185,9 @@ impl cosmic::Application for AppModel {
                                     None,
                                 );
                                 popup_settings.positioner.size_limits = Limits::NONE
-                                    .max_width(POPUP_WIDTH as f32)
+                                    .max_width(f32::from(POPUP_WIDTH))
                                     .min_width(300.0)
-                                    .min_height(200.0)
-                                    .max_height(POPUP_HEIGHT as f32);
+                                    .max_height(f32::from(POPUP_MAX_HEIGHT));
                                 popup_settings
                             },
                             None,
@@ -185,12 +211,12 @@ impl cosmic::Application for AppModel {
                     &self.config,
                     &mut self.state,
                     &mut self.selected_provider,
-                    loaded_state,
+                    *loaded_state,
                 );
             }
 
             Message::ProviderRefreshed(provider_state) => {
-                self.state.upsert_provider(provider_state);
+                self.state.upsert_provider(*provider_state);
                 runtime::persist_state(&self.state);
                 self.selected_provider = select_provider(self.selected_provider, &self.state);
             }
@@ -218,22 +244,11 @@ impl cosmic::Application for AppModel {
             }
 
             Message::SetProviderEnabled(provider, enabled) => {
-                if let Some(entry) = self.state.provider_mut(provider) {
-                    entry.enabled = enabled;
-                }
-                if let Ok(ctx) = cosmic_config::Config::new(Self::APP_ID, Config::VERSION) {
-                    let mut new_config = self.config.clone();
-                    match provider {
-                        ProviderId::Codex => new_config.codex_enabled = enabled,
-                        ProviderId::Claude => new_config.claude_enabled = enabled,
-                        ProviderId::Cursor => new_config.cursor_enabled = enabled,
-                    }
-                    let _ = new_config.write_entry(&ctx);
-                    self.config = new_config;
-                }
-                if enabled {
-                    return refresh_provider_tasks(&self.config, &mut self.state);
-                }
+                return self.set_provider_enabled(provider, enabled);
+            }
+
+            Message::SetRefreshInterval(interval_seconds) => {
+                return self.set_refresh_interval(interval_seconds);
             }
         }
         Task::none()
@@ -244,15 +259,35 @@ impl cosmic::Application for AppModel {
     }
 }
 
+pub fn applet_settings() -> cosmic::app::Settings {
+    let preview_core = cosmic::Core::default();
+    let (width, height) = applet_button_size(&preview_core);
+
+    cosmic::app::Settings::default()
+        .size(Size::new(width, height))
+        .size_limits(
+            Limits::NONE
+                .min_width(width)
+                .max_width(width)
+                .min_height(height)
+                .max_height(height),
+        )
+        .resizable(None)
+        .client_decorations(false)
+        .default_text_size(14.0)
+        .transparent(true)
+}
+
 fn applet_indicator<'a>(
     state: &AppState,
     selected_provider: ProviderId,
     core: &cosmic::Core,
 ) -> Element<'a, Message> {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
-    let compact_size = f32::from(suggested_w.min(suggested_h));
-    let logo_size = (compact_size - 8.0).max(11.0);
-    let bar_width = f32::from(suggested_w.max(suggested_h)).max(40.0);
+    let compact_px = suggested_w.min(suggested_h);
+    let logo_size_px = compact_px.saturating_sub(8).max(11);
+    let logo_size = f32::from(logo_size_px);
+    let bar_width = applet_bar_width(suggested_w, suggested_h);
     let (top_usage, bottom_usage) = selected_provider_percents(state, selected_provider);
 
     let bars = column![
@@ -271,7 +306,7 @@ fn applet_indicator<'a>(
             selected_provider,
             provider_icon_variant(),
         ))
-        .size(logo_size as u16)
+        .size(logo_size_px)
         .width(Length::Fixed(logo_size))
         .height(Length::Fixed(logo_size)),
         bars,
@@ -285,23 +320,45 @@ fn applet_button<'a>(
     core: &cosmic::Core,
     content: impl Into<Element<'a, Message>>,
 ) -> widget::Button<'a, Message> {
-    let (_, suggested_h) = core.applet.suggested_size(false);
     let (major_padding, minor_padding) = core.applet.suggested_padding(true);
-    let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
-        (major_padding, minor_padding)
+    let horizontal_padding = if core.applet.is_horizontal() {
+        major_padding
     } else {
-        (minor_padding, major_padding)
+        minor_padding
     };
-    let height = (suggested_h + 2 * vertical_padding) as f32;
+    let (width, height) = applet_button_size(core);
 
     widget::button::custom(
         widget::layer_container(content)
             .padding(cosmic::iced::Padding::from([0, horizontal_padding]))
             .align_y(cosmic::iced::alignment::Vertical::Center.into()),
     )
-    .width(Length::Shrink)
+    .width(Length::Fixed(width))
     .height(Length::Fixed(height))
     .class(CosmicButton::AppletIcon)
+}
+
+fn applet_button_size(core: &cosmic::Core) -> (f32, f32) {
+    let (suggested_w, suggested_h) = core.applet.suggested_size(false);
+    let (major_padding, minor_padding) = core.applet.suggested_padding(true);
+    let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
+        (major_padding, minor_padding)
+    } else {
+        (minor_padding, major_padding)
+    };
+    let compact_px = suggested_w.min(suggested_h);
+    let logo_width = f32::from(compact_px.saturating_sub(8).max(11));
+    let bar_width = applet_bar_width(suggested_w, suggested_h);
+    let width = logo_width + 6.0 + bar_width + f32::from(2 * horizontal_padding);
+    let height = f32::from(suggested_h + 2 * vertical_padding);
+
+    (width, height)
+}
+
+fn applet_bar_width(suggested_w: u16, suggested_h: u16) -> f32 {
+    let min_width = suggested_h.saturating_mul(APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER);
+
+    f32::from(suggested_w.max(min_width))
 }
 
 fn selected_provider_percents(state: &AppState, selected_provider: ProviderId) -> (f32, f32) {
@@ -311,18 +368,13 @@ fn selected_provider_percents(state: &AppState, selected_provider: ProviderId) -
         .iter()
         .find(|p| p.provider == selected_provider)
         .and_then(|p| p.snapshot.as_ref())
-        .map(|snapshot| {
+        .map_or((0.0, 0.0), |snapshot| {
             let (primary, secondary) = snapshot.applet_windows();
             (
-                primary
-                    .map(|w| usage_display::displayed_percent(w, now) as f32)
-                    .unwrap_or(0.0),
-                secondary
-                    .map(|w| usage_display::displayed_percent(w, now) as f32)
-                    .unwrap_or(0.0),
+                primary.map_or(0.0, |w| usage_display::displayed_percent(w, now)),
+                secondary.map_or(0.0, |w| usage_display::displayed_percent(w, now)),
             )
         })
-        .unwrap_or((0.0, 0.0))
 }
 
 fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {
@@ -337,8 +389,42 @@ fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {
             .providers
             .iter()
             .find(|p| p.enabled)
-            .map(|p| p.provider)
-            .unwrap_or(ProviderId::Codex)
+            .map_or(ProviderId::Codex, |p| p.provider)
+    }
+}
+
+impl AppModel {
+    fn write_config(&mut self, f: impl FnOnce(&mut Config)) {
+        if let Ok(ctx) =
+            cosmic_config::Config::new(<Self as cosmic::Application>::APP_ID, Config::VERSION)
+        {
+            let mut new_config = self.config.clone();
+            f(&mut new_config);
+            let _ = new_config.write_entry(&ctx);
+            self.config = new_config;
+        }
+    }
+
+    fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> Task<Message> {
+        if let Some(entry) = self.state.provider_mut(provider) {
+            entry.enabled = enabled;
+        }
+        self.write_config(|new_config| match provider {
+            ProviderId::Codex => new_config.codex_enabled = enabled,
+            ProviderId::Claude => new_config.claude_enabled = enabled,
+            ProviderId::Cursor => new_config.cursor_enabled = enabled,
+        });
+        if enabled {
+            return refresh_provider_tasks(&self.config, &mut self.state);
+        }
+        Task::none()
+    }
+
+    fn set_refresh_interval(&mut self, interval_seconds: u64) -> Task<Message> {
+        self.write_config(|new_config| {
+            new_config.refresh_interval_seconds = interval_seconds;
+        });
+        Task::none()
     }
 }
 

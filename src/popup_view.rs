@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::app::Message;
+use crate::config::Config;
 use crate::fl;
+use crate::model::{
+    AppState, ProviderCost, ProviderHealth, ProviderId, ProviderRuntimeState, STALE_THRESHOLD,
+    UsageWindow,
+};
 use crate::provider_assets::{provider_icon_handle, provider_icon_variant};
+use crate::updates::UpdateStatus;
+use crate::usage_display;
 use cosmic::Element;
 use cosmic::iced::widget::{column, container, progress_bar, row, scrollable};
 use cosmic::iced::{Alignment, Background, Color, Length};
 use cosmic::widget;
-use yapcap::model::{
-    AppState, ProviderCost, ProviderHealth, ProviderId, ProviderRuntimeState, UsageWindow,
-};
-use yapcap::updates::UpdateStatus;
-use yapcap::usage_display;
 
 pub fn popup_content<'a>(
     state: &'a AppState,
+    config: &'a Config,
     selected_provider: ProviderId,
     show_settings: bool,
     update_status: &'a UpdateStatus,
@@ -41,7 +44,7 @@ pub fn popup_content<'a>(
         });
 
     let body: Element<'_, Message> = if show_settings {
-        settings_view(state, update_status)
+        settings_view(state, config, update_status)
     } else {
         selected_provider_view(selected)
     };
@@ -74,8 +77,22 @@ pub fn popup_content<'a>(
 
 const SETTINGS_INDENT: u16 = 24;
 
-fn settings_view<'a>(state: &'a AppState, update_status: &'a UpdateStatus) -> Element<'a, Message> {
-    let providers_title = widget::text(fl!("providers-section-title")).size(16);
+fn settings_block<'a>(
+    title: Element<'a, Message>,
+    body: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    Element::from(
+        column![title, container(body).padding([0, 0, 0, SETTINGS_INDENT]),]
+            .spacing(10)
+            .width(Length::Fill),
+    )
+}
+
+fn settings_view<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    update_status: &'a UpdateStatus,
+) -> Element<'a, Message> {
     let provider_rows = state.providers.iter().fold(
         column![].spacing(10).width(Length::Fill),
         |col, provider| {
@@ -88,20 +105,48 @@ fn settings_view<'a>(state: &'a AppState, update_status: &'a UpdateStatus) -> El
             )
         },
     );
-    let providers_section = column![
-        providers_title,
-        container(provider_rows).padding([0, 0, 0, SETTINGS_INDENT]),
-    ]
-    .spacing(10)
-    .width(Length::Fill);
+    let providers_section = settings_block(
+        widget::text(fl!("providers-section-title")).size(16).into(),
+        provider_rows,
+    );
+
+    let refresh_section = refresh_section(config.refresh_interval_seconds);
 
     let about = about_section(update_status);
 
     Element::from(
-        column![providers_section, about]
+        column![providers_section, refresh_section, about]
             .spacing(22)
             .padding([0, 0, 8, 0])
             .width(Length::Fill),
+    )
+}
+
+fn refresh_section(current_seconds: u64) -> Element<'static, Message> {
+    let label = widget::text(fl!("refresh-interval-label")).size(13);
+
+    let options: &[(u64, &str)] = &[(60, "1m"), (300, "5m"), (900, "15m"), (1800, "30m")];
+
+    let buttons = options.iter().fold(
+        row![].spacing(8).width(Length::Fill),
+        |row, (secs, text)| {
+            let is_selected = *secs == current_seconds;
+            let caption = if is_selected {
+                format!("• {text}")
+            } else {
+                text.to_string()
+            };
+            row.push(
+                widget::button::text(caption)
+                    .on_press(Message::SetRefreshInterval(*secs))
+                    .width(Length::Shrink),
+            )
+        },
+    );
+
+    settings_block(
+        widget::text(fl!("refresh-section-title")).size(16).into(),
+        column![label, buttons].spacing(10),
     )
 }
 
@@ -119,11 +164,9 @@ fn about_section(update_status: &UpdateStatus) -> Element<'_, Message> {
         .into(),
         UpdateStatus::Unchecked => widget::text(fl!("update-checking")).size(12).into(),
         UpdateStatus::NoUpdate => widget::text(fl!("update-up-to-date")).size(12).into(),
-        UpdateStatus::Error(reason) => {
-            widget::text(fl!("update-failed", reason = reason.as_str()))
-                .size(12)
-                .into()
-        }
+        UpdateStatus::Error(reason) => widget::text(fl!("update-failed", reason = reason.as_str()))
+            .size(12)
+            .into(),
     };
 
     let inner = column![
@@ -133,13 +176,9 @@ fn about_section(update_status: &UpdateStatus) -> Element<'_, Message> {
     .spacing(6)
     .width(Length::Fill);
 
-    Element::from(
-        column![
-            widget::text(fl!("about-section-title")).size(16),
-            container(inner).padding([0, 0, 0, SETTINGS_INDENT]),
-        ]
-        .spacing(10)
-        .width(Length::Fill),
+    settings_block(
+        widget::text(fl!("about-section-title")).size(16).into(),
+        inner,
     )
 }
 
@@ -214,9 +253,7 @@ fn apply_alpha(mut color: Color, opacity: f32) -> Color {
 
 fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_, Message> {
     let Some(provider) = provider else {
-        return Element::from(
-            container(widget::text(fl!("no-providers"))).width(Length::Fill),
-        );
+        return Element::from(container(widget::text(fl!("no-providers"))).width(Length::Fill));
     };
 
     let plan_label = provider
@@ -245,8 +282,7 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
 
     let updated_label = provider
         .last_success_at
-        .map(format_updated_label)
-        .unwrap_or_else(|| provider.status_line());
+        .map_or_else(|| provider.status_line(), format_updated_label);
     let subtitle = row![
         widget::text(updated_label).size(14),
         cosmic::iced::widget::Space::new().width(Length::Fill),
@@ -257,18 +293,28 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
     let mut content = column![title_row, subtitle].spacing(6);
 
     if let Some(snapshot) = &provider.snapshot {
-        if let Some(source) = provider.source_label.as_ref().or(Some(&snapshot.source)) {
-            content = content.push(info_block(fl!("source-label"), source.clone(), None));
+        if provider.health == ProviderHealth::Error {
+            content = content.push(info_block(
+                fl!("status-label"),
+                provider.status_line(),
+                provider.error.clone(),
+            ));
+            if let Some(source) = provider.source_label.as_ref().or(Some(&snapshot.source)) {
+                content = content.push(info_block(fl!("source-label"), source.clone(), None));
+            }
         }
-        if let Some(primary) = &snapshot.primary {
-            content = content.push(usage_section(primary));
+        let mut cost_shown = false;
+        for window in &snapshot.windows {
+            if window.label == "Extra" && snapshot.provider_cost.is_some() {
+                content = content.push(extra_section(window, snapshot.provider_cost.as_ref()));
+                cost_shown = true;
+            } else {
+                content = content.push(usage_section(window));
+            }
         }
-        if let Some(secondary) = &snapshot.secondary {
-            content = content.push(usage_section(secondary));
-        }
-        if let Some(tertiary) = &snapshot.tertiary {
-            content = content.push(extra_section(tertiary, snapshot.provider_cost.as_ref()));
-        } else if let Some(cost) = &snapshot.provider_cost {
+        if !cost_shown
+            && let Some(cost) = &snapshot.provider_cost
+        {
             content = content.push(cost_section(provider.provider, cost));
         }
         if let Some(email) = &snapshot.identity.email {
@@ -287,22 +333,20 @@ fn selected_provider_view(provider: Option<&ProviderRuntimeState>) -> Element<'_
 
 fn usage_section(window: &UsageWindow) -> Element<'static, Message> {
     let now = chrono::Utc::now();
+    let pct = usage_display::displayed_percent(window, now);
     usage_block(
         window.label.clone(),
-        usage_display::displayed_percent(window, now) as f32,
-        format!("{:.1}% used", usage_display::displayed_percent(window, now)),
+        pct,
+        format!("{pct:.1}% used"),
         usage_display::reset_label(window, now),
     )
 }
 
 fn extra_section(window: &UsageWindow, cost: Option<&ProviderCost>) -> Element<'static, Message> {
-    let cost_text = cost.map(|c| match c.limit {
-        Some(limit) => format!("{}{:.2} / {}{:.2}", c.units, c.used, c.units, limit),
-        None => format!("{}{:.2} spent", c.units, c.used),
-    });
+    let cost_text = cost.map(format_cost);
     usage_block(
         window.label.clone(),
-        window.used_percent as f32,
+        window.used_percent,
         format!("{:.1}% used", window.used_percent),
         cost_text,
     )
@@ -312,14 +356,17 @@ fn cost_section(provider: ProviderId, cost: &ProviderCost) -> Element<'static, M
     if provider == ProviderId::Codex {
         return credit_section(cost);
     }
-    let text_str = match cost.limit {
+    info_block(fl!("extra-label"), format_cost(cost), None)
+}
+
+fn format_cost(cost: &ProviderCost) -> String {
+    match cost.limit {
         Some(limit) => format!(
             "{}{:.2} / {}{:.2}",
             cost.units, cost.used, cost.units, limit
         ),
         None => format!("{}{:.2} spent", cost.units, cost.used),
-    };
-    info_block(fl!("extra-label"), text_str, None)
+    }
 }
 
 fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
@@ -367,9 +414,12 @@ fn usage_block(
     Element::from(container(col).width(Length::Fill).padding([4, 0]))
 }
 
-fn info_block(title: String, primary: String, secondary: Option<String>) -> Element<'static, Message> {
-    let mut col =
-        column![widget::text(title).size(18), widget::text(primary).size(14)].spacing(6);
+fn info_block(
+    title: String,
+    primary: String,
+    secondary: Option<String>,
+) -> Element<'static, Message> {
+    let mut col = column![widget::text(title).size(18), widget::text(primary).size(14)].spacing(6);
 
     if let Some(secondary) = secondary {
         col = col.push(widget::text(secondary).size(13));
@@ -394,11 +444,10 @@ fn tab_percent(provider: &ProviderRuntimeState) -> f32 {
         .snapshot
         .as_ref()
         .and_then(|s| s.headline_window())
-        .map(|w| usage_display::displayed_percent(w, chrono::Utc::now()) as f32)
-        .unwrap_or(0.0)
+        .map_or(0.0, |w| {
+            usage_display::displayed_percent(w, chrono::Utc::now())
+        })
 }
-
-const STALE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
 
 fn provider_status_badge(provider: &ProviderRuntimeState) -> String {
     if !provider.enabled {
@@ -410,7 +459,7 @@ fn provider_status_badge(provider: &ProviderRuntimeState) -> String {
     let now = chrono::Utc::now();
     let recent = provider
         .last_success_at
-        .is_some_and(|t| now - t < STALE_AFTER);
+        .is_some_and(|t| now - t < STALE_THRESHOLD);
     match (&provider.health, provider.snapshot.is_some(), recent) {
         (ProviderHealth::Ok, true, true) => fl!("badge-live"),
         (_, true, _) => fl!("badge-stale"),

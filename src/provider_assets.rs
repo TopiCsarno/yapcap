@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::model::ProviderId;
 use cosmic::widget::icon::{self, Handle};
-use yapcap::model::ProviderId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderIconVariant {

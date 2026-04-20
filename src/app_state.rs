@@ -67,10 +67,8 @@ mod tests {
             provider,
             source: "test".to_string(),
             updated_at: Utc::now(),
-            headline: UsageHeadline::Primary,
-            primary: None,
-            secondary: None,
-            tertiary: None,
+            headline: UsageHeadline(0),
+            windows: Vec::new(),
             provider_cost: None,
             identity: ProviderIdentity::default(),
         }

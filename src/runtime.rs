@@ -3,17 +3,17 @@
 use crate::cache::{load_cached_state, save_cached_state};
 use crate::config::Config;
 use crate::error::AppError;
-use crate::providers;
 use crate::model::{
     AppState, AuthState, ProviderHealth, ProviderId, ProviderRuntimeState, UsageSnapshot,
 };
+use crate::providers;
 use chrono::Utc;
 use std::time::Duration;
 
 pub(crate) const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub async fn load_initial_state(config: &Config) -> AppState {
+pub fn load_initial_state(config: &Config) -> AppState {
     let mut state = load_cached_state()
         .ok()
         .flatten()
@@ -31,6 +31,7 @@ pub fn persist_state(state: &AppState) {
     }
 }
 
+#[must_use]
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
@@ -152,10 +153,8 @@ mod tests {
             provider: ProviderId::Codex,
             source: "OAuth".to_string(),
             updated_at: Utc::now(),
-            headline: UsageHeadline::Primary,
-            primary: None,
-            secondary: None,
-            tertiary: None,
+            headline: UsageHeadline(0),
+            windows: Vec::new(),
             provider_cost: None,
             identity: ProviderIdentity::default(),
         }
@@ -184,10 +183,10 @@ mod tests {
         let _client = http_client();
     }
 
-    #[tokio::test]
-    async fn load_initial_state_returns_empty_when_no_cache() {
+    #[test]
+    fn load_initial_state_returns_empty_when_no_cache() {
         let config = Config::default();
-        let state = load_initial_state(&config).await;
+        let state = load_initial_state(&config);
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         for provider in &state.providers {
             assert!(!provider.is_refreshing);

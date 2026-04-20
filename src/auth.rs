@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub struct CodexAuth {
     pub access_token: String,
     pub account_id: Option<String>,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,8 @@ struct CodexAuthFile {
 struct CodexTokens {
     access_token: String,
     account_id: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,12 +65,64 @@ pub fn load_codex_auth() -> Result<CodexAuth, AuthError> {
     Ok(CodexAuth {
         access_token: parsed.tokens.access_token,
         account_id: parsed.tokens.account_id,
+        refresh_token: parsed.tokens.refresh_token,
     })
 }
 
-pub fn load_claude_auth() -> Result<ClaudeAuth, AuthError> {
-    let path = claude_credentials_path()?;
-    load_claude_auth_from_path(&path)
+pub fn codex_auth_path() -> Result<PathBuf, AuthError> {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|p| p.join(".codex")))
+        .ok_or(AuthError::ResolveCodexHome)?;
+    Ok(home.join("auth.json"))
+}
+
+pub fn update_codex_auth_tokens(
+    path: &Path,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    last_refresh_iso: Option<&str>,
+) -> Result<(), AuthError> {
+    let raw = fs::read_to_string(path).map_err(|source| AuthError::ReadCodexAuthFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(AuthError::ParseCodexAuthJson)?;
+
+    let tokens = parsed
+        .as_object_mut()
+        .and_then(|obj| obj.get_mut("tokens"))
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or(AuthError::InvalidCodexAuthShape)?;
+
+    tokens.insert(
+        "access_token".to_string(),
+        serde_json::Value::String(access_token.to_string()),
+    );
+    if let Some(refresh_token) = refresh_token {
+        tokens.insert(
+            "refresh_token".to_string(),
+            serde_json::Value::String(refresh_token.to_string()),
+        );
+    }
+    if let Some(last_refresh_iso) = last_refresh_iso {
+        parsed
+            .as_object_mut()
+            .ok_or(AuthError::InvalidCodexAuthShape)?
+            .insert(
+                "last_refresh".to_string(),
+                serde_json::Value::String(last_refresh_iso.to_string()),
+            );
+    }
+
+    let serialized =
+        serde_json::to_string_pretty(&parsed).map_err(AuthError::ParseCodexAuthJson)?;
+    fs::write(path, serialized).map_err(|source| AuthError::ReadCodexAuthFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(())
 }
 
 pub fn claude_credentials_path() -> Result<PathBuf, AuthError> {
@@ -144,7 +199,6 @@ mod tests {
         )
         .unwrap();
 
-        // simulate CODEX_HOME
         unsafe { std::env::set_var("CODEX_HOME", dir.to_str().unwrap()) };
         let auth = load_codex_auth().unwrap();
         unsafe { std::env::remove_var("CODEX_HOME") };

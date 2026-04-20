@@ -306,7 +306,6 @@ fn push_unique(values: &mut Vec<String>, value: Option<String>) {
 pub struct AppPaths {
     pub cache_dir: PathBuf,
     pub snapshot_file: PathBuf,
-    pub state_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -320,7 +319,6 @@ pub fn paths() -> AppPaths {
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
         cache_dir,
-        state_dir,
         log_dir,
     }
 }

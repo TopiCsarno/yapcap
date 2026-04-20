@@ -43,6 +43,7 @@ impl From<CursorError> for AppError {
 }
 
 impl AppError {
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Auth(_) => true,
@@ -52,6 +53,7 @@ impl AppError {
         }
     }
 
+    #[must_use]
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Provider(error) => error.is_transient(),
@@ -74,6 +76,8 @@ pub enum AuthError {
     },
     #[error("failed to parse codex auth.json")]
     ParseCodexAuthJson(#[source] serde_json::Error),
+    #[error("codex auth.json is missing required fields")]
+    InvalidCodexAuthShape,
     #[error("failed to read claude credentials {path}")]
     ReadClaudeCredentials {
         path: PathBuf,
@@ -211,6 +215,7 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Codex(error) => error.requires_user_action(),
@@ -219,6 +224,7 @@ impl ProviderError {
         }
     }
 
+    #[must_use]
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Claude(error) => error.is_transient(),
@@ -239,10 +245,18 @@ pub enum CodexError {
     UsageRequest(#[source] reqwest::Error),
     #[error("Codex login required")]
     Unauthorized,
-    #[error("codex usage endpoint returned error")]
-    UsageEndpoint(#[source] reqwest::Error),
+    #[error("codex usage endpoint returned HTTP {status}{details}")]
+    UsageHttp { status: u16, details: String },
     #[error("failed to decode codex usage response")]
     DecodeUsage(#[source] reqwest::Error),
+    #[error("codex token refresh not available (missing refresh_token in auth.json)")]
+    RefreshUnavailable,
+    #[error("codex token refresh request failed")]
+    RefreshRequest(#[source] reqwest::Error),
+    #[error("codex token refresh returned HTTP {status}{details}")]
+    RefreshHttp { status: u16, details: String },
+    #[error("failed to decode codex token refresh response")]
+    RefreshDecode(#[source] reqwest::Error),
     #[error("Codex response had no usage windows")]
     NoUsageData,
     #[error("failed to parse codex credit balance {balance}")]
@@ -251,25 +265,14 @@ pub enum CodexError {
         #[source]
         source: ParseFloatError,
     },
-    #[error("codex CLI binary not found")]
-    CliUnavailable,
-    #[error("failed to spawn codex CLI")]
-    CliCommand(#[source] std::io::Error),
-    #[error("failed to communicate with codex CLI")]
-    CliIo(#[source] std::io::Error),
-    #[error("codex CLI timed out after {timeout:?}")]
-    CliTimeout { timeout: Duration },
-    #[error("failed to parse codex CLI output")]
-    CliParse,
-    #[error("codex RPC protocol mismatch or incompatible version")]
-    RpcProtocol,
 }
 
 impl CodexError {
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
-            Self::Auth(_) | Self::Unauthorized | Self::CliUnavailable
+            Self::Auth(_) | Self::Unauthorized | Self::RefreshUnavailable
         )
     }
 }
@@ -317,6 +320,7 @@ pub enum ClaudeError {
 }
 
 impl ClaudeError {
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
@@ -331,6 +335,7 @@ impl ClaudeError {
         )
     }
 
+    #[must_use]
     pub fn is_transient(&self) -> bool {
         matches!(self, Self::RateLimited)
     }
@@ -363,6 +368,7 @@ pub enum CursorError {
 }
 
 impl CursorError {
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(self, Self::Browser(error) if error.requires_user_action())
             || matches!(self, Self::Unauthorized)
@@ -437,7 +443,7 @@ mod tests {
 
     #[test]
     fn codex_cli_errors_do_not_require_user_action_by_default() {
-        let err = CodexError::CliParse;
+        let err = CodexError::NoUsageData;
         assert!(!err.requires_user_action());
     }
 

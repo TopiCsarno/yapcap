@@ -9,6 +9,8 @@ quit = Quit
 
 ## Settings view
 providers-section-title = Providers
+refresh-section-title = Refresh
+refresh-interval-label = Auto refresh interval
 about-section-title = About
 app-version = YapCap v{ $version }
 
@@ -42,3 +44,9 @@ updated-seconds-ago = Updated { $n }s ago
 updated-minutes-ago = Updated { $n }m ago
 updated-hours-ago = Updated { $n }h ago
 updated-at = Updated { $date }
+
+## Usage reset labels
+reset-now = Reset
+resets-in-days-hours = Resets in { $days }d { $hours }h
+resets-in-hours-minutes = Resets in { $hours }h { $mins }m
+resets-in-minutes = Resets in { $mins }m

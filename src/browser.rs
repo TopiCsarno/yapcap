@@ -20,8 +20,6 @@ use crate::error::{BrowserError, Result};
 
 const CURSOR_COOKIE_NAME: &str = "WorkosCursorSessionToken";
 const CURSOR_COOKIE_DOMAIN: &str = "cursor.com";
-const CLAUDE_COOKIE_NAME: &str = "sessionKey";
-const CLAUDE_COOKIE_DOMAIN: &str = "claude.ai";
 
 pub async fn load_cursor_cookie_chromium(
     cookie_db_path: &Path,
@@ -32,19 +30,6 @@ pub async fn load_cursor_cookie_chromium(
         application,
         CURSOR_COOKIE_NAME,
         CURSOR_COOKIE_DOMAIN,
-    )
-    .await
-}
-
-pub async fn load_claude_cookie_chromium(
-    cookie_db_path: &Path,
-    application: &str,
-) -> Result<String, BrowserError> {
-    load_chromium_cookie(
-        cookie_db_path,
-        application,
-        CLAUDE_COOKIE_NAME,
-        CLAUDE_COOKIE_DOMAIN,
     )
     .await
 }
@@ -63,10 +48,6 @@ async fn load_chromium_cookie(
 
 pub fn load_cursor_cookie_firefox(cookie_db_path: &Path) -> Result<String, BrowserError> {
     load_firefox_cookie(cookie_db_path, CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN)
-}
-
-pub fn load_claude_cookie_firefox(cookie_db_path: &Path) -> Result<String, BrowserError> {
-    load_firefox_cookie(cookie_db_path, CLAUDE_COOKIE_NAME, CLAUDE_COOKIE_DOMAIN)
 }
 
 fn load_firefox_cookie(
@@ -299,6 +280,9 @@ mod tests {
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
 
+    const CHROMIUM_SQL: &str = include_str!("../fixtures/browser/chromium_cookies.sql");
+    const FIREFOX_SQL: &str = include_str!("../fixtures/browser/firefox_cookies.sql");
+
     fn chromium_cookies_db(
         name: &str,
         host_key: &str,
@@ -352,6 +336,13 @@ mod tests {
         let mut blob = b"v10".to_vec();
         blob.extend_from_slice(&ciphertext);
         blob
+    }
+
+    fn load_db(sql: &str) -> NamedTempFile {
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(sql).unwrap();
+        file
     }
 
     #[test]
@@ -431,6 +422,20 @@ mod tests {
         let blob = make_chromium_cbc_blob(password, plaintext);
         let result = decrypt_chromium_cookie(&blob, password).unwrap();
         assert_eq!(result, plaintext);
+    }
+
+    #[test]
+    fn chromium_fixture_loads_without_firefox_cookie_value() {
+        let db = load_db(CHROMIUM_SQL);
+        let result = load_cursor_cookie_firefox(db.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn firefox_fixture_returns_cursor_session_token() {
+        let db = load_db(FIREFOX_SQL);
+        let result = load_cursor_cookie_firefox(db.path()).unwrap();
+        assert_eq!(result, "WorkosCursorSessionToken=cursor-test-session-token");
     }
 
     #[test]

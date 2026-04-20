@@ -14,35 +14,6 @@ pub enum UpdateStatus {
     Error(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateDisplay {
-    pub text: String,
-    pub link: Option<String>,
-}
-
-impl UpdateStatus {
-    pub fn describe(&self) -> UpdateDisplay {
-        match self {
-            Self::Unchecked => UpdateDisplay {
-                text: "Checking for updates...".to_string(),
-                link: None,
-            },
-            Self::NoUpdate => UpdateDisplay {
-                text: "Up to date".to_string(),
-                link: None,
-            },
-            Self::UpdateAvailable { version, url } => UpdateDisplay {
-                text: format!("Update available: v{version}"),
-                link: Some(url.clone()),
-            },
-            Self::Error(reason) => UpdateDisplay {
-                text: format!("Update check failed: {reason}"),
-                link: None,
-            },
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
     tag_name: String,
@@ -103,6 +74,7 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+#[must_use]
 pub fn is_newer(latest: &str, current: &str) -> bool {
     match (parse_version(latest), parse_version(current)) {
         (Some(l), Some(c)) => l > c,
@@ -140,40 +112,5 @@ mod tests {
     fn is_newer_false_on_garbage() {
         assert!(!is_newer("nope", "0.1.0"));
         assert!(!is_newer("v0.1.0", "nope"));
-    }
-
-    #[test]
-    fn describe_unchecked() {
-        let d = UpdateStatus::Unchecked.describe();
-        assert_eq!(d.text, "Checking for updates...");
-        assert!(d.link.is_none());
-    }
-
-    #[test]
-    fn describe_no_update() {
-        let d = UpdateStatus::NoUpdate.describe();
-        assert_eq!(d.text, "Up to date");
-        assert!(d.link.is_none());
-    }
-
-    #[test]
-    fn describe_update_available() {
-        let d = UpdateStatus::UpdateAvailable {
-            version: "0.2.0".to_string(),
-            url: "https://example.test/releases/v0.2.0".to_string(),
-        }
-        .describe();
-        assert_eq!(d.text, "Update available: v0.2.0");
-        assert_eq!(
-            d.link.as_deref(),
-            Some("https://example.test/releases/v0.2.0")
-        );
-    }
-
-    #[test]
-    fn describe_error() {
-        let d = UpdateStatus::Error("http 500".to_string()).describe();
-        assert_eq!(d.text, "Update check failed: http 500");
-        assert!(d.link.is_none());
     }
 }

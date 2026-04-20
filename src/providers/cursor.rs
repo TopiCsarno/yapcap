@@ -29,11 +29,11 @@ struct CursorIndividualUsage {
 #[derive(Debug, Deserialize)]
 struct CursorPlanUsage {
     #[serde(rename = "totalPercentUsed")]
-    pub total_percent_used: f64,
+    pub total: f32,
     #[serde(rename = "autoPercentUsed")]
-    pub auto_percent_used: f64,
+    pub auto_mode: f32,
     #[serde(rename = "apiPercentUsed")]
-    pub api_percent_used: f64,
+    pub api: f32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,11 +47,11 @@ pub async fn fetch(
     browser: Browser,
     profile_id: Option<&str>,
 ) -> Result<UsageSnapshot, CursorError> {
-    let profiles = browser
-        .cookie_profiles()
-        .map_err(|e| CursorError::Browser(crate::error::BrowserError::CookieDatabaseNotFound {
+    let profiles = browser.cookie_profiles().map_err(|e| {
+        CursorError::Browser(crate::error::BrowserError::CookieDatabaseNotFound {
             path: std::path::PathBuf::from(format!("{e}")),
-        }))?;
+        })
+    })?;
 
     let profile = profile_id
         .and_then(|id| browser.profile_by_id(&profiles, id))
@@ -123,26 +123,22 @@ fn normalize(
         })?
         .with_timezone(&Utc);
 
+    let windows = vec![
+        window("Total", usage.individual_usage.plan.total, reset_at),
+        window(
+            "Auto + Composer",
+            usage.individual_usage.plan.auto_mode,
+            reset_at,
+        ),
+        window("API", usage.individual_usage.plan.api, reset_at),
+    ];
+
     Ok(UsageSnapshot {
         provider: ProviderId::Cursor,
         source: "Browser Cookie".to_string(),
         updated_at: Utc::now(),
-        headline: UsageHeadline::Primary,
-        primary: Some(window(
-            "Total",
-            usage.individual_usage.plan.total_percent_used,
-            reset_at,
-        )),
-        secondary: Some(window(
-            "Auto + Composer",
-            usage.individual_usage.plan.auto_percent_used,
-            reset_at,
-        )),
-        tertiary: Some(window(
-            "API",
-            usage.individual_usage.plan.api_percent_used,
-            reset_at,
-        )),
+        headline: UsageHeadline::first_available(&windows),
+        windows,
         provider_cost: None,
         identity: ProviderIdentity {
             email: identity.as_ref().and_then(|v| v.email.clone()),
@@ -153,7 +149,7 @@ fn normalize(
     })
 }
 
-fn window(label: &str, used_percent: f64, reset_at: DateTime<Utc>) -> UsageWindow {
+fn window(label: &str, used_percent: f32, reset_at: DateTime<Utc>) -> UsageWindow {
     UsageWindow {
         label: label.to_string(),
         used_percent,
@@ -174,15 +170,9 @@ mod tests {
             serde_json::from_str(include_str!("../../fixtures/cursor/auth_me.json")).unwrap();
         let snapshot = normalize(usage, Some(identity)).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Cursor);
-        assert_eq!(
-            snapshot.primary.as_ref().unwrap().used_percent,
-            68.71794871794872
-        );
-        assert_eq!(
-            snapshot.secondary.as_ref().unwrap().used_percent,
-            56.333333333333336
-        );
-        assert_eq!(snapshot.tertiary.as_ref().unwrap().used_percent, 100.0);
+        assert_eq!(snapshot.windows[0].used_percent, 68.71794871794872);
+        assert_eq!(snapshot.windows[1].used_percent, 56.333333333333336);
+        assert_eq!(snapshot.windows[2].used_percent, 100.0);
         assert_eq!(snapshot.identity.plan.as_deref(), Some("pro"));
     }
 }

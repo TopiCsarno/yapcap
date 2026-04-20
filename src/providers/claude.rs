@@ -18,13 +18,18 @@ const REQUIRED_SCOPE: &str = "user:profile";
 struct ClaudeUsageResponse {
     pub five_hour: Option<ClaudeWindow>,
     pub seven_day: Option<ClaudeWindow>,
+    pub seven_day_sonnet: Option<ClaudeWindow>,
+    pub seven_day_opus: Option<ClaudeWindow>,
+    pub seven_day_cowork: Option<ClaudeWindow>,
+    #[allow(dead_code)]
+    pub seven_day_omelette: Option<ClaudeWindow>,
     pub extra_usage: Option<ClaudeExtraUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ClaudeWindow {
     #[serde(default)]
-    pub utilization: Option<f64>,
+    pub utilization: Option<f32>,
     #[serde(default)]
     pub resets_at: Option<String>,
 }
@@ -35,7 +40,8 @@ struct ClaudeExtraUsage {
     pub is_enabled: Option<bool>,
     pub monthly_limit: Option<f64>,
     pub used_credits: Option<f64>,
-    pub utilization: Option<f64>,
+    pub utilization: Option<f32>,
+    pub currency: Option<String>,
 }
 
 pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot, ClaudeError> {
@@ -103,27 +109,45 @@ fn normalize(
     payload: ClaudeUsageResponse,
     plan: Option<String>,
 ) -> Result<UsageSnapshot, ClaudeError> {
-    let primary = normalize_window("Session", payload.five_hour.as_ref())?;
-    let secondary = normalize_window("Weekly", payload.seven_day.as_ref())?;
-    if primary.is_none() && secondary.is_none() {
+    let mut windows = Vec::new();
+    if let Some(w) = normalize_window("Session", payload.five_hour.as_ref())? {
+        windows.push(w);
+    }
+    if let Some(w) = normalize_window("Weekly", payload.seven_day.as_ref())? {
+        windows.push(w);
+    }
+    let model_windows: &[(&str, &Option<ClaudeWindow>)] = &[
+        ("Sonnet", &payload.seven_day_sonnet),
+        ("Opus", &payload.seven_day_opus),
+        ("Cowork", &payload.seven_day_cowork),
+    ];
+    for &(label, window) in model_windows {
+        if let Some(w) = normalize_window(label, window.as_ref())? {
+            windows.push(w);
+        }
+    }
+    if windows.is_empty() {
         return Err(ClaudeError::NoUsageData);
     }
     let extra_enabled = payload
         .extra_usage
         .as_ref()
         .is_some_and(|extra| extra.is_enabled.unwrap_or(true));
-    let tertiary = payload
+    if let Some(extra) = payload.extra_usage.as_ref().filter(|_| extra_enabled)
+        && let Some(utilization) = extra.utilization
+    {
+        windows.push(UsageWindow {
+            label: "Extra".to_string(),
+            used_percent: utilization,
+            reset_at: None,
+            reset_description: None,
+        });
+    }
+    let currency = payload
         .extra_usage
         .as_ref()
-        .filter(|_| extra_enabled)
-        .and_then(|extra| {
-            extra.utilization.map(|utilization| UsageWindow {
-                label: "Extra".to_string(),
-                used_percent: utilization,
-                reset_at: None,
-                reset_description: None,
-            })
-        });
+        .and_then(|u| u.currency.clone())
+        .unwrap_or_else(|| "$".to_string());
     let provider_cost = payload
         .extra_usage
         .filter(|_| extra_enabled)
@@ -131,21 +155,15 @@ fn normalize(
             usage.used_credits.map(|used| ProviderCost {
                 used: used / 100.0,
                 limit: usage.monthly_limit.map(|limit| limit / 100.0),
-                units: "$".to_string(),
+                units: currency.clone(),
             })
         });
     Ok(UsageSnapshot {
         provider: ProviderId::Claude,
         source: "OAuth".to_string(),
         updated_at: Utc::now(),
-        headline: UsageHeadline::primary_first(
-            primary.as_ref(),
-            secondary.as_ref(),
-            tertiary.as_ref(),
-        ),
-        primary,
-        secondary,
-        tertiary,
+        headline: UsageHeadline::first_available(&windows),
+        windows,
         provider_cost,
         identity: ProviderIdentity {
             plan,
@@ -194,8 +212,8 @@ mod tests {
             serde_json::from_str(include_str!("../../fixtures/claude/usage_oauth.json")).unwrap();
         let snapshot = normalize(payload, None).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Claude);
-        assert_eq!(snapshot.primary.as_ref().unwrap().used_percent, 18.0);
-        assert_eq!(snapshot.secondary.as_ref().unwrap().used_percent, 90.0);
+        assert_eq!(snapshot.windows[0].used_percent, 18.0);
+        assert_eq!(snapshot.windows[1].used_percent, 90.0);
         assert_eq!(snapshot.provider_cost.as_ref().unwrap().used, 2.44);
     }
 
@@ -207,10 +225,45 @@ mod tests {
         .unwrap();
         let snapshot = normalize(payload, Some("pro".to_string())).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Claude);
-        assert_eq!(snapshot.primary.as_ref().unwrap().used_percent, 83.0);
-        assert_eq!(snapshot.secondary.as_ref().unwrap().used_percent, 21.0);
-        assert!(snapshot.tertiary.is_none());
+        assert_eq!(snapshot.windows[0].used_percent, 83.0);
+        assert_eq!(snapshot.windows[1].used_percent, 21.0);
+        assert_eq!(snapshot.windows.len(), 2);
         assert!(snapshot.provider_cost.is_none());
+    }
+
+    #[test]
+    fn normalizes_max_fixture_with_model_windows() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
+            "../../fixtures/claude/usage_oauth_max_2026_03_10.json"
+        ))
+        .unwrap();
+        let snapshot = normalize(payload, Some("max".to_string())).unwrap();
+        assert_eq!(snapshot.provider, ProviderId::Claude);
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert_eq!(snapshot.windows[0].used_percent, 37.0);
+        assert_eq!(snapshot.windows[1].label, "Weekly");
+        assert_eq!(snapshot.windows[1].used_percent, 26.0);
+        assert_eq!(snapshot.windows[2].label, "Sonnet");
+        assert_eq!(snapshot.windows[2].used_percent, 1.0);
+        assert_eq!(snapshot.windows.len(), 3);
+        assert!(snapshot.provider_cost.is_none());
+    }
+
+    #[test]
+    fn normalizes_live_fixture_with_currency() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
+            "../../fixtures/claude/usage_oauth_live_2026_04_20.json"
+        ))
+        .unwrap();
+        let snapshot = normalize(payload, Some("pro".to_string())).unwrap();
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert_eq!(snapshot.windows[1].label, "Weekly");
+        assert_eq!(snapshot.windows[2].label, "Extra");
+        assert_eq!(snapshot.windows.len(), 3);
+        let cost = snapshot.provider_cost.as_ref().unwrap();
+        assert_eq!(cost.units, "EUR");
+        assert_eq!(cost.used, 4.80);
+        assert_eq!(cost.limit, Some(5.0));
     }
 
     #[test]
@@ -231,9 +284,8 @@ mod tests {
         .unwrap();
 
         let snapshot = normalize(payload, None).unwrap();
-        let primary = snapshot.primary.as_ref().unwrap();
-        assert_eq!(primary.used_percent, 42.0);
-        assert!(primary.reset_at.is_none());
-        assert!(snapshot.secondary.is_none());
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].used_percent, 42.0);
+        assert!(snapshot.windows[0].reset_at.is_none());
     }
 }

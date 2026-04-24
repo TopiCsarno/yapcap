@@ -26,7 +26,7 @@ YapCap lives in your COSMIC panel and reads local credentials to show how much o
 
 All data is fetched directly from the provider APIs using credentials already on your machine. No telemetry, no cloud sync, no account needed beyond the ones you already have.
 
-On startup, YapCap shows any cached snapshot immediately, then refreshes enabled providers in the background. Provider API calls have short network timeouts so a stalled request does not leave the applet stuck refreshing forever.
+On startup, YapCap shows any cached snapshot immediately, then refreshes enabled providers in the background. On a brand-new config it also imports or discovers any local accounts it can find and hides providers that have no usable account yet. Provider API calls have short network timeouts so a stalled request does not leave the applet stuck refreshing forever.
 
 ## Requirements
 
@@ -61,31 +61,32 @@ just install
 
 ### Codex
 
-Reads OAuth token from `~/.codex/auth.json` and calls `chatgpt.com/backend-api/wham/usage`.
+Reads OAuth token from `auth.json` and calls `chatgpt.com/backend-api/wham/usage`. Ambient `CODEX_HOME` discovery is import-only; YapCap copies just the auth file it needs into its managed account storage.
 
 ### Claude Code
 
-Reads OAuth token from `~/.claude/.credentials.json` or `$CLAUDE_CONFIG_DIR/.credentials.json` (scope `user:profile`) and calls `api.anthropic.com/api/oauth/usage`.
+Stores Claude Code credentials in YapCap-managed config dirs under `~/.local/state/yapcap/claude-accounts/`, keeping only `.credentials.json`, and calls `api.anthropic.com/api/oauth/usage`.
 
 If the Claude Code access token is expired or close to expiring, YapCap runs `claude auth status --json` and then rereads the credentials file. Claude Code owns the OAuth refresh flow and may update `.credentials.json`; YapCap does not call Claude's private token endpoint directly.
 
 ### Cursor
 
-Imports the `WorkosCursorSessionToken` cookie from a supported local browser and calls `cursor.com/api/usage-summary`. Supported browsers: Brave, Chrome, Edge, Firefox.
+Imports the `WorkosCursorSessionToken` cookie from a supported local browser, stores that cookie header in YapCap-managed account state, and calls `cursor.com/api/usage-summary`. Supported browsers: Brave, Chrome, Edge, Firefox.
 
 ## Configuration
 
 
-| Path                                    | Purpose                                      |
-| --------------------------------------- | -------------------------------------------- |
-| `~/.config/yapcap/config.toml`          | Per-provider enable flags, browser selection |
-| `~/.cache/yapcap/snapshots.json`        | Last successful response per provider        |
-| `~/.local/state/yapcap/logs/yapcap.log` | Log output                                   |
+| Path                                                              | Purpose                                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `~/.config/cosmic/com.topi.YapCap/v*/`                            | Per-provider enable flags, managed accounts, browser selection     |
+| `~/.cache/yapcap/snapshots.json`                                  | Cached `AppState` (last refresh per account)                       |
+| `~/.local/state/yapcap/logs/yapcap.log`                           | Log output                                                         |
 
+Adding or removing accounts, changing the active account, or toggling providers in the popup updates COSMIC config, re-merges in-memory state, and rewrites the snapshot cache in one pass so the panel, settings UI, and on-disk data stay aligned. For schema details and paths, see [`docs/spec.md`](docs/spec.md).
 
 Cursor browser selection can be overridden per-run with `YAPCAP_CURSOR_BROWSER` (`brave`, `chrome`, `edge`, `firefox`).
 
-To hide a provider you don't use, open the popup → **Settings** and toggle it off. The change is written straight to `config.toml`:
+To hide a provider you don't use, open the popup → **Settings** and toggle it off. The change is written to COSMIC config:
 
 ```toml
 codex_enabled = true

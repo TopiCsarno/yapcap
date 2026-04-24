@@ -19,6 +19,23 @@ default: build-release
 clean:
     cargo clean
 
+# Clears the app cache at ~/.cache/yapcap
+clear-cache:
+    rm -rf ~/.cache/yapcap
+
+# Clears Cursor session dirs (cookie_header, managed profile Cookies DB) under ~/.local/state/yapcap/cursor-accounts
+
+# Clears cookie/session dirs, snapshot cache, and full managed state (codex/claude/cursor/logs under ~/.local/state/yapcap)
+clear-all-data: clear-config clear-cache clear-accounts
+
+# Clears COSMIC config at $XDG_CONFIG_HOME/cosmic/<appid> (default ~/.config/...)
+clear-config:
+    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/{{ appid }}"
+
+# Clears managed account state at ~/.local/state/yapcap
+clear-accounts:
+    rm -rf ~/.local/state/yapcap
+
 # Removes vendored dependencies
 clean-vendor:
     rm -rf .cargo vendor vendor.tar
@@ -46,6 +63,12 @@ check-json: (check '--message-format=json')
 # Run the application for testing purposes
 run *args:
     env RUST_BACKTRACE=full cargo run --release {{args}}
+
+# Runs with empty HOME/XDG dirs so provider discovery finds nothing
+run-empty-discovery *args:
+    rm -rf /tmp/yapcap-empty-home /tmp/yapcap-empty-config /tmp/yapcap-empty-state
+    mkdir -p /tmp/yapcap-empty-home /tmp/yapcap-empty-config /tmp/yapcap-empty-state
+    env RUST_BACKTRACE=full HOME=/tmp/yapcap-empty-home XDG_CONFIG_HOME=/tmp/yapcap-empty-config XDG_STATE_HOME=/tmp/yapcap-empty-state CARGO_HOME="${CARGO_HOME:-{{home_directory() / '.cargo'}}}" RUSTUP_HOME="${RUSTUP_HOME:-{{home_directory() / '.rustup'}}}" cargo run --release {{args}}
 
 # Installs files
 install: build-release

@@ -1,0 +1,31 @@
+# TODO
+
+- [x] just file install
+- [x] localization support
+- [x] fix UI flickering
+- [x] multi account support
+    - [x] codex
+    - [x] claude
+    - [x] cursor
+- [x] UI redesign
+- [x] Panel icon setting
+- [x] full/left setting
+- [x] relative / full time
+- [x] fix About request fail
+- [x] check for internet -> UI gets stale when no internet but no error
+- [x] add pasing feature (ahead behind expected usage)
+- [x] when system accent color changes yapcap should adapt to the new color asap
+- [x] for absoute time show minutes too not just hour
+- [x] refine the about section updaet checker. mb add a blue dot if there's a new release
+- [x] claude expired token handling
+
+- [x] test codex accounts
+- [x] test cursor accounts
+- [x] test claude accounts
+- [x] do we need to copy all those files for a codex profile in local state?
+- [x] cursor uses email address for folder name but codex and claude doesn't
+- [x] shared provider interface once all 3 providers are done
+- [x] standardize UI, accounts for all 3 providers
+- [ ] refactor code when all features are in
+- [ ] break up large files 
+- [ ] provider discovery: what providers does the user have? -> configure providers in config

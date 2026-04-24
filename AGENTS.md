@@ -7,4 +7,4 @@
 - Remove existing comments from touched source code when they are no longer needed. MPL-2.0 license headers (`// SPDX-License-Identifier: MPL-2.0`) are fine and should be kept.
 - Do not edit the template `justfile` unless explicitly asked.
 - Before committing, update `docs/spec.md` when behavior or user-facing expectations change.
-- Before committing, run `cargo check` and `just test`, then fix all warnings, errors, and failures.
+- Before committing, run `just check` and `cargo test`, then fix all warnings, errors, and failures.

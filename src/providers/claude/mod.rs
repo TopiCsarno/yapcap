@@ -160,7 +160,7 @@ pub(crate) fn blocking_fetch_usage_email(config_dir: &Path) -> Option<String> {
 
     let get_json = |url: &str| -> Option<reqwest::blocking::Response> {
         let response = match send(&credentials_path, url)? {
-            (status, resp) if status == reqwest::StatusCode::UNAUTHORIZED => {
+            (status, _resp) if status == reqwest::StatusCode::UNAUTHORIZED => {
                 refresh::refresh_claude_credentials(&credentials_path).ok()?;
                 let (status2, resp2) = send(&credentials_path, url)?;
                 if !status2.is_success() {

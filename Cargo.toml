@@ -14,7 +14,7 @@ section = "utils"
 priority = "optional"
 assets = [
     ["target/release/yapcap", "usr/bin/", "755"],
-    ["resources/app.desktop", "usr/share/applications/", "644"],
+    ["resources/app.desktop", "usr/share/applications/com.topi.YapCap.desktop", "644"],
     ["resources/icon.svg", "usr/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg", "644"],
     ["README.md", "usr/share/doc/yapcap/README.md", "644"],
 ]
@@ -29,7 +29,7 @@ summary = "COSMIC panel applet for Codex, Claude Code, and Cursor usage"
 license = "MPL-2.0"
 assets = [
     { source = "target/release/yapcap", dest = "/usr/bin/yapcap", mode = "755" },
-    { source = "resources/app.desktop", dest = "/usr/share/applications/app.desktop", mode = "644" },
+    { source = "resources/app.desktop", dest = "/usr/share/applications/com.topi.YapCap.desktop", mode = "644" },
     { source = "resources/icon.svg", dest = "/usr/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg", mode = "644" },
     { source = "README.md", dest = "/usr/share/doc/yapcap/README.md", mode = "644", doc = true },
 ]

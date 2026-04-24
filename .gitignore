@@ -8,6 +8,7 @@ debug/
 target/
 vendor/
 vendor.tar
+make_screenshot.py
 debian/*
 !debian/changelog
 !debian/control

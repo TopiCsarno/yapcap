@@ -2,6 +2,7 @@
 
 use crate::cache::{load_cached_state, save_cached_state};
 use crate::config::Config;
+use crate::demo_env;
 use crate::error::AppError;
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderHealth,
@@ -34,6 +35,9 @@ pub fn load_initial_state(config: &Config) -> AppState {
 }
 
 pub fn persist_state(state: &AppState) {
+    if demo_env::is_active() {
+        return;
+    }
     if let Err(error) = save_cached_state(state) {
         tracing::error!(error = %error, "failed to save snapshot cache");
     }

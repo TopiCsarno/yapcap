@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that shows local usage state for Codex, Claude Code, and Cursor.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, and Cursor.**
 
 <img src="resources/screenshot.png" alt="YapCap panel applet" width="780" />
 
@@ -18,38 +18,38 @@
 
 ## What it does
 
-YapCap lives in your COSMIC panel and reads local credentials to show how much of your AI coding quota you've used this session, week, or billing cycle — without sending anything to a third party.
+YapCap lives in your COSMIC panel and shows how much of your AI coding quota you've used — without sending anything to a third party. All data is fetched directly from provider APIs using credentials already on your machine. No telemetry, no cloud sync, no separate account needed.
 
-- **Codex** — 5-hour and weekly windows, credit balance
-- **Claude Code** — session utilization and reset time
-- **Cursor** — plan usage and billing cycle end
+## Highlights
 
-All data is fetched directly from the provider APIs using credentials already on your machine. No telemetry, no cloud sync, no account needed beyond the ones you already have.
-
-On startup, YapCap shows any cached snapshot immediately, then refreshes enabled providers in the background. On a brand-new config it also imports or discovers any local accounts it can find and hides providers that have no usable account yet. Provider API calls have short network timeouts so a stalled request does not leave the applet stuck refreshing forever.
-
-## Requirements
-
-- Pop!_OS (or another distro running COSMIC)
-- At least one of: Codex, Claude Code, or Cursor logged in locally
-- COSMIC dependencies installed
-- Rust toolchain (stable) only if you build from source
+- **Three providers**
+    - <img src="resources/providers/codex.svg" height="14" valign="middle"> **Codex** — 5h/weekly windows + credits
+    - <img src="resources/providers/claude.svg" height="14" valign="middle"> **Claude Code** — session/weekly/extra usage
+    - <img src="resources/providers/cursor.svg" height="14" valign="middle"> **Cursor** — plan usage + billing cycle end
+- **Multi-account support** — add, switch, and remove accounts for each provider from within the popup
+- **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
+- **Auto-discovery** — on first launch, imports existing Codex and Claude CLI credentials and Cursor browser sessions automatically
+- **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
 
 ## Install
 
-### Install with apt (recommended)
-
-Download the `.deb` package from the [latest release](https://github.com/TopiCsarno/yapcap/releases/latest), then install it:
+### apt (Debian/Ubuntu/Pop!\_OS)
 
 ```bash
 sudo apt install ./yapcap_*.deb
 ```
 
-Restart your COSMIC session (or log out and back in) so the panel picks up the new applet, then add **YapCap** from the panel applet picker.
+### rpm (Fedora/openSUSE)
+
+```bash
+sudo rpm -i ./yapcap_*.rpm
+```
+
+Download packages from the [latest release](https://github.com/TopiCsarno/yapcap/releases/latest).
 
 ### From source
 
-This path requires COSMIC development dependencies and a local Rust toolchain.
+Requires COSMIC development dependencies and a Rust toolchain.
 
 ```bash
 git clone https://github.com/TopiCsarno/yapcap
@@ -57,68 +57,79 @@ cd yapcap
 just install
 ```
 
-## Providers
+## Quickstart
 
-### Codex
+1. After installing, restart your COSMIC session (log out and back in).
+2. Add **YapCap** from the panel applet picker.
+3. On first launch, YapCap auto-imports accounts it can find — Codex from `~/.codex`, Claude from `~/.claude`, and Cursor from any supported browser (Brave, Chrome, Edge, Firefox).
+4. Click the panel button to open the popup.
+5. To add more accounts or switch between them, open the popup → **Settings → [Provider]**.
 
-Reads OAuth token from `auth.json` and calls `chatgpt.com/backend-api/wham/usage`. Ambient `CODEX_HOME` discovery is import-only; YapCap copies just the auth file it needs into its managed account storage.
+---
 
-### Claude Code
+## Accounts
 
-Stores Claude Code credentials in YapCap-managed config dirs under `~/.local/state/yapcap/claude-accounts/`, keeping only `.credentials.json`, and calls `api.anthropic.com/api/oauth/usage`.
+Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-If the Claude Code access token is expired or close to expiring, YapCap runs `claude auth status --json` and then rereads the credentials file. Claude Code owns the OAuth refresh flow and may update `.credentials.json`; YapCap does not call Claude's private token endpoint directly.
+- **Add account** — triggers the provider's own login flow (Codex CLI browser login, `claude auth login`, or an isolated managed browser profile for Cursor) without leaving YapCap.
+- **Switch account** — tap any account row to make it active; the panel and popup update immediately.
+- **Remove account** — deletes only YapCap's copy of the credentials. Your original browser profiles and CLI configs are never touched.
 
-### Cursor
+Each provider keeps at most one account per email address.
 
-Imports the `WorkosCursorSessionToken` cookie from a supported local browser, stores that cookie header in YapCap-managed account state, and calls `cursor.com/api/usage-summary`. Supported browsers: Brave, Chrome, Edge, Firefox.
+## Panel styles
 
-## Configuration
+Configured under **Settings → General**:
 
+| Style | What's shown |
+| --- | --- |
+| Logo + bars | Provider icon and two compact usage bars (default) |
+| Bars only | Two usage bars, no icon |
+| Logo + percent | Provider icon and the headline window as a percentage |
+| Percent only | Headline percentage only |
 
-| Path                                                              | Purpose                                                            |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `~/.config/cosmic/com.topi.YapCap/v*/`                            | Per-provider enable flags, managed accounts, browser selection     |
-| `~/.cache/yapcap/snapshots.json`                                  | Cached `AppState` (last refresh per account)                       |
-| `~/.local/state/yapcap/logs/yapcap.log`                           | Log output                                                         |
+## Display options
 
-Adding or removing accounts, changing the active account, or toggling providers in the popup updates COSMIC config, re-merges in-memory state, and rewrites the snapshot cache in one pass so the panel, settings UI, and on-disk data stay aligned. For schema details and paths, see [`docs/spec.md`](docs/spec.md).
+Also under **Settings → General**:
 
-Cursor browser selection can be overridden per-run with `YAPCAP_CURSOR_BROWSER` (`brave`, `chrome`, `edge`, `firefox`).
+- **Usage format** — show quota as *used* (how much you've consumed) or *left* (how much remains).
+- **Reset time format** — relative durations (`Resets in 2d 4h`) or absolute local times (`Resets Wednesday at 8:25 AM`).
+- **Auto-refresh interval** — how often YapCap polls the provider APIs in the background.
 
-To hide a provider you don't use, open the popup → **Settings** and toggle it off. The change is written to COSMIC config:
-
-```toml
-codex_enabled = true
-claude_enabled = true
-cursor_enabled = false
-```
-
-Disabled providers are hidden from the popup entirely.
+Usage bars include a pace indicator: a vertical marker shows expected usage for the elapsed portion of the window so you can see at a glance whether you're running ahead or behind.
 
 ## Updates
 
-YapCap checks GitHub for a newer release on startup and surfaces the result in **Settings → About**. If a new version is available, the About section shows a link to the release page. No automatic download or install — just a nudge so you know to pull.
+YapCap checks GitHub for a new release on startup. If one is available, a red dot appears on the Settings icon and a link to the release page appears in **Settings → About**. No automatic download or install.
 
 ## Privacy
 
-YapCap reads local files and talks directly to provider APIs over HTTPS. For Claude Code, it may also run `claude auth status --json` to let Claude Code refresh its own local credentials. Logs avoid credentials, cookies, and bearer tokens — if you find one leaking, that's a bug, please file it.
+YapCap reads local credential files and calls provider APIs directly over HTTPS. For Claude Code it may run `claude auth status --json` to trigger a credential refresh; Claude Code manages its own OAuth flow. Logs never contain credentials, bearer tokens, or cookie values — if you find one leaking, please file a bug.
 
 ## Troubleshooting
 
 - **Applet doesn't appear after install** — restart the COSMIC session (log out and back in).
-- **"Auth required" on Codex or Claude** — log in with the respective CLI. For Claude, `claude auth status --json` is used automatically when possible, but `/login` may still be needed if Claude Code reports the refresh token is revoked or expired.
-- **Cursor shows no data** — make sure you're logged in to `cursor.com` in a supported browser, then quit that browser so YapCap can read its cookie DB.
-- **Stale data** — a transient refresh failure keeps the last good snapshot visible and marks it stale. Click refresh once the network or provider is back.
+- **Auth error on Codex** — open **Settings → Codex** and use the re-authenticate action, or run `codex login` in a terminal.
+- **Auth error on Claude** — open **Settings → Claude** and add or re-authenticate the account. YapCap will run `claude auth login` for you.
+- **Cursor shows no data** — quit your browser first (its cookie database is locked while running), then click **Refresh now**. If the session has expired, use **Settings → Cursor → Re-auth**.
+- **Stale data** — a transient failure keeps the last good snapshot visible and marks it stale. Click **Refresh now** once the network or provider is back.
 
-Logs at `~/.local/state/yapcap/logs/yapcap.log` are usually the fastest way to see what's going on.
+Logs at `~/.local/state/yapcap/logs/yapcap.log` are the fastest way to diagnose issues.
+
+## File locations
+
+| Path | Purpose |
+| --- | --- |
+| `~/.config/cosmic/com.topi.YapCap/v*/` | Settings (provider toggles, accounts, display options) |
+| `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
+| `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`}`-accounts/` | Managed credential copies |
+| `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
 ## Limitations
 
 - COSMIC only. No GNOME, KDE, or tray fallback.
-- Three providers only. Not designed to be extensible.
 - No historical charts, notifications, or cost analytics.
-- Cursor cookie import requires the browser to be closed (its cookie DB is locked while running).
+- Three providers only for now.
 
 ## License
 

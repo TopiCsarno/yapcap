@@ -7,6 +7,7 @@ use crate::config::{
     Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
     PanelIconStyle, ResetTimeFormat, UsageAmountFormat, paths,
 };
+use crate::demo_env;
 use crate::model::{
     AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
 };
@@ -163,6 +164,7 @@ impl cosmic::Application for AppModel {
         let mut state = runtime::load_initial_state(&initial_config);
         #[cfg(debug_assertions)]
         crate::debug_env::apply(&mut state);
+        demo_env::apply(&initial_config, &mut state);
         let selected_provider = select_provider(ProviderId::Codex, &state);
         let refresh_task = refresh_provider_tasks(&initial_config, &mut state);
         let cursor_status_task =
@@ -203,10 +205,13 @@ impl cosmic::Application for AppModel {
             )
         };
 
-        (
-            app,
-            Task::batch([refresh_task, update_task, discover_task, cursor_status_task]),
-        )
+        let startup = if demo_env::is_active() {
+            Task::none()
+        } else {
+            Task::batch([refresh_task, update_task, discover_task, cursor_status_task])
+        };
+
+        (app, startup)
     }
 
     fn on_close_requested(&self, id: Id) -> Option<Message> {
@@ -967,6 +972,7 @@ impl AppModel {
     fn on_config_update(&mut self, config: Config) {
         self.config = config;
         runtime::reconcile_state(&self.config, &mut self.state);
+        demo_env::apply(&self.config, &mut self.state);
         runtime::persist_state(&self.state);
     }
 

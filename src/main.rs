@@ -7,6 +7,7 @@ mod auth;
 mod browser;
 mod cache;
 mod config;
+mod demo_env;
 #[cfg(debug_assertions)]
 mod debug_env;
 mod error;

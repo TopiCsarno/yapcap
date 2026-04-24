@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=YapCap (debug)
+Comment=Provider usage panel applet for COSMIC (debug build, demo mode)
+Type=Application
+Icon=com.topi.YapCap
+Exec=env YAPCAP_DEMO=1 yapcap-debug
+Terminal=false
+StartupNotify=true
+Categories=COSMIC;
+Keywords=COSMIC;Usage;Quota;Debug;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=

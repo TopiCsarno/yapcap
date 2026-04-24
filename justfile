@@ -1,4 +1,5 @@
 name := 'yapcap'
+name-debug := 'yapcap-debug'
 appid := 'com.topi.YapCap'
 
 rootdir := ''
@@ -9,7 +10,9 @@ base-dir := absolute_path(clean(rootdir / prefix))
 cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 appdata-dst := base-dir / 'share' / 'appdata' / appid + '.metainfo.xml'
 bin-dst := base-dir / 'bin' / name
+bin-debug-dst := base-dir / 'bin' / name-debug
 desktop-dst := base-dir / 'share' / 'applications' / appid + '.desktop'
+desktop-debug-dst := base-dir / 'share' / 'applications' / 'yapcap-debug.desktop'
 icon-dst := base-dir / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / appid + '.svg'
 
 # Default recipe which runs `just build-release`
@@ -77,8 +80,17 @@ install: build-release
     install -Dm0644 resources/app.metainfo.xml {{appdata-dst}}
     install -Dm0644 resources/icon.svg {{icon-dst}}
 
-# Uninstalls installed files
-uninstall:
+# Installs debug build as `yapcap-debug` and a separate desktop entry (YAPCAP_DEMO) for screenshots
+install-demo: build-debug
+    install -Dm0755 {{ cargo-target-dir / 'debug' / name }} {{bin-debug-dst}}
+    install -Dm0644 resources/app-debug.desktop {{desktop-debug-dst}}
+
+# Removes only the debug install (`install-demo`)
+uninstall-demo:
+    rm -f {{bin-debug-dst}} {{desktop-debug-dst}}
+
+# Uninstalls installed files (and debug demo install if present)
+uninstall: uninstall-demo
     rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
 # Vendor dependencies locally

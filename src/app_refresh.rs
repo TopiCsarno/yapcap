@@ -2,6 +2,7 @@
 
 use crate::app::Message;
 use crate::config::Config;
+use crate::demo_env;
 use crate::model::{AppState, ProviderId};
 use crate::providers::registry;
 use crate::runtime;
@@ -29,6 +30,9 @@ pub fn refresh_provider_task(
     state: &mut AppState,
     provider: ProviderId,
 ) -> Task<Message> {
+    if demo_env::is_active() {
+        return Task::none();
+    }
     let enabled = config.provider_enabled(provider);
     let already_refreshing = state
         .provider(provider)

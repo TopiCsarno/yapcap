@@ -32,6 +32,8 @@ pub struct UsageWindow {
     pub label: String,
     pub used_percent: f32,
     pub reset_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub window_seconds: Option<i64>,
     pub reset_description: Option<String>,
 }
 
@@ -81,6 +83,12 @@ impl UsageSnapshot {
 
     #[must_use]
     pub fn applet_windows(&self) -> (Option<&UsageWindow>, Option<&UsageWindow>) {
+        if self.provider == ProviderId::Cursor {
+            return (
+                self.windows.first(),
+                self.windows.get(2).or_else(|| self.windows.get(1)),
+            );
+        }
         (self.windows.first(), self.windows.get(1))
     }
 }
@@ -98,16 +106,26 @@ pub enum AuthState {
     Error,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AccountSelectionStatus {
+    Ready,
+    LoginRequired,
+    SelectionRequired,
+    #[default]
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderRuntimeState {
     pub provider: ProviderId,
     pub enabled: bool,
+    #[serde(default)]
+    pub active_account_id: Option<String>,
+    #[serde(default)]
+    pub account_status: AccountSelectionStatus,
     pub is_refreshing: bool,
-    pub health: ProviderHealth,
-    pub auth_state: AuthState,
-    pub source_label: Option<String>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub snapshot: Option<UsageSnapshot>,
+    #[serde(default, alias = "snapshot")]
+    pub legacy_display_snapshot: Option<UsageSnapshot>,
     pub error: Option<String>,
 }
 
@@ -117,12 +135,10 @@ impl ProviderRuntimeState {
         Self {
             provider,
             enabled: true,
+            active_account_id: None,
+            account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
-            health: ProviderHealth::Ok,
-            auth_state: AuthState::ActionRequired,
-            source_label: None,
-            last_success_at: None,
-            snapshot: None,
+            legacy_display_snapshot: None,
             error: Some("Not refreshed yet".to_string()),
         }
     }
@@ -132,24 +148,86 @@ impl ProviderRuntimeState {
         Self {
             provider,
             enabled: false,
+            active_account_id: None,
+            account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
-            health: ProviderHealth::Ok,
-            auth_state: AuthState::Ready,
-            source_label: None,
-            last_success_at: None,
-            snapshot: None,
+            legacy_display_snapshot: None,
             error: Some("Disabled in config".to_string()),
         }
     }
 
     #[must_use]
-    pub fn status_line(&self) -> String {
+    pub fn status_line(&self, account: Option<&ProviderAccountRuntimeState>) -> String {
         if !self.enabled {
             return "Disabled in config".to_string();
         }
         if self.is_refreshing {
             return "Refreshing...".to_string();
         }
+        if let Some(account) = account {
+            return account.status_line();
+        }
+        if let Some(snapshot) = &self.legacy_display_snapshot {
+            let now = Utc::now();
+            let headline = snapshot.headline_window().map_or_else(
+                || "No usage window".to_string(),
+                |window| {
+                    format!(
+                        "{} {:.0}%",
+                        window.label,
+                        usage_display::displayed_percent(window, now)
+                    )
+                },
+            );
+            return format!("{headline} (stale)");
+        }
+        match self.account_status {
+            AccountSelectionStatus::LoginRequired => "Login required".to_string(),
+            AccountSelectionStatus::SelectionRequired => "Select an account".to_string(),
+            AccountSelectionStatus::Unavailable => "Account unavailable".to_string(),
+            AccountSelectionStatus::Ready => self
+                .error
+                .clone()
+                .unwrap_or_else(|| "No usage data yet".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderAccountRuntimeState {
+    pub provider: ProviderId,
+    pub account_id: String,
+    pub label: String,
+    pub source_label: Option<String>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub snapshot: Option<UsageSnapshot>,
+    pub health: ProviderHealth,
+    pub auth_state: AuthState,
+    pub error: Option<String>,
+}
+
+impl ProviderAccountRuntimeState {
+    #[must_use]
+    pub fn empty(
+        provider: ProviderId,
+        account_id: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider,
+            account_id: account_id.into(),
+            label: label.into(),
+            source_label: None,
+            last_success_at: None,
+            snapshot: None,
+            health: ProviderHealth::Ok,
+            auth_state: AuthState::ActionRequired,
+            error: Some("Not refreshed yet".to_string()),
+        }
+    }
+
+    #[must_use]
+    pub fn status_line(&self) -> String {
         if let Some(snapshot) = &self.snapshot {
             let now = Utc::now();
             let headline = snapshot.headline_window().map_or_else(
@@ -166,11 +244,10 @@ impl ProviderRuntimeState {
                 || self
                     .last_success_at
                     .is_none_or(|t| now - t >= STALE_THRESHOLD);
-            let source = self.source_label.as_deref().unwrap_or("unknown source");
             return if is_stale {
-                format!("{headline} via {source} (stale)")
+                format!("{headline} (stale)")
             } else {
-                format!("{headline} via {source}")
+                headline
             };
         }
         self.error
@@ -182,6 +259,8 @@ impl ProviderRuntimeState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppState {
     pub providers: Vec<ProviderRuntimeState>,
+    #[serde(default)]
+    pub provider_accounts: Vec<ProviderAccountRuntimeState>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -194,6 +273,7 @@ mod tests {
             label: label.to_string(),
             used_percent: 10.0,
             reset_at: None,
+            window_seconds: None,
             reset_description: None,
         }
     }
@@ -219,6 +299,15 @@ mod tests {
     }
 
     #[test]
+    fn cursor_applet_windows_use_total_and_api() {
+        let mut snap = snapshot(ProviderId::Cursor);
+        snap.windows = vec![window("Total"), window("Auto + Composer"), window("API")];
+        let (first, second) = snap.applet_windows();
+        assert_eq!(first.map(|w| w.label.as_str()), Some("Total"));
+        assert_eq!(second.map(|w| w.label.as_str()), Some("API"));
+    }
+
+    #[test]
     fn headline_selects_by_index() {
         let snapshot = snapshot(ProviderId::Codex);
         assert_eq!(
@@ -229,47 +318,52 @@ mod tests {
 
     #[test]
     fn status_line_uses_headline_when_present() {
-        let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let mut account = ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex");
         let mut snapshot = snapshot(ProviderId::Codex);
         snapshot.windows = vec![
             UsageWindow {
                 label: "Session".to_string(),
                 used_percent: 31.0,
                 reset_at: None,
+                window_seconds: None,
                 reset_description: None,
             },
             UsageWindow {
                 label: "Weekly".to_string(),
                 used_percent: 88.0,
                 reset_at: None,
+                window_seconds: None,
                 reset_description: None,
             },
         ];
         snapshot.headline = UsageHeadline::first_available(&snapshot.windows);
-        state.snapshot = Some(snapshot);
-        state.source_label = Some("OAuth".to_string());
-        state.health = ProviderHealth::Ok;
-        state.last_success_at = Some(Utc::now());
+        account.snapshot = Some(snapshot);
+        account.source_label = Some("OAuth".to_string());
+        account.health = ProviderHealth::Ok;
+        account.last_success_at = Some(Utc::now());
 
-        assert_eq!(state.status_line(), "Session 31% via OAuth");
+        assert_eq!(state.status_line(Some(&account)), "Session 31%");
     }
 
     #[test]
     fn status_line_marks_stale_when_refresh_failed() {
-        let mut state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let state = ProviderRuntimeState::empty(ProviderId::Codex);
+        let mut account = ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex");
         let mut snap = snapshot(ProviderId::Codex);
         snap.windows = vec![UsageWindow {
             label: "Session".to_string(),
             used_percent: 31.0,
             reset_at: None,
+            window_seconds: None,
             reset_description: None,
         }];
         snap.headline = UsageHeadline(0);
-        state.snapshot = Some(snap);
-        state.source_label = Some("OAuth".to_string());
-        state.health = ProviderHealth::Error;
-        state.last_success_at = Some(Utc::now());
+        account.snapshot = Some(snap);
+        account.source_label = Some("OAuth".to_string());
+        account.health = ProviderHealth::Error;
+        account.last_success_at = Some(Utc::now());
 
-        assert_eq!(state.status_line(), "Session 31% via OAuth (stale)");
+        assert_eq!(state.status_line(Some(&account)), "Session 31% (stale)");
     }
 }

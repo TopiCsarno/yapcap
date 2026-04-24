@@ -2,21 +2,33 @@
 
 use crate::error::ConfigError;
 use crate::model::ProviderId;
+use chrono::{DateTime, Utc};
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 use dirs::{cache_dir, state_dir};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
 
-#[derive(Debug, Clone, CosmicConfigEntry, Eq, PartialEq)]
-#[version = 1]
+#[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
+#[version = 200]
 pub struct Config {
     pub refresh_interval_seconds: u64,
+    pub reset_time_format: ResetTimeFormat,
+    pub usage_amount_format: UsageAmountFormat,
+    pub panel_icon_style: PanelIconStyle,
+    #[serde(default = "default_provider_visibility_mode")]
+    pub provider_visibility_mode: ProviderVisibilityMode,
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
+    pub active_codex_account_id: Option<String>,
+    pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
+    pub active_claude_account_id: Option<String>,
+    pub claude_managed_accounts: Vec<ManagedClaudeAccountConfig>,
+    pub active_cursor_account_id: Option<String>,
+    pub cursor_managed_accounts: Vec<ManagedCursorAccountConfig>,
     pub cursor_browser: Browser,
     pub cursor_profile_id: Option<String>,
     pub log_level: String,
@@ -25,15 +37,29 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            refresh_interval_seconds: 60,
+            refresh_interval_seconds: 300,
+            reset_time_format: ResetTimeFormat::Relative,
+            usage_amount_format: UsageAmountFormat::Used,
+            panel_icon_style: PanelIconStyle::LogoAndBars,
+            provider_visibility_mode: ProviderVisibilityMode::AutoInitPending,
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
+            active_codex_account_id: None,
+            codex_managed_accounts: Vec::new(),
+            active_claude_account_id: None,
+            claude_managed_accounts: Vec::new(),
+            active_cursor_account_id: None,
+            cursor_managed_accounts: Vec::new(),
             cursor_browser: Browser::Brave,
             cursor_profile_id: None,
             log_level: "info".to_string(),
         }
     }
+}
+
+fn default_provider_visibility_mode() -> ProviderVisibilityMode {
+    ProviderVisibilityMode::UserManaged
 }
 
 impl Config {
@@ -55,7 +81,94 @@ impl Config {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelIconStyle {
+    #[default]
+    LogoAndBars,
+    BarsOnly,
+    LogoAndPercent,
+    PercentOnly,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetTimeFormat {
+    #[default]
+    Relative,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageAmountFormat {
+    #[default]
+    Used,
+    Left,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderVisibilityMode {
+    AutoInitPending,
+    #[default]
+    UserManaged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedCodexAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub codex_home: PathBuf,
+    pub email: Option<String>,
+    pub provider_account_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedClaudeAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub config_dir: PathBuf,
+    pub email: Option<String>,
+    pub organization: Option<String>,
+    pub subscription_type: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedCursorAccountConfig {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default, deserialize_with = "deserialize_cursor_email")]
+    pub email: String,
+    pub label: String,
+    #[serde(alias = "profile_root")]
+    pub account_root: PathBuf,
+    #[serde(default)]
+    pub credential_source: CursorCredentialSource,
+    #[serde(default)]
+    pub browser: Option<Browser>,
+    pub display_name: Option<String>,
+    pub plan: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorCredentialSource {
+    ManagedProfile,
+    #[default]
+    ImportedBrowserProfile,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Browser {
     #[default]
@@ -75,6 +188,14 @@ pub struct BrowserProfile {
 }
 
 impl Browser {
+    pub const ALL: [Self; 5] = [
+        Self::Brave,
+        Self::Chrome,
+        Self::Chromium,
+        Self::Edge,
+        Self::Firefox,
+    ];
+
     fn from_env(name: &str) -> Option<Self> {
         let raw = std::env::var(name).ok()?;
         Self::parse(&raw)
@@ -112,14 +233,6 @@ impl Browser {
             )),
             Self::Firefox => discover_firefox_profiles(self, &home),
         }
-    }
-
-    #[must_use]
-    pub fn profile_by_id(self, profiles: &[BrowserProfile], id: &str) -> Option<BrowserProfile> {
-        profiles
-            .iter()
-            .find(|profile| profile.browser == self && profile.id == id)
-            .cloned()
     }
 
     #[must_use]
@@ -169,6 +282,23 @@ impl Browser {
             cookie_db_path,
         }
     }
+}
+
+fn deserialize_cursor_email<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum EmailValue {
+        Text(String),
+        Maybe(Option<String>),
+    }
+
+    Ok(match EmailValue::deserialize(deserializer)? {
+        EmailValue::Text(value) => value,
+        EmailValue::Maybe(value) => value.unwrap_or_default(),
+    })
 }
 
 fn discover_chromium_profiles(browser: Browser, root: &Path) -> Vec<BrowserProfile> {
@@ -306,6 +436,9 @@ fn push_unique(values: &mut Vec<String>, value: Option<String>) {
 pub struct AppPaths {
     pub cache_dir: PathBuf,
     pub snapshot_file: PathBuf,
+    pub codex_accounts_dir: PathBuf,
+    pub claude_accounts_dir: PathBuf,
+    pub cursor_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -315,10 +448,16 @@ pub fn paths() -> AppPaths {
     let state_root = state_dir().unwrap_or_else(|| PathBuf::from("."));
     let cache_dir = cache_root.join("yapcap");
     let state_dir = state_root.join("yapcap");
+    let codex_accounts_dir = state_dir.join("codex-accounts");
+    let claude_accounts_dir = state_dir.join("claude-accounts");
+    let cursor_accounts_dir = state_dir.join("cursor-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
         cache_dir,
+        codex_accounts_dir,
+        claude_accounts_dir,
+        cursor_accounts_dir,
         log_dir,
     }
 }
@@ -347,14 +486,83 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Codex));
         assert!(config.provider_enabled(ProviderId::Claude));
         assert!(config.provider_enabled(ProviderId::Cursor));
-        assert_eq!(config.refresh_interval_seconds, 60);
+        assert_eq!(
+            config.provider_visibility_mode,
+            ProviderVisibilityMode::AutoInitPending
+        );
+        assert_eq!(config.refresh_interval_seconds, 300);
+        assert_eq!(config.reset_time_format, ResetTimeFormat::Relative);
+        assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
+        assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
         assert_eq!(config.cursor_profile_id, None);
+    }
+
+    #[test]
+    fn missing_provider_visibility_mode_defaults_to_user_managed() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "refresh_interval_seconds": 60,
+                "reset_time_format": "relative",
+                "usage_amount_format": "used",
+                "panel_icon_style": "logo_and_bars",
+                "codex_enabled": true,
+                "claude_enabled": true,
+                "cursor_enabled": true,
+                "active_codex_account_id": null,
+                "codex_managed_accounts": [],
+                "active_claude_account_id": null,
+                "claude_managed_accounts": [],
+                "active_cursor_account_id": null,
+                "cursor_managed_accounts": [],
+                "cursor_browser": "brave",
+                "cursor_profile_id": null,
+                "log_level": "info"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.provider_visibility_mode,
+            ProviderVisibilityMode::UserManaged
+        );
     }
 
     #[test]
     fn cursor_browser_default_is_brave() {
         let config = Config::default();
         assert_eq!(config.cursor_browser.label(), "Brave");
+    }
+
+    #[test]
+    fn panel_icon_style_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&PanelIconStyle::LogoAndBars).unwrap(),
+            "\"logo_and_bars\""
+        );
+        assert_eq!(
+            serde_json::from_str::<PanelIconStyle>("\"bars_only\"").unwrap(),
+            PanelIconStyle::BarsOnly
+        );
+        assert_eq!(
+            serde_json::from_str::<PanelIconStyle>("\"logo_and_percent\"").unwrap(),
+            PanelIconStyle::LogoAndPercent
+        );
+        assert_eq!(
+            serde_json::from_str::<PanelIconStyle>("\"percent_only\"").unwrap(),
+            PanelIconStyle::PercentOnly
+        );
+    }
+
+    #[test]
+    fn usage_amount_format_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&UsageAmountFormat::Used).unwrap(),
+            "\"used\""
+        );
+        assert_eq!(
+            serde_json::from_str::<UsageAmountFormat>("\"left\"").unwrap(),
+            UsageAmountFormat::Left
+        );
     }
 
     #[test]
@@ -396,9 +604,10 @@ mod tests {
             ["Default", "Profile 1", "Profile 2"]
         );
         assert_eq!(
-            Browser::Chromium
-                .profile_by_id(&profiles, "Profile 1")
-                .map(|profile| profile.cookie_db_path),
+            profiles
+                .iter()
+                .find(|p| p.browser == Browser::Chromium && p.id == "Profile 1")
+                .map(|p| p.cookie_db_path.clone()),
             Some(root.join("Profile 1/Cookies"))
         );
     }

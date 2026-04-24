@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::model::{AppState, ProviderId, ProviderRuntimeState};
+use crate::model::{
+    AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState,
+};
 use chrono::Utc;
 
 impl AppState {
@@ -11,6 +13,7 @@ impl AppState {
                 .into_iter()
                 .map(ProviderRuntimeState::empty)
                 .collect(),
+            provider_accounts: Vec::new(),
             updated_at: Utc::now(),
         }
     }
@@ -26,6 +29,23 @@ impl AppState {
         self.providers
             .iter_mut()
             .find(|entry| entry.provider == provider)
+    }
+
+    #[must_use]
+    pub fn active_account(&self, provider: ProviderId) -> Option<&ProviderAccountRuntimeState> {
+        let provider_state = self.provider(provider)?;
+        let active_id = provider_state.active_account_id.as_ref()?;
+        self.provider_accounts
+            .iter()
+            .find(|entry| entry.provider == provider && entry.account_id == *active_id)
+    }
+
+    #[must_use]
+    pub fn accounts_for(&self, provider: ProviderId) -> Vec<&ProviderAccountRuntimeState> {
+        self.provider_accounts
+            .iter()
+            .filter(|entry| entry.provider == provider)
+            .collect()
     }
 
     pub fn upsert_provider(&mut self, provider_state: ProviderRuntimeState) {
@@ -49,11 +69,22 @@ impl AppState {
         if enabled {
             state.provider = provider;
             state.enabled = true;
-            state.is_refreshing = true;
+            state.is_refreshing = state.account_status == AccountSelectionStatus::Ready;
         } else {
             state = ProviderRuntimeState::disabled(provider);
         }
         self.upsert_provider(state);
+    }
+
+    pub fn upsert_account(&mut self, account_state: ProviderAccountRuntimeState) {
+        if let Some(existing) = self.provider_accounts.iter_mut().find(|entry| {
+            entry.provider == account_state.provider && entry.account_id == account_state.account_id
+        }) {
+            *existing = account_state;
+        } else {
+            self.provider_accounts.push(account_state);
+        }
+        self.updated_at = Utc::now();
     }
 }
 
@@ -100,14 +131,15 @@ mod tests {
     fn mark_provider_refreshing_preserves_previous_snapshot() {
         let mut state = AppState::empty();
         let mut codex = ProviderRuntimeState::empty(ProviderId::Codex);
-        codex.snapshot = Some(snapshot(ProviderId::Codex));
+        codex.legacy_display_snapshot = Some(snapshot(ProviderId::Codex));
+        codex.account_status = AccountSelectionStatus::Ready;
         state.upsert_provider(codex);
 
         state.mark_provider_refreshing(ProviderId::Codex, true);
 
         let codex = state.provider(ProviderId::Codex).unwrap();
         assert!(codex.is_refreshing);
-        assert!(codex.snapshot.is_some());
+        assert!(codex.legacy_display_snapshot.is_some());
     }
 
     #[test]

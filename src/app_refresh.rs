@@ -3,6 +3,7 @@
 use crate::app::Message;
 use crate::config::Config;
 use crate::model::{AppState, ProviderId};
+use crate::providers::registry;
 use crate::runtime;
 use cosmic::app::Task;
 
@@ -10,21 +11,9 @@ pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Mes
     let mut tasks = Vec::new();
 
     for provider in ProviderId::ALL {
-        let enabled = config.provider_enabled(provider);
-        let already_refreshing = state
-            .provider(provider)
-            .is_some_and(|entry| entry.is_refreshing);
-        state.mark_provider_refreshing(provider, enabled);
-
-        if enabled && !already_refreshing {
-            let config = config.clone();
-            let previous = state.provider(provider).cloned();
-            tasks.push(Task::perform(
-                async move { runtime::refresh_one(config, provider, previous).await },
-                |provider_state| {
-                    cosmic::Action::App(Message::ProviderRefreshed(Box::new(provider_state)))
-                },
-            ));
+        let task = refresh_provider_task(config, state, provider);
+        if task.units() > 0 {
+            tasks.push(task);
         }
     }
 
@@ -35,14 +24,82 @@ pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Mes
     }
 }
 
+pub fn refresh_provider_task(
+    config: &Config,
+    state: &mut AppState,
+    provider: ProviderId,
+) -> Task<Message> {
+    let enabled = config.provider_enabled(provider);
+    let already_refreshing = state
+        .provider(provider)
+        .is_some_and(|entry| entry.is_refreshing);
+    state.mark_provider_refreshing(provider, enabled);
+
+    let ready = state
+        .provider(provider)
+        .is_some_and(|entry| entry.account_status == crate::model::AccountSelectionStatus::Ready);
+    if !enabled || !ready || already_refreshing {
+        return Task::none();
+    }
+
+    let config = config.clone();
+    let previous = state.provider(provider).cloned();
+    let previous_accounts = state
+        .accounts_for(provider)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    Task::perform(
+        async move { runtime::refresh_one(config, provider, previous, previous_accounts).await },
+        |refresh_result| cosmic::Action::App(Message::ProviderRefreshed(Box::new(refresh_result))),
+    )
+}
+
+pub fn refresh_provider_account_statuses_task(
+    config: &Config,
+    state: &AppState,
+    provider: ProviderId,
+) -> Task<Message> {
+    if !config.provider_enabled(provider) || !registry::supports_background_status_refresh(provider)
+    {
+        return Task::none();
+    }
+
+    let config = config.clone();
+    let previous_accounts = state
+        .accounts_for(provider)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    Task::perform(
+        async move {
+            runtime::refresh_provider_account_statuses(provider, config, previous_accounts).await
+        },
+        move |accounts| {
+            cosmic::Action::App(Message::ProviderAccountStatusesRefreshed(
+                provider, accounts,
+            ))
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::AccountSelectionStatus;
+
+    fn mark_all_ready(state: &mut AppState) {
+        for provider in &mut state.providers {
+            provider.account_status = AccountSelectionStatus::Ready;
+            provider.active_account_id = Some("default".to_string());
+        }
+    }
 
     #[test]
     fn refresh_tasks_mark_enabled_providers_refreshing() {
         let config = Config::default();
         let mut state = AppState::empty();
+        mark_all_ready(&mut state);
 
         let _tasks = refresh_provider_tasks(&config, &mut state);
 
@@ -60,6 +117,7 @@ mod tests {
             ..Config::default()
         };
         let mut state = AppState::empty();
+        mark_all_ready(&mut state);
         for p in &mut state.providers {
             p.enabled = config.provider_enabled(p.provider);
         }
@@ -75,6 +133,7 @@ mod tests {
     fn refresh_tasks_skip_already_refreshing_provider() {
         let config = Config::default();
         let mut state = AppState::empty();
+        mark_all_ready(&mut state);
         state.mark_provider_refreshing(ProviderId::Codex, true);
 
         let _tasks = refresh_provider_tasks(&config, &mut state);

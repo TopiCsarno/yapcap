@@ -7,6 +7,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
+pub const OFFLINE_MESSAGE: &str = "No internet connection. Information is not up to date.";
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -44,6 +45,27 @@ impl From<CursorError> for AppError {
 
 impl AppError {
     #[must_use]
+    pub fn user_message(&self) -> String {
+        if self.is_network_unavailable() {
+            OFFLINE_MESSAGE.to_string()
+        } else {
+            format!("{self:#}")
+        }
+    }
+
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::Provider(error) => error.is_network_unavailable(),
+            Self::Auth(_)
+            | Self::Browser(_)
+            | Self::Cache(_)
+            | Self::Config(_)
+            | Self::Logging(_) => false,
+        }
+    }
+
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Auth(_) => true,
@@ -66,8 +88,6 @@ impl AppError {
 pub enum AuthError {
     #[error("could not resolve CODEX_HOME or ~/.codex")]
     ResolveCodexHome,
-    #[error("could not resolve CLAUDE_HOME or ~/.claude")]
-    ResolveClaudeHome,
     #[error("failed to read codex auth file {path}")]
     ReadCodexAuthFile {
         path: PathBuf,
@@ -216,6 +236,15 @@ pub enum ProviderError {
 
 impl ProviderError {
     #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::Codex(error) => error.is_network_unavailable(),
+            Self::Claude(error) => error.is_network_unavailable(),
+            Self::Cursor(error) => error.is_network_unavailable(),
+        }
+    }
+
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Codex(error) => error.requires_user_action(),
@@ -233,6 +262,10 @@ impl ProviderError {
     }
 }
 
+fn request_could_not_reach_network(error: &reqwest::Error) -> bool {
+    error.is_connect() || (!error.is_status() && error.is_timeout())
+}
+
 #[derive(Debug, Error)]
 pub enum CodexError {
     #[error(transparent)]
@@ -248,7 +281,7 @@ pub enum CodexError {
     #[error("codex usage endpoint returned HTTP {status}{details}")]
     UsageHttp { status: u16, details: String },
     #[error("failed to decode codex usage response")]
-    DecodeUsage(#[source] reqwest::Error),
+    DecodeUsageJson(#[source] serde_json::Error),
     #[error("codex token refresh not available (missing refresh_token in auth.json)")]
     RefreshUnavailable,
     #[error("codex token refresh request failed")]
@@ -268,6 +301,16 @@ pub enum CodexError {
 }
 
 impl CodexError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) | Self::RefreshRequest(source) => {
+                request_could_not_reach_network(source)
+            }
+            _ => false,
+        }
+    }
+
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(
@@ -299,6 +342,8 @@ pub enum ClaudeError {
     CliTimeout { timeout: Duration },
     #[error("claude auth status failed with exit status {status}")]
     CliStatusFailed { status: String },
+    #[error("failed to decode claude auth status JSON")]
+    DecodeCliStatus(#[source] serde_json::Error),
     #[error("claude usage endpoint rate limited (429)")]
     RateLimited,
     #[error("claude usage endpoint returned HTTP {status}")]
@@ -321,6 +366,14 @@ pub enum ClaudeError {
 
 impl ClaudeError {
     #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
@@ -332,6 +385,7 @@ impl ClaudeError {
                 | Self::CliIo(_)
                 | Self::CliTimeout { .. }
                 | Self::CliStatusFailed { .. }
+                | Self::DecodeCliStatus(_)
         )
     }
 
@@ -368,6 +422,16 @@ pub enum CursorError {
 }
 
 impl CursorError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) | Self::IdentityRequest(source) => {
+                request_could_not_reach_network(source)
+            }
+            _ => false,
+        }
+    }
+
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(self, Self::Browser(error) if error.requires_user_action())

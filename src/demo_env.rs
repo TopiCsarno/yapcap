@@ -3,8 +3,8 @@
 use crate::config::Config;
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderCost,
-    ProviderHealth, ProviderId, ProviderIdentity, ProviderRuntimeState, UsageHeadline, UsageSnapshot,
-    UsageWindow,
+    ProviderHealth, ProviderId, ProviderIdentity, ProviderRuntimeState, UsageHeadline,
+    UsageSnapshot, UsageWindow,
 };
 use chrono::{Duration, Utc};
 
@@ -67,7 +67,10 @@ pub fn apply(config: &Config, state: &mut AppState) {
         });
     }
     state.updated_at = Utc::now();
-    tracing::warn!(env = DEMO_ENV, "using synthetic usage snapshots (see demo_env)");
+    tracing::warn!(
+        env = DEMO_ENV,
+        "using synthetic usage snapshots (see demo_env)"
+    );
 }
 
 fn demo_source(provider: ProviderId) -> String {

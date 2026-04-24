@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 pub mod claude;
-pub mod claude_refresh;
 pub mod codex;
-pub mod codex_refresh;
 pub mod cursor;
+pub mod interface;
+pub mod registry;

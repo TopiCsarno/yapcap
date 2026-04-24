@@ -18,36 +18,81 @@ use tempfile::NamedTempFile;
 
 use crate::error::{BrowserError, Result};
 
-const CURSOR_COOKIE_NAME: &str = "WorkosCursorSessionToken";
-const CURSOR_COOKIE_DOMAIN: &str = "cursor.com";
+const CURSOR_COOKIE_NAMES: [&str; 3] = [
+    "WorkosCursorSessionToken",
+    "__Secure-next-auth.session-token",
+    "next-auth.session-token",
+];
+const CURSOR_COOKIE_DOMAINS: [&str; 4] = [
+    "cursor.com",
+    "www.cursor.com",
+    "cursor.sh",
+    "authenticator.cursor.sh",
+];
 
-pub async fn load_cursor_cookie_chromium(
+pub async fn load_cursor_cookie_header_chromium(
     cookie_db_path: &Path,
     application: &str,
-) -> Result<String, BrowserError> {
-    load_chromium_cookie(
-        cookie_db_path,
-        application,
-        CURSOR_COOKIE_NAME,
-        CURSOR_COOKIE_DOMAIN,
-    )
-    .await
-}
-
-async fn load_chromium_cookie(
-    cookie_db_path: &Path,
-    application: &str,
-    cookie_name: &str,
-    cookie_domain: &str,
 ) -> Result<String, BrowserError> {
     let password = load_safe_storage_password(application).await?;
-    let encrypted_cookie = read_cookie_blob(cookie_db_path, cookie_name, cookie_domain)?;
-    let decrypted = decrypt_chromium_cookie(&encrypted_cookie, &password)?;
-    Ok(format!("{cookie_name}={decrypted}"))
+    let mut cookies = Vec::new();
+    for cookie_name in CURSOR_COOKIE_NAMES {
+        if let Some(cookie) = load_first_chromium_cookie(cookie_db_path, &password, cookie_name)? {
+            cookies.push(cookie);
+        }
+    }
+    cookie_header(&cookies)
 }
 
-pub fn load_cursor_cookie_firefox(cookie_db_path: &Path) -> Result<String, BrowserError> {
-    load_firefox_cookie(cookie_db_path, CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN)
+pub fn load_cursor_cookie_header_firefox(cookie_db_path: &Path) -> Result<String, BrowserError> {
+    let mut cookies = Vec::new();
+    for cookie_name in CURSOR_COOKIE_NAMES {
+        if let Some(cookie) = load_first_firefox_cookie(cookie_db_path, cookie_name)? {
+            cookies.push(cookie);
+        }
+    }
+    cookie_header(&cookies)
+}
+
+fn cookie_header(cookies: &[String]) -> Result<String, BrowserError> {
+    if cookies.is_empty() {
+        return Err(BrowserError::CookieNotFound(
+            rusqlite::Error::QueryReturnedNoRows,
+        ));
+    }
+    Ok(cookies.join("; "))
+}
+
+fn load_first_chromium_cookie(
+    cookie_db_path: &Path,
+    password: &str,
+    cookie_name: &str,
+) -> Result<Option<String>, BrowserError> {
+    for cookie_domain in CURSOR_COOKIE_DOMAINS {
+        match read_cookie_blob(cookie_db_path, cookie_name, cookie_domain) {
+            Ok(encrypted_cookie) => {
+                let decrypted = decrypt_chromium_cookie(&encrypted_cookie, password)?;
+                return Ok(Some(format!("{cookie_name}={decrypted}")));
+            }
+            Err(BrowserError::CookieNotFound(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
+}
+
+fn load_first_firefox_cookie(
+    cookie_db_path: &Path,
+    cookie_name: &str,
+) -> Result<Option<String>, BrowserError> {
+    for cookie_domain in CURSOR_COOKIE_DOMAINS {
+        match load_firefox_cookie(cookie_db_path, cookie_name, cookie_domain) {
+            Ok(cookie) => return Ok(Some(cookie)),
+            Err(BrowserError::CookieNotFound(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
 }
 
 fn load_firefox_cookie(
@@ -282,6 +327,8 @@ mod tests {
 
     const CHROMIUM_SQL: &str = include_str!("../fixtures/browser/chromium_cookies.sql");
     const FIREFOX_SQL: &str = include_str!("../fixtures/browser/firefox_cookies.sql");
+    const TEST_CURSOR_COOKIE_NAME: &str = "WorkosCursorSessionToken";
+    const TEST_CURSOR_COOKIE_DOMAIN: &str = "cursor.com";
 
     fn chromium_cookies_db(
         name: &str,
@@ -367,20 +414,35 @@ mod tests {
     #[test]
     fn chromium_read_cookie_blob_returns_encrypted_bytes() {
         let encrypted = vec![1u8, 2, 3, 4];
-        let db = chromium_cookies_db(CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN, "", &encrypted);
-        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
+        let db = chromium_cookies_db(
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
+            "",
+            &encrypted,
+        );
+        let blob = read_cookie_blob(
+            db.path(),
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
+        )
+        .unwrap();
         assert_eq!(blob, encrypted);
     }
 
     #[test]
     fn chromium_read_cookie_blob_falls_back_to_plaintext_value() {
         let db = chromium_cookies_db(
-            CURSOR_COOKIE_NAME,
-            CURSOR_COOKIE_DOMAIN,
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
             "plain_session",
             &[],
         );
-        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
+        let blob = read_cookie_blob(
+            db.path(),
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
+        )
+        .unwrap();
         assert_eq!(blob, b"plain_session");
     }
 
@@ -388,12 +450,17 @@ mod tests {
     fn chromium_read_cookie_blob_matches_dot_prefixed_domain() {
         let encrypted = vec![5u8, 6];
         let db = chromium_cookies_db(
-            CURSOR_COOKIE_NAME,
-            &format!(".{CURSOR_COOKIE_DOMAIN}"),
+            TEST_CURSOR_COOKIE_NAME,
+            &format!(".{TEST_CURSOR_COOKIE_DOMAIN}"),
             "",
             &encrypted,
         );
-        let blob = read_cookie_blob(db.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap();
+        let blob = read_cookie_blob(
+            db.path(),
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
+        )
+        .unwrap();
         assert_eq!(blob, encrypted);
     }
 
@@ -410,8 +477,12 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        let err =
-            read_cookie_blob(file.path(), CURSOR_COOKIE_NAME, CURSOR_COOKIE_DOMAIN).unwrap_err();
+        let err = read_cookie_blob(
+            file.path(),
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
+        )
+        .unwrap_err();
         assert!(matches!(err, BrowserError::CookieNotFound(_)));
     }
 
@@ -427,40 +498,43 @@ mod tests {
     #[test]
     fn chromium_fixture_loads_without_firefox_cookie_value() {
         let db = load_db(CHROMIUM_SQL);
-        let result = load_cursor_cookie_firefox(db.path());
+        let result = load_cursor_cookie_header_firefox(db.path());
         assert!(result.is_err());
     }
 
     #[test]
     fn firefox_fixture_returns_cursor_session_token() {
         let db = load_db(FIREFOX_SQL);
-        let result = load_cursor_cookie_firefox(db.path()).unwrap();
+        let result = load_cursor_cookie_header_firefox(db.path()).unwrap();
         assert_eq!(result, "WorkosCursorSessionToken=cursor-test-session-token");
     }
 
     #[test]
     fn firefox_extracts_cookie_exact_domain() {
         let db = firefox_cookies_db(
-            CURSOR_COOKIE_NAME,
-            CURSOR_COOKIE_DOMAIN,
+            TEST_CURSOR_COOKIE_NAME,
+            TEST_CURSOR_COOKIE_DOMAIN,
             "firefox_session_value",
         );
-        let result = load_cursor_cookie_firefox(db.path()).unwrap();
+        let result = load_cursor_cookie_header_firefox(db.path()).unwrap();
         assert_eq!(
             result,
-            format!("{CURSOR_COOKIE_NAME}=firefox_session_value")
+            format!("{TEST_CURSOR_COOKIE_NAME}=firefox_session_value")
         );
     }
 
     #[test]
     fn firefox_extracts_cookie_dot_prefixed_domain() {
         let db = firefox_cookies_db(
-            CURSOR_COOKIE_NAME,
-            &format!(".{CURSOR_COOKIE_DOMAIN}"),
+            TEST_CURSOR_COOKIE_NAME,
+            &format!(".{TEST_CURSOR_COOKIE_DOMAIN}"),
             "dot_domain_value",
         );
-        let result = load_cursor_cookie_firefox(db.path()).unwrap();
-        assert_eq!(result, format!("{CURSOR_COOKIE_NAME}=dot_domain_value"));
+        let result = load_cursor_cookie_header_firefox(db.path()).unwrap();
+        assert_eq!(
+            result,
+            format!("{TEST_CURSOR_COOKIE_NAME}=dot_domain_value")
+        );
     }
 
     #[test]
@@ -472,14 +546,15 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        let err = load_cursor_cookie_firefox(file.path()).unwrap_err();
+        let err = load_cursor_cookie_header_firefox(file.path()).unwrap_err();
         assert!(matches!(err, BrowserError::CookieNotFound(_)));
     }
 
     #[test]
     fn firefox_returns_error_for_missing_db() {
-        let err = load_cursor_cookie_firefox(Path::new("/tmp/nonexistent_cookies_yapcap.sqlite"))
-            .unwrap_err();
+        let err =
+            load_cursor_cookie_header_firefox(Path::new("/tmp/nonexistent_cookies_yapcap.sqlite"))
+                .unwrap_err();
         assert!(matches!(err, BrowserError::CookieDatabaseNotFound { .. }));
     }
 }

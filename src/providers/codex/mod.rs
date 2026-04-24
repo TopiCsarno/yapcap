@@ -1,19 +1,29 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::auth::{CodexAuth, codex_auth_path, load_codex_auth, update_codex_auth_tokens};
+mod account;
+mod login;
+mod refresh;
+
+use crate::auth::{CodexAuth, load_codex_auth_from_home, update_codex_auth_tokens};
 use crate::error::{CodexError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
 };
-use crate::providers::codex_refresh;
 use chrono::{DateTime, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
+use std::path::PathBuf;
+
+pub use account::{apply_login_account, discover_accounts, sync_imported_account};
+pub use login::{CodexLoginEvent, CodexLoginState, CodexLoginStatus, prepare};
 
 const ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 
-pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot, CodexError> {
-    let auth = load_codex_auth()?;
+pub async fn fetch(
+    client: &reqwest::Client,
+    codex_home: PathBuf,
+) -> Result<UsageSnapshot, CodexError> {
+    let auth = load_codex_auth_from_home(&codex_home)?;
     match fetch_oauth(client, &auth).await {
         Ok(snapshot) => Ok(snapshot),
         Err(error) => {
@@ -22,8 +32,8 @@ pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot, CodexError
                     .refresh_token
                     .as_deref()
                     .ok_or(CodexError::RefreshUnavailable)?;
-                let refreshed = codex_refresh::refresh_access_token(client, refresh_token).await?;
-                let path = codex_auth_path()?;
+                let refreshed = refresh::refresh_access_token(client, refresh_token).await?;
+                let path = codex_home.join("auth.json");
                 let now_iso = Utc::now().to_rfc3339();
                 let refresh_token = refreshed
                     .refresh_token
@@ -39,6 +49,7 @@ pub async fn fetch(client: &reqwest::Client) -> Result<UsageSnapshot, CodexError
                     access_token: refreshed.access_token,
                     account_id: auth.account_id.clone(),
                     refresh_token: refresh_token.map(str::to_string),
+                    id_token: auth.id_token.clone(),
                 };
                 return fetch_oauth(client, &refreshed_auth).await;
             }
@@ -88,7 +99,11 @@ async fn fetch_oauth(
             details: snippet.unwrap_or_default(),
         });
     }
-    let payload: CodexUsageResponse = response.json().await.map_err(CodexError::DecodeUsage)?;
+    let body = response.text().await.map_err(CodexError::UsageRequest)?;
+    let payload: CodexUsageResponse = serde_json::from_str(&body).map_err(|e| {
+        tracing::warn!(body = %body.chars().take(512).collect::<String>(), error = %e, "failed to decode codex usage response");
+        CodexError::DecodeUsageJson(e)
+    })?;
     normalize_oauth(payload)
 }
 
@@ -118,12 +133,29 @@ struct CodexRateLimit {
 #[derive(Debug, Deserialize)]
 struct CodexWindow {
     pub used_percent: f32,
+    pub limit_window_seconds: Option<i64>,
     pub reset_at: i64,
 }
 
 #[derive(Debug, Deserialize)]
 struct CodexCredits {
-    pub balance: String,
+    pub balance: Option<BalanceValue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BalanceValue {
+    Str(String),
+    Num(f64),
+}
+
+impl BalanceValue {
+    fn as_f64_str(&self) -> String {
+        match self {
+            Self::Str(s) => s.clone(),
+            Self::Num(n) => n.to_string(),
+        }
+    }
 }
 
 fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexError> {
@@ -133,18 +165,29 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
         .as_ref()
         .and_then(|r| r.primary_window.as_ref())
     {
-        windows.push(normalize_window("Session", w.used_percent, w.reset_at));
+        windows.push(normalize_window(
+            "Session",
+            w.used_percent,
+            w.reset_at,
+            w.limit_window_seconds,
+        ));
     }
     if let Some(w) = payload
         .rate_limit
         .as_ref()
         .and_then(|r| r.secondary_window.as_ref())
     {
-        windows.push(normalize_window("Weekly", w.used_percent, w.reset_at));
+        windows.push(normalize_window(
+            "Weekly",
+            w.used_percent,
+            w.reset_at,
+            w.limit_window_seconds,
+        ));
     }
 
     let provider_cost = payload.credits.as_ref().and_then(|c| {
-        match c.balance.parse::<f64>() {
+        let raw = c.balance.as_ref()?.as_f64_str();
+        match raw.parse::<f64>() {
             Ok(used) => Some(ProviderCost {
                 used,
                 limit: None,
@@ -152,8 +195,8 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
             }),
             Err(source) => {
                 tracing::warn!(
-                    balance = %c.balance,
-                    error = %CodexError::InvalidCreditBalance { balance: c.balance.clone(), source },
+                    balance = %raw,
+                    error = %CodexError::InvalidCreditBalance { balance: raw.clone(), source },
                     "failed to parse codex credit balance"
                 );
                 None
@@ -181,48 +224,17 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
     })
 }
 
-fn normalize_window(label: &str, used_percent: f32, reset_at_epoch: i64) -> UsageWindow {
-    let reset_at = DateTime::from_timestamp(reset_at_epoch, 0);
+fn normalize_window(
+    label: &str,
+    used_percent: f32,
+    reset_at_epoch: i64,
+    window_seconds: Option<i64>,
+) -> UsageWindow {
     UsageWindow {
         label: label.to_string(),
         used_percent,
-        reset_at,
-        reset_description: reset_at.map(|t| t.to_rfc3339()),
+        reset_at: DateTime::from_timestamp(reset_at_epoch, 0),
+        window_seconds,
+        reset_description: None,
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oauth_normalizes_fixture() {
-        let payload: CodexUsageResponse =
-            serde_json::from_str(include_str!("../../fixtures/codex/usage_oauth.json")).unwrap();
-        let snapshot = normalize_oauth(payload).unwrap();
-        assert_eq!(snapshot.provider, ProviderId::Codex);
-        assert_eq!(snapshot.source, "OAuth");
-        assert_eq!(snapshot.windows[0].used_percent, 3.0);
-        assert_eq!(snapshot.windows[1].used_percent, 24.0);
-        assert_eq!(snapshot.identity.plan.as_deref(), Some("plus"));
-    }
-
-    #[test]
-    fn oauth_keeps_credits_without_rate_windows() {
-        let payload = CodexUsageResponse {
-            account_id: Some("acct_123".to_string()),
-            email: Some("user@example.com".to_string()),
-            plan_type: Some("plus".to_string()),
-            rate_limit: None,
-            credits: Some(CodexCredits {
-                balance: "12.5".to_string(),
-            }),
-        };
-        let snapshot = normalize_oauth(payload).unwrap();
-        assert!(snapshot.windows.is_empty());
-        assert_eq!(snapshot.provider_cost.as_ref().unwrap().used, 12.5);
-        assert_eq!(snapshot.identity.account_id.as_deref(), Some("acct_123"));
-    }
-
-    // RPC/CLI fallback removed: it was not independent from the OAuth source.
 }

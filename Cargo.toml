@@ -33,7 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 i18n-embed-fl = "0.10"
 pbkdf2 = "0.12"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rust-embed = "8.7.2"
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }

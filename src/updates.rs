@@ -3,7 +3,8 @@
 use serde::Deserialize;
 
 const DEFAULT_URL: &str = "https://api.github.com/repos/TopiCsarno/yapcap/releases/latest";
-const URL_OVERRIDE_ENV: &str = "YAPCAP_UPDATE_URL";
+#[cfg(debug_assertions)]
+const DEBUG_UPDATE_AVAILABLE_ENV: &str = "YAPCAP_DEBUG_UPDATE_AVAILABLE";
 const USER_AGENT: &str = concat!("yapcap/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,8 +22,12 @@ struct GithubRelease {
 }
 
 pub async fn check(client: &reqwest::Client) -> UpdateStatus {
-    let url = std::env::var(URL_OVERRIDE_ENV).unwrap_or_else(|_| DEFAULT_URL.to_string());
-    match fetch_release(client, &url).await {
+    #[cfg(debug_assertions)]
+    if let Ok(value) = std::env::var(DEBUG_UPDATE_AVAILABLE_ENV) {
+        return debug_update_available_status(&value);
+    }
+
+    match fetch_release(client, DEFAULT_URL).await {
         Ok(release) => {
             let current = env!("CARGO_PKG_VERSION");
             if is_newer(&release.tag_name, current) {
@@ -39,6 +44,19 @@ pub async fn check(client: &reqwest::Client) -> UpdateStatus {
     }
 }
 
+#[cfg(any(debug_assertions, test))]
+fn debug_update_available_status(value: &str) -> UpdateStatus {
+    let version = match value.trim() {
+        "" | "1" | "true" | "yes" => "9.9.9",
+        version => strip_v(version),
+    };
+
+    UpdateStatus::UpdateAvailable {
+        version: version.to_string(),
+        url: format!("https://github.com/TopiCsarno/yapcap/releases/tag/v{version}"),
+    }
+}
+
 async fn fetch_release(client: &reqwest::Client, url: &str) -> Result<GithubRelease, String> {
     let response = client
         .get(url)
@@ -46,19 +64,46 @@ async fn fetch_release(client: &reqwest::Client, url: &str) -> Result<GithubRele
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| request_failure_message(&e))?;
 
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
         return Err("no releases".to_string());
     }
-    if !response.status().is_success() {
-        return Err(format!("http {}", response.status().as_u16()));
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("read failed after http {}: {e}", status.as_u16()))?;
+    if !status.is_success() {
+        return Err(http_failure_message(status, &body));
     }
 
-    response
-        .json::<GithubRelease>()
-        .await
-        .map_err(|e| format!("decode failed: {e}"))
+    serde_json::from_str::<GithubRelease>(&body)
+        .map_err(|e| format!("decode failed: {e}; body: {}", compact_body(&body)))
+}
+
+fn request_failure_message(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return format!("request timed out after 20s: {error}");
+    }
+    if error.is_connect() {
+        return format!("connection failed: {error}");
+    }
+    format!("request failed: {error}")
+}
+
+fn http_failure_message(status: reqwest::StatusCode, body: &str) -> String {
+    let reason = status.canonical_reason().unwrap_or("unknown status");
+    let body = compact_body(body);
+    if body.is_empty() {
+        return format!("http {} {reason}", status.as_u16());
+    }
+    format!("http {} {reason}: {body}", status.as_u16())
+}
+
+fn compact_body(body: &str) -> String {
+    let one_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    one_line.chars().take(240).collect()
 }
 
 fn strip_v(tag: &str) -> &str {
@@ -112,5 +157,27 @@ mod tests {
     fn is_newer_false_on_garbage() {
         assert!(!is_newer("nope", "0.1.0"));
         assert!(!is_newer("v0.1.0", "nope"));
+    }
+
+    #[test]
+    fn debug_update_available_status_defaults_to_future_release() {
+        assert_eq!(
+            debug_update_available_status("1"),
+            UpdateStatus::UpdateAvailable {
+                version: "9.9.9".to_string(),
+                url: "https://github.com/TopiCsarno/yapcap/releases/tag/v9.9.9".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn debug_update_available_status_accepts_version_value() {
+        assert_eq!(
+            debug_update_available_status("v0.1.0"),
+            UpdateStatus::UpdateAvailable {
+                version: "0.1.0".to_string(),
+                url: "https://github.com/TopiCsarno/yapcap/releases/tag/v0.1.0".to_string(),
+            }
+        );
     }
 }

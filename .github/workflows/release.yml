@@ -32,8 +32,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
+      - name: Install packaging tools
+        run: cargo install cargo-deb cargo-generate-rpm --locked
 
       - name: Build release binary
         run: cargo build --release
@@ -48,14 +48,17 @@ jobs:
           cp -r resources "dist/${PKG}/"
           tar -czf "dist/${PKG}.tar.gz" -C dist "${PKG}"
 
-      - name: Build .deb
-        run: cargo deb --no-build --output dist/
+      - name: Build .deb and .rpm
+        run: |
+          cargo deb --no-build --output dist/
+          cargo generate-rpm
+          cp target/generate-rpm/*.rpm dist/
 
       - name: Generate checksums
         working-directory: dist
         run: |
           shopt -s nullglob
-          sha256sum *.tar.gz *.deb > checksums.txt
+          sha256sum *.tar.gz *.deb *.rpm > checksums.txt
           cat checksums.txt
 
       - name: Upload release artifacts
@@ -64,6 +67,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.deb
+            dist/*.rpm
             dist/checksums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true

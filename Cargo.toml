@@ -24,6 +24,16 @@ Codex, Claude Code, and Cursor by reading locally available OAuth tokens \
 and browser session cookies.
 """
 
+[package.metadata.generate-rpm]
+summary = "COSMIC panel applet for Codex, Claude Code, and Cursor usage"
+license = "MPL-2.0"
+assets = [
+    { source = "target/release/yapcap", dest = "/usr/bin/yapcap", mode = "755" },
+    { source = "resources/app.desktop", dest = "/usr/share/applications/app.desktop", mode = "644" },
+    { source = "resources/icon.svg", dest = "/usr/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/yapcap/README.md", mode = "644", doc = true },
+]
+
 [dependencies]
 aes = "0.8"
 aes-gcm = "0.10"

@@ -1,5 +1,7 @@
 .cargo/
 .codex
+dist/
+docs/todo.md
 *.pdb
 **/*.rs.bk
 debug/

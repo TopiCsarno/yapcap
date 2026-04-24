@@ -498,11 +498,9 @@ mod tests {
         }
 
         let now = Utc::now();
-        let mut config = Config::default();
-        config.active_codex_account_id = Some("codex-existing".to_string());
-        config
-            .codex_managed_accounts
-            .push(ManagedCodexAccountConfig {
+        let mut config = Config {
+            active_codex_account_id: Some("codex-existing".to_string()),
+            codex_managed_accounts: vec![ManagedCodexAccountConfig {
                 id: "codex-existing".to_string(),
                 label: "user@example.com".to_string(),
                 codex_home: missing_managed_home.clone(),
@@ -511,7 +509,9 @@ mod tests {
                 created_at: now,
                 updated_at: now,
                 last_authenticated_at: Some(now),
-            });
+            }],
+            ..Default::default()
+        };
 
         let changed = sync_imported_account(&mut config).unwrap();
 
@@ -537,30 +537,32 @@ mod tests {
         write_auth(&home_a, "acct-123", "user@example.com");
         write_auth(&home_b, "acct-999", "USER@example.com");
 
-        let mut config = Config::default();
-        config.active_codex_account_id = Some("codex-b".to_string());
-        config.codex_managed_accounts = vec![
-            ManagedCodexAccountConfig {
-                id: "codex-a".to_string(),
-                label: "user@example.com".to_string(),
-                codex_home: home_a,
-                email: Some("user@example.com".to_string()),
-                provider_account_id: Some("acct-123".to_string()),
-                created_at: now,
-                updated_at: now,
-                last_authenticated_at: Some(now),
-            },
-            ManagedCodexAccountConfig {
-                id: "codex-b".to_string(),
-                label: "USER@example.com".to_string(),
-                codex_home: home_b,
-                email: Some("USER@example.com".to_string()),
-                provider_account_id: None,
-                created_at: now,
-                updated_at: now + chrono::TimeDelta::seconds(1),
-                last_authenticated_at: Some(now + chrono::TimeDelta::seconds(1)),
-            },
-        ];
+        let mut config = Config {
+            active_codex_account_id: Some("codex-b".to_string()),
+            codex_managed_accounts: vec![
+                ManagedCodexAccountConfig {
+                    id: "codex-a".to_string(),
+                    label: "user@example.com".to_string(),
+                    codex_home: home_a,
+                    email: Some("user@example.com".to_string()),
+                    provider_account_id: Some("acct-123".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_authenticated_at: Some(now),
+                },
+                ManagedCodexAccountConfig {
+                    id: "codex-b".to_string(),
+                    label: "USER@example.com".to_string(),
+                    codex_home: home_b,
+                    email: Some("USER@example.com".to_string()),
+                    provider_account_id: None,
+                    created_at: now,
+                    updated_at: now + chrono::TimeDelta::seconds(1),
+                    last_authenticated_at: Some(now + chrono::TimeDelta::seconds(1)),
+                },
+            ],
+            ..Default::default()
+        };
 
         let changed = dedupe_managed_accounts(&mut config);
 

@@ -1646,8 +1646,9 @@ fn no_providers_view<'a>() -> Element<'a, Message> {
         column![
             widget::text(fl!("no-providers")).size(16),
             widget::text(fl!("no-providers-detail")).size(13),
-            widget::button::standard(fl!("no-providers-open-settings"))
-                .on_press(Message::NavigateTo(PopupRoute::Settings(SettingsRoute::General))),
+            widget::button::standard(fl!("no-providers-open-settings")).on_press(
+                Message::NavigateTo(PopupRoute::Settings(SettingsRoute::General))
+            ),
         ]
         .spacing(10)
         .width(Length::Fill),

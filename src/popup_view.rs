@@ -425,12 +425,16 @@ fn codex_accounts_section<'a>(
         rows = rows.push(widget::text(fl!("codex-accounts-empty")).size(13));
     } else {
         let mut account_rows = column![].spacing(6).width(Length::Fill);
-        for account in accounts {
+        for account in &accounts {
             account_rows = account_rows.push(codex_account_settings_row(
                 account, active_id, config, enabled,
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if !accounts.is_empty() {
+        rows = rows.push(codex_auto_detect_active_account_control(config, enabled));
     }
 
     if let Some(provider) = codex
@@ -445,6 +449,30 @@ fn codex_accounts_section<'a>(
         widget::text(fl!("codex-accounts-title")).size(16).into(),
         rows,
         enabled,
+    )
+}
+
+fn codex_auto_detect_active_account_control(
+    config: &Config,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let on_toggle =
+        enabled.then_some(Message::SetCodexAutoDetectActiveAccount as fn(bool) -> Message);
+    Element::from(
+        row![
+            container(
+                widget::checkbox(config.codex_auto_detect_active_account)
+                    .width(Length::Shrink)
+                    .on_toggle_maybe(on_toggle)
+            )
+            .padding([2, 0, 0, 0]),
+            widget::text(fl!("codex-auto-active-account"))
+                .size(14)
+                .width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Start)
+        .width(Length::Fill),
     )
 }
 

@@ -60,10 +60,46 @@ pub fn discover_accounts(config: &Config) -> Vec<CodexAccount> {
     accounts
 }
 
+pub fn ambient_active_account_id(config: &Config) -> Option<String> {
+    let source_home = codex_home().ok()?;
+    active_account_id_from_home(config, &source_home)
+}
+
+fn active_account_id_from_home(config: &Config, source_home: &Path) -> Option<String> {
+    let auth = load_codex_auth_from_home(&source_home).ok()?;
+    let email = auth.id_token.as_deref().and_then(email_from_id_token);
+    find_matching_account_by_identity(config, auth.account_id.as_deref(), email.as_deref())
+        .map(|account| account.id.clone())
+}
+
 pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
+    sync_imported_account_mode(config, true)
+}
+
+pub fn sync_imported_account_preserving_selection(
+    config: &mut Config,
+) -> Result<bool, String> {
+    sync_imported_account_mode(config, false)
+}
+
+pub fn sync_auto_detect_active_account(config: &mut Config) -> Result<bool, String> {
+    let mut changed = sync_imported_account_preserving_selection(config)?;
+    let detected_active_id = ambient_active_account_id(config);
+    if detected_active_id.is_some() && config.active_codex_account_id != detected_active_id {
+        config.active_codex_account_id = detected_active_id;
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn sync_imported_account_mode(
+    config: &mut Config,
+    select_imported_account: bool,
+) -> Result<bool, String> {
     let mut changed = dedupe_managed_accounts(config);
-    let prefer_imported = config.active_codex_account_id.as_deref() == Some("system")
-        || config.active_codex_account_id.is_none();
+    let prefer_imported = select_imported_account
+        && (config.active_codex_account_id.as_deref() == Some("system")
+            || config.active_codex_account_id.is_none());
 
     let Ok(source_home) = codex_home() else {
         if config.active_codex_account_id.as_deref() == Some("system") {
@@ -112,7 +148,7 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
         commit_pending_home(&pending_home, &existing.codex_home)?;
 
         let now = Utc::now();
-        apply_login_account(
+        upsert_managed_account(
             config,
             ManagedCodexAccountConfig {
                 id: existing.id,
@@ -124,6 +160,7 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
                 updated_at: now,
                 last_authenticated_at: Some(now),
             },
+            select_imported_account,
         );
         return Ok(true);
     }
@@ -135,7 +172,7 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
     commit_pending_home(&pending_home, &target_home)?;
 
     let now = Utc::now();
-    apply_login_account(
+    upsert_managed_account(
         config,
         ManagedCodexAccountConfig {
             id: account_id.clone(),
@@ -147,6 +184,7 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
             updated_at: now,
             last_authenticated_at: Some(now),
         },
+        select_imported_account,
     );
     Ok(true)
 }
@@ -154,6 +192,24 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
 pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConfig) {
     let account_id = account.id.clone();
     config.active_codex_account_id = Some(account_id.clone());
+    config
+        .codex_managed_accounts
+        .retain(|existing| existing.id != account_id);
+    config.codex_managed_accounts.push(account);
+    dedupe_managed_accounts(config);
+}
+
+fn upsert_managed_account(
+    config: &mut Config,
+    account: ManagedCodexAccountConfig,
+    select_imported_account: bool,
+) {
+    if select_imported_account {
+        apply_login_account(config, account);
+        return;
+    }
+
+    let account_id = account.id.clone();
     config
         .codex_managed_accounts
         .retain(|existing| existing.id != account_id);
@@ -175,6 +231,23 @@ pub(crate) fn find_matching_account<'a>(
         .codex_managed_accounts
         .iter()
         .find(|account| account.email.as_deref().map(normalized_email) == Some(email.clone()))
+}
+
+pub(crate) fn find_matching_account_by_identity<'a>(
+    config: &'a Config,
+    provider_account_id: Option<&str>,
+    email: Option<&str>,
+) -> Option<&'a ManagedCodexAccountConfig> {
+    if let Some(provider_account_id) = provider_account_id
+        && let Some(account) = config
+            .codex_managed_accounts
+            .iter()
+            .find(|account| account.provider_account_id.as_deref() == Some(provider_account_id))
+    {
+        return Some(account);
+    }
+
+    find_matching_account(config, email)
 }
 
 pub(crate) fn managed_home(account_id: &str) -> PathBuf {
@@ -372,14 +445,9 @@ fn is_path_within(path: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support;
     use base64::Engine;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
@@ -411,7 +479,7 @@ mod tests {
 
     #[test]
     fn imports_external_codex_home_into_managed_storage() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-source");
         write_auth(&home, "acct-123", "user@example.com");
         let state_root = temp_dir("codex-import-state");
@@ -444,14 +512,16 @@ mod tests {
 
     #[test]
     fn reuses_existing_managed_account_for_same_email() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-email-source");
         write_auth(&home, "acct-456", "user@example.com");
         let managed_home = temp_dir("codex-import-email-managed");
         write_auth(&managed_home, "acct-123", "user@example.com");
+        let state_root = temp_dir("codex-import-email-state");
 
         unsafe {
             std::env::set_var("CODEX_HOME", &home);
+            std::env::set_var("XDG_STATE_HOME", &state_root);
         }
 
         let now = Utc::now();
@@ -473,6 +543,7 @@ mod tests {
 
         unsafe {
             std::env::remove_var("CODEX_HOME");
+            std::env::remove_var("XDG_STATE_HOME");
         }
 
         assert!(changed);
@@ -485,8 +556,113 @@ mod tests {
     }
 
     #[test]
+    fn preserves_manual_selection_while_importing_new_ambient_account() {
+        let _guard = test_support::env_lock();
+        let ambient_home = temp_dir("codex-import-preserve-source");
+        write_auth(&ambient_home, "acct-456", "new@example.com");
+        let managed_home = temp_dir("codex-import-preserve-managed");
+        write_auth(&managed_home, "acct-123", "existing@example.com");
+        let state_root = temp_dir("codex-import-preserve-state");
+
+        unsafe {
+            std::env::set_var("CODEX_HOME", &ambient_home);
+            std::env::set_var("XDG_STATE_HOME", &state_root);
+        }
+
+        let now = Utc::now();
+        let mut config = Config {
+            active_codex_account_id: Some("codex-existing".to_string()),
+            codex_managed_accounts: vec![ManagedCodexAccountConfig {
+                id: "codex-existing".to_string(),
+                label: "existing@example.com".to_string(),
+                codex_home: managed_home,
+                email: Some("existing@example.com".to_string()),
+                provider_account_id: Some("acct-123".to_string()),
+                created_at: now,
+                updated_at: now,
+                last_authenticated_at: Some(now),
+            }],
+            ..Config::default()
+        };
+
+        let changed = sync_imported_account_preserving_selection(&mut config).unwrap();
+
+        unsafe {
+            std::env::remove_var("CODEX_HOME");
+            std::env::remove_var("XDG_STATE_HOME");
+        }
+
+        assert!(changed);
+        assert_eq!(
+            config.active_codex_account_id.as_deref(),
+            Some("codex-existing")
+        );
+        assert_eq!(config.codex_managed_accounts.len(), 2);
+        let imported = config
+            .codex_managed_accounts
+            .iter()
+            .find(|account| account.id != "codex-existing")
+            .unwrap();
+        assert_eq!(imported.email.as_deref(), Some("new@example.com"));
+        assert_eq!(
+            active_account_id_from_home(&config, &ambient_home).as_deref(),
+            Some(imported.id.as_str())
+        );
+    }
+
+    #[test]
+    fn auto_detect_updates_selection_to_imported_ambient_account() {
+        let _guard = test_support::env_lock();
+        let ambient_home = temp_dir("codex-auto-detect-source");
+        write_auth(&ambient_home, "acct-456", "new@example.com");
+        let managed_home = temp_dir("codex-auto-detect-managed");
+        write_auth(&managed_home, "acct-123", "existing@example.com");
+        let state_root = temp_dir("codex-auto-detect-state");
+
+        unsafe {
+            std::env::set_var("CODEX_HOME", &ambient_home);
+            std::env::set_var("XDG_STATE_HOME", &state_root);
+        }
+
+        let now = Utc::now();
+        let mut config = Config {
+            active_codex_account_id: Some("codex-existing".to_string()),
+            codex_managed_accounts: vec![ManagedCodexAccountConfig {
+                id: "codex-existing".to_string(),
+                label: "existing@example.com".to_string(),
+                codex_home: managed_home,
+                email: Some("existing@example.com".to_string()),
+                provider_account_id: Some("acct-123".to_string()),
+                created_at: now,
+                updated_at: now,
+                last_authenticated_at: Some(now),
+            }],
+            ..Config::default()
+        };
+
+        let changed = sync_auto_detect_active_account(&mut config).unwrap();
+
+        unsafe {
+            std::env::remove_var("CODEX_HOME");
+            std::env::remove_var("XDG_STATE_HOME");
+        }
+
+        assert!(changed);
+        assert_eq!(config.codex_managed_accounts.len(), 2);
+        let imported = config
+            .codex_managed_accounts
+            .iter()
+            .find(|account| account.id != "codex-existing")
+            .unwrap();
+        assert_eq!(
+            config.active_codex_account_id.as_deref(),
+            Some(imported.id.as_str())
+        );
+    }
+
+    #[test]
     fn repairs_existing_managed_account_when_home_was_cleared() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-repair-source");
         write_auth(&home, "acct-456", "user@example.com");
         let state_root = temp_dir("codex-import-repair-state");
@@ -620,6 +796,82 @@ mod tests {
 
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].id, "codex-b");
+    }
+
+    #[test]
+    fn matches_identity_by_provider_account_id_before_email() {
+        let now = Utc::now();
+        let config = Config {
+            codex_managed_accounts: vec![
+                ManagedCodexAccountConfig {
+                    id: "codex-a".to_string(),
+                    label: "first@example.com".to_string(),
+                    codex_home: PathBuf::from("/tmp/codex-a"),
+                    email: Some("first@example.com".to_string()),
+                    provider_account_id: Some("acct-123".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_authenticated_at: Some(now),
+                },
+                ManagedCodexAccountConfig {
+                    id: "codex-b".to_string(),
+                    label: "shared@example.com".to_string(),
+                    codex_home: PathBuf::from("/tmp/codex-b"),
+                    email: Some("shared@example.com".to_string()),
+                    provider_account_id: Some("acct-999".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_authenticated_at: Some(now),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let matched = find_matching_account_by_identity(
+            &config,
+            Some("acct-123"),
+            Some("shared@example.com"),
+        )
+        .unwrap();
+
+        assert_eq!(matched.id, "codex-a");
+    }
+
+    #[test]
+    fn active_account_id_from_home_uses_provider_account_match() {
+        let home = temp_dir("codex-ambient-active-source");
+        write_auth(&home, "acct-456", "user@example.com");
+
+        let now = Utc::now();
+        let config = Config {
+            codex_managed_accounts: vec![
+                ManagedCodexAccountConfig {
+                    id: "codex-a".to_string(),
+                    label: "user@example.com".to_string(),
+                    codex_home: PathBuf::from("/tmp/codex-a"),
+                    email: Some("user@example.com".to_string()),
+                    provider_account_id: Some("acct-123".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_authenticated_at: Some(now),
+                },
+                ManagedCodexAccountConfig {
+                    id: "codex-b".to_string(),
+                    label: "user@example.com".to_string(),
+                    codex_home: PathBuf::from("/tmp/codex-b"),
+                    email: Some("user@example.com".to_string()),
+                    provider_account_id: Some("acct-456".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_authenticated_at: Some(now),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let active_id = active_account_id_from_home(&config, &home);
+
+        assert_eq!(active_id.as_deref(), Some("codex-b"));
     }
 
     #[test]

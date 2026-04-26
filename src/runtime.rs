@@ -114,7 +114,7 @@ pub async fn refresh_one(
         .and_then(|p| p.active_account_id.as_deref());
 
     let accounts = providers::registry::discover_accounts(provider, &config);
-    let preferred = providers::registry::active_account_preference(provider, &config);
+    let preferred = providers::registry::effective_active_account_preference(provider, &config);
     let preferred_id = preferred.as_deref().or(active_id);
 
     let Some(account) = accounts

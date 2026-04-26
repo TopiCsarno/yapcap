@@ -24,6 +24,8 @@ pub struct Config {
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
     pub active_codex_account_id: Option<String>,
+    #[serde(default)]
+    pub codex_auto_detect_active_account: bool,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub active_claude_account_id: Option<String>,
     pub claude_managed_accounts: Vec<ManagedClaudeAccountConfig>,
@@ -46,6 +48,7 @@ impl Default for Config {
             claude_enabled: true,
             cursor_enabled: true,
             active_codex_account_id: None,
+            codex_auto_detect_active_account: false,
             codex_managed_accounts: Vec::new(),
             active_claude_account_id: None,
             claude_managed_accounts: Vec::new(),
@@ -465,6 +468,7 @@ pub fn paths() -> AppPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_dir(name: &str) -> PathBuf {
@@ -495,6 +499,7 @@ mod tests {
         assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
         assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
         assert_eq!(config.cursor_profile_id, None);
+        assert!(!config.codex_auto_detect_active_account);
     }
 
     #[test]
@@ -525,6 +530,7 @@ mod tests {
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
         );
+        assert!(!config.codex_auto_detect_active_account);
     }
 
     #[test]
@@ -567,6 +573,7 @@ mod tests {
 
     #[test]
     fn cursor_browser_env_override() {
+        let _guard = test_support::env_lock();
         unsafe {
             std::env::set_var(CURSOR_BROWSER_ENV, "chromium");
         }

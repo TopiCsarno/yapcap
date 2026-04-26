@@ -171,6 +171,13 @@ pub fn active_account_preference(provider: ProviderId, config: &Config) -> Optio
     }
 }
 
+pub fn effective_active_account_preference(
+    provider: ProviderId,
+    config: &Config,
+) -> Option<String> {
+    active_account_preference(provider, config)
+}
+
 pub fn set_active_account_preference(
     provider: ProviderId,
     config: &mut Config,
@@ -285,7 +292,7 @@ pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Confi
 pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state: &mut AppState) {
     let accounts = discover_accounts(provider, config);
     let valid_ids: Vec<String> = accounts.iter().map(|a| a.account_id.clone()).collect();
-    let preferred = active_account_preference(provider, config);
+    let preferred = effective_active_account_preference(provider, config);
     let active_id = resolve_active_account(preferred.as_deref(), &valid_ids);
 
     state
@@ -542,5 +549,19 @@ mod tests {
         assert!(config.codex_enabled);
         assert!(config.claude_enabled);
         assert!(config.cursor_enabled);
+    }
+
+    #[test]
+    fn codex_effective_active_account_uses_stored_selection() {
+        let config = Config {
+            codex_auto_detect_active_account: true,
+            active_codex_account_id: Some("codex-a".to_string()),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            effective_active_account_preference(ProviderId::Codex, &config).as_deref(),
+            Some("codex-a")
+        );
     }
 }

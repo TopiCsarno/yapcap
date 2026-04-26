@@ -14,7 +14,10 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use std::path::PathBuf;
 
-pub use account::{apply_login_account, discover_accounts, sync_imported_account};
+pub use account::{
+    apply_login_account, discover_accounts, sync_auto_detect_active_account,
+    sync_imported_account,
+};
 pub use login::{CodexLoginEvent, CodexLoginState, CodexLoginStatus, prepare};
 
 const ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";

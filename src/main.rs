@@ -18,6 +18,8 @@ mod popup_view;
 mod provider_assets;
 mod providers;
 mod runtime;
+#[cfg(test)]
+mod test_support;
 mod updates;
 mod usage_display;
 

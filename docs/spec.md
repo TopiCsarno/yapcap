@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.2 · **Last updated:** 2026-04-26 (provider popup now includes cached non-active account usage rows)
+**Status:** As-built v0.3 · **Last updated:** 2026-04-26 (Codex auto-detect updates the saved active selection when it finds a managed match)
 
 ## Document Metadata
 
@@ -156,12 +156,16 @@ Codex account import and discovery:
 - On startup, if `CODEX_HOME` or `~/.codex` contains a usable `auth.json`,
   YapCap imports that Codex home into YapCap-managed storage unless a managed
   account with the same normalized email already exists.
+- When Codex ambient-account detection is enabled, that same ambient import
+  check also runs during popup/reconcile/refresh so a newly logged-in ambient
+  Codex account is added without restarting YapCap.
 - Managed accounts are read from `Config.codex_managed_accounts`; each entry
   points at an isolated Codex home and is valid only when that home's
   `auth.json` parses.
 - Codex account identity is the normalized email from `id_token`
-  (`trim + ASCII lowercase`). `provider_account_id` is stored only as
-  non-identity metadata for display, diagnostics, and compatibility.
+  (`trim + ASCII lowercase`). `provider_account_id` is stored as
+  non-identity metadata for display, diagnostics, compatibility, and ambient
+  active-account matching.
 - If multiple managed Codex entries share the same normalized email, YapCap
   auto-merges them down to one surviving config entry, preferring the active
   account when one is active and otherwise preferring the most recently
@@ -169,13 +173,22 @@ Codex account import and discovery:
 - The active resolver uses the persisted id when it resolves to a valid source,
   otherwise auto-selects exactly one valid source, otherwise reports
   `SelectionRequired` or `LoginRequired`.
+- Settings can opt into Codex ambient-account auto-detection. When enabled,
+  each sync/refresh reads the ambient Codex `auth.json`
+  (`CODEX_HOME/auth.json` or `~/.codex/auth.json`), matches its
+  `tokens.account_id` first and its `id_token` email second against managed
+  YapCap accounts, and writes that match back into
+  `active_codex_account_id` as the current selection. If no match is found but
+  the ambient auth is usable, YapCap imports it into managed storage,
+  re-resolves the ambient match, and keeps the stored manual selection as the
+  fallback when ambient detection is later unavailable.
 - Account display labels are derived from the `email` claim in each account's
   `id_token` at discovery time; stored config labels are not used for display.
 - After import, YapCap uses only the copied managed Codex home under
   `~/.local/state/yapcap/codex-accounts/<id>/`. Import copies only the auth
   material YapCap needs (`auth.json`), not an entire ambient Codex home.
-  `CODEX_HOME`/`~/.codex` is not treated as a live account source. Ambient
-  `CODEX_HOME` is import-only.
+  `CODEX_HOME`/`~/.codex` is not treated as a live account source for usage
+  fetches; ambient auth is only consulted as an optional active-account hint.
 - If a managed Codex entry matches the ambient Codex email but its managed home
   has been deleted or is no longer readable, startup import repairs that
   managed entry by repopulating its managed home from the ambient Codex home
@@ -458,6 +471,7 @@ codex_enabled = true
 claude_enabled = true
 cursor_enabled = true
 active_codex_account_id = null
+codex_auto_detect_active_account = false
 codex_managed_accounts = []
 active_claude_account_id = null
 claude_managed_accounts = []
@@ -479,6 +493,11 @@ log_level = "info"
 - The refresh interval is clamped to a 10-second floor at subscription time.
 - `active_codex_account_id` is a preference, not proof that credentials exist.
   It resolves to `Ready` only when a matching managed account source is valid.
+- `codex_auto_detect_active_account = true` makes YapCap keep trying to match
+  the ambient Codex `auth.json` to a managed account and, when it succeeds,
+  update `active_codex_account_id` to that detected account. When no managed
+  match is available, the existing `active_codex_account_id` remains the
+  fallback selection.
 - `codex_managed_accounts` stores non-secret metadata only: id, label,
   managed Codex home path, optional email/provider account id, and timestamps.
   There is at most one managed account per normalized email.
@@ -685,7 +704,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
   - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) applies a fixed synthetic `AppState` for screenshots, skips the default startup `Task` batch, makes provider-refresh a no-op, skips writing the snapshot cache, and re-applies after each in-app `reconcile` on config updates.
-  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow, and Codex re-authentication appears only after an auth failure that requires user action. Claude add-account runs the Claude Code auth flow from Settings. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label; browser-auto-imported accounts and login-created accounts appear the same in the UI. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
+  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. The Codex settings card also includes an opt-in checkbox that keeps trying to match the ambient Codex `auth.json` account on each refresh while still allowing row selection; a successful ambient match updates the saved selection, and a manual click remains the fallback when detection is unavailable. Codex add-account login opens the browser from the Settings flow, and Codex re-authentication appears only after an auth failure that requires user action. Claude add-account runs the Claude Code auth flow from Settings. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label; browser-auto-imported accounts and login-created accounts appear the same in the UI. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 

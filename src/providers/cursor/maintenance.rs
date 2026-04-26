@@ -303,6 +303,7 @@ fn migrate_legacy_profile_root(
 mod tests {
     use super::*;
     use crate::config::{Browser, Config};
+    use crate::test_support;
     use chrono::Utc;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -336,6 +337,7 @@ mod tests {
 
     #[test]
     fn upsert_keeps_one_account_per_email() {
+        let _guard = test_support::env_lock();
         let mut config = Config::default();
         config
             .cursor_managed_accounts
@@ -351,6 +353,7 @@ mod tests {
 
     #[test]
     fn directory_naming_is_deterministic() {
+        let _guard = test_support::env_lock();
         let email = normalized_email("User+test@example.com");
         let id = stable_storage_id_from_normalized_email(&email);
         assert_eq!(managed_account_dir(&id), managed_account_dir(&id));
@@ -358,6 +361,7 @@ mod tests {
 
     #[test]
     fn sync_drops_legacy_token_only_accounts() {
+        let _guard = test_support::env_lock();
         let state_root = test_dir("cursor-legacy-token");
         let legacy_root = state_root.join("yapcap/cursor-accounts/legacy");
         fs::create_dir_all(&legacy_root).unwrap();
@@ -394,6 +398,7 @@ mod tests {
 
     #[test]
     fn sync_drops_malformed_account_dirs() {
+        let _guard = test_support::env_lock();
         let state_root = test_dir("cursor-malformed");
         unsafe {
             std::env::set_var("XDG_STATE_HOME", &state_root);

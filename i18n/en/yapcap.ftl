@@ -19,6 +19,7 @@ providers-section-title = Providers
 codex-accounts-title = Codex Accounts
 codex-accounts-empty = No Codex accounts found
 codex-account-select-required = Select a Codex account before refreshing
+codex-auto-active-account = Detect the active account automatically and update this selection when found
 codex-no-accounts-status = No Codex accounts
 codex-no-accounts-action = Open Settings to add one
 claude-accounts-title = Claude Accounts

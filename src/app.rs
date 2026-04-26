@@ -94,6 +94,7 @@ pub enum Message {
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
     SetActiveAccount(ProviderId, String),
+    SetCodexAutoDetectActiveAccount(bool),
     DeleteCodexAccount(String),
     StartCodexLogin,
     CancelCodexLogin,
@@ -150,6 +151,17 @@ impl cosmic::Application for AppModel {
                     Err((_errors, cfg)) => cfg.with_env_overrides(),
                 };
                 let mut changed = registry::startup_sync(&mut config);
+                if config.codex_auto_detect_active_account {
+                    changed |= codex::sync_auto_detect_active_account(&mut config).unwrap_or_else(
+                        |error| {
+                            tracing::warn!(
+                                error = %error,
+                                "failed to sync auto-detected Codex account"
+                            );
+                            false
+                        },
+                    );
+                }
                 changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
                 if changed {
                     let _ = config.write_entry(&ctx);
@@ -316,6 +328,9 @@ impl AppModel {
             }
 
             Message::TogglePopup => {
+                if self.popup.is_none() {
+                    self.sync_codex_auto_detect_account();
+                }
                 return Some(self.toggle_popup());
             }
 
@@ -327,6 +342,7 @@ impl AppModel {
             }
 
             Message::Tick | Message::RefreshNow => {
+                self.sync_codex_auto_detect_account();
                 return Some(refresh_provider_tasks(&self.config, &mut self.state));
             }
 
@@ -392,6 +408,10 @@ impl AppModel {
 
             Message::SetActiveAccount(provider, account_id) => {
                 return Some(self.set_active_account(provider, &account_id));
+            }
+
+            Message::SetCodexAutoDetectActiveAccount(enabled) => {
+                return Some(self.set_codex_auto_detect_active_account(enabled));
             }
 
             Message::DeleteCodexAccount(account_id) => {
@@ -922,6 +942,33 @@ impl AppModel {
         }
     }
 
+    fn sync_codex_auto_detect_account(&mut self) {
+        if !self.config.codex_auto_detect_active_account {
+            return;
+        }
+
+        let mut synced_config = self.config.clone();
+        let changed = codex::sync_auto_detect_active_account(&mut synced_config).unwrap_or_else(
+            |error| {
+                tracing::warn!(error = %error, "failed to sync ambient Codex account");
+                false
+            },
+        );
+        if !changed {
+            return;
+        }
+
+        if let Ok(ctx) =
+            cosmic_config::Config::new(<Self as cosmic::Application>::APP_ID, Config::VERSION)
+        {
+            let _ = synced_config.write_entry(&ctx);
+        }
+
+        self.config = synced_config;
+        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
+        runtime::persist_state(&self.state);
+    }
+
     fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> Task<Message> {
         if let Some(entry) = self.state.provider_mut(provider) {
             entry.enabled = enabled;
@@ -971,6 +1018,7 @@ impl AppModel {
 
     fn on_config_update(&mut self, config: Config) {
         self.config = config;
+        self.sync_codex_auto_detect_account();
         runtime::reconcile_state(&self.config, &mut self.state);
         demo_env::apply(&self.config, &mut self.state);
         runtime::persist_state(&self.state);
@@ -994,6 +1042,24 @@ impl AppModel {
             account.error = None;
         }
         refresh_provider_task(&self.config, &mut self.state, provider)
+    }
+
+    fn set_codex_auto_detect_active_account(&mut self, enabled: bool) -> Task<Message> {
+        self.write_config(|new_config| {
+            new_config.codex_auto_detect_active_account = enabled;
+        });
+        if enabled {
+            self.sync_codex_auto_detect_account();
+        }
+        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
+        if self
+            .state
+            .provider(ProviderId::Codex)
+            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
+        {
+            return refresh_provider_task(&self.config, &mut self.state, ProviderId::Codex);
+        }
+        Task::none()
     }
 
     fn delete_codex_account(&mut self, account_id: &str) -> Task<Message> {

@@ -45,9 +45,11 @@ pub fn simulate_expired_cookie_accounts(accounts: &[ManagedCursorAccountConfig])
 #[cfg(debug_assertions)]
 mod tests {
     use super::*;
+    use crate::test_support;
 
     #[test]
     fn expired_cookie_debug_flag_accepts_common_true_and_false_values() {
+        let _guard = test_support::env_lock();
         unsafe {
             std::env::set_var(DEBUG_CURSOR_EXPIRED_COOKIE_ENV, "true");
         }

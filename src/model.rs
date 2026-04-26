@@ -82,6 +82,11 @@ impl UsageSnapshot {
     }
 
     #[must_use]
+    pub fn session_window(&self) -> Option<&UsageWindow> {
+        self.windows.iter().find(|window| window.label == "Session")
+    }
+
+    #[must_use]
     pub fn applet_windows(&self) -> (Option<&UsageWindow>, Option<&UsageWindow>) {
         if self.provider == ProviderId::Cursor {
             return (
@@ -314,6 +319,25 @@ mod tests {
             UsageHeadline::first_available(&snapshot.windows),
             UsageHeadline(0)
         );
+    }
+
+    #[test]
+    fn session_window_prefers_named_session() {
+        let mut snapshot = snapshot(ProviderId::Claude);
+        snapshot.windows = vec![window("Weekly"), window("Session"), window("Extra")];
+
+        assert_eq!(
+            snapshot.session_window().map(|window| window.label.as_str()),
+            Some("Session")
+        );
+    }
+
+    #[test]
+    fn session_window_returns_none_when_missing() {
+        let mut snapshot = snapshot(ProviderId::Cursor);
+        snapshot.windows = vec![window("Total"), window("API")];
+
+        assert!(snapshot.session_window().is_none());
     }
 
     #[test]

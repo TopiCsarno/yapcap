@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.2 · **Last updated:** 2026-04-24 (account state reconciled with config and cache)
+**Status:** As-built v0.2 · **Last updated:** 2026-04-26 (provider popup now includes cached non-active account usage rows)
 
 ## Document Metadata
 
@@ -84,7 +84,7 @@ Binary-only modules (`src/`, compiled only into the applet binary):
 | --- | --- |
 | `app` | `AppModel`, `Message`, libcosmic `Application` impl. Panel button, popup open/close, tick scheduling. |
 | `app_refresh` | Dispatches one `Task::perform` per enabled provider. |
-| `popup_view` | `popup_content` renders the popup. Tabs, status badge, usage bars, cost block. All strings via `fl!()`. |
+| `popup_view` | `popup_content` renders the popup. Tabs, status badge, usage bars, active account summary, cached non-active account rows, cost block. All strings via `fl!()`. |
 | `provider_assets` | Embedded SVG icon handles; dark/light variant selection. |
 | `i18n` | `fl!()` macro, `i18n_embed` loader wired to `i18n/en/yapcap.ftl`. |
 
@@ -680,7 +680,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
   - settings: category tabs for General, Codex, Claude, and Cursor, using a theme-symbolic gear icon for General and provider icons for provider settings.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
-  - Provider view is rendered as a stack of consistent cards (summary, usage windows, cost/credits, account, and error/source state).
+  - Provider view keeps the active account at the top with the full summary/usage/account stack. When more accounts exist for that provider, the popup appends a muted vertical list below it for the non-active accounts, using each account's cached snapshot to show its session-or-headline usage and email label without pretending the values are live.
   - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".

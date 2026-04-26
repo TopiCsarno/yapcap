@@ -15,6 +15,7 @@ use crate::providers::interface::ProviderAccountActionSupport;
 use crate::providers::registry;
 use crate::updates::UpdateStatus;
 use crate::usage_display;
+use chrono::{DateTime, Utc};
 use cosmic::Element;
 use cosmic::iced::widget::{column, container, progress_bar, row, scrollable};
 use cosmic::iced::{Alignment, Background, Color, Length, Size};
@@ -31,6 +32,9 @@ const PROVIDER_CARD_SPACING: f32 = 8.0;
 const PROVIDER_HEIGHT_SECTION_SPACING: f32 = 14.0;
 const PROVIDER_SUMMARY_HEIGHT: f32 = 104.0;
 const PROVIDER_SECTION_HEIGHT: f32 = 96.0;
+const PROVIDER_ACCOUNT_LIST_TITLE_HEIGHT: f32 = 32.0;
+const PROVIDER_ACCOUNT_LIST_ROW_HEIGHT: f32 = 92.0;
+const PROVIDER_ACCOUNT_LIST_SPACING: f32 = 10.0;
 const SETTINGS_SECTION_HEIGHT: f32 = 104.0;
 const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const ACCOUNT_LABEL_MAX_CHARS: usize = 30;
@@ -1581,6 +1585,14 @@ fn format_plan_label(label: &str) -> String {
     first.to_uppercase().chain(chars).collect()
 }
 
+#[derive(Clone)]
+struct UsageDisplayData {
+    percent: f32,
+    primary: String,
+    secondary: Option<String>,
+    pace: Option<usage_display::UsagePace>,
+}
+
 fn selected_provider_view<'a>(
     provider: Option<&'a ProviderRuntimeState>,
     state: &'a AppState,
@@ -1598,6 +1610,7 @@ fn selected_provider_view<'a>(
     let mut content = column![summary]
         .spacing(PROVIDER_CARD_SPACING)
         .width(Length::Fill);
+    let inactive_accounts = provider_detail_accounts(state, provider);
 
     if let Some(snapshot) = snapshot {
         if active_account.is_some_and(|account| account.health == ProviderHealth::Error) {
@@ -1636,6 +1649,14 @@ fn selected_provider_view<'a>(
         }
     } else {
         content = content.push(provider_status_info(provider, state, active_account));
+    }
+
+    if !inactive_accounts.is_empty() {
+        content = content.push(inactive_accounts_section(
+            inactive_accounts,
+            active_account.is_some(),
+            config,
+        ));
     }
 
     Element::from(content)
@@ -1787,8 +1808,141 @@ fn provider_body_height(state: &AppState, provider: Option<&ProviderRuntimeState
     }
 
     let extra_sections = f32::from(u16::try_from(sections.saturating_sub(1)).unwrap_or(u16::MAX));
-    PROVIDER_SUMMARY_HEIGHT
-        + extra_sections * (PROVIDER_SECTION_HEIGHT + PROVIDER_HEIGHT_SECTION_SPACING)
+    let mut height =
+        PROVIDER_SUMMARY_HEIGHT + extra_sections * (PROVIDER_SECTION_HEIGHT + PROVIDER_HEIGHT_SECTION_SPACING);
+    let account_rows = provider_detail_accounts(state, provider).len();
+    if account_rows > 0 {
+        let account_rows = f32::from(u16::try_from(account_rows).unwrap_or(u16::MAX));
+        height += PROVIDER_HEIGHT_SECTION_SPACING
+            + PROVIDER_ACCOUNT_LIST_TITLE_HEIGHT
+            + account_rows * PROVIDER_ACCOUNT_LIST_ROW_HEIGHT;
+        if account_rows > 1.0 {
+            height += (account_rows - 1.0) * PROVIDER_ACCOUNT_LIST_SPACING;
+        }
+    }
+    height
+}
+
+fn provider_detail_accounts<'a>(
+    state: &'a AppState,
+    provider: &'a ProviderRuntimeState,
+) -> Vec<&'a ProviderAccountRuntimeState> {
+    let active_id = provider.active_account_id.as_deref();
+    state
+        .accounts_for(provider.provider)
+        .into_iter()
+        .filter(|account| Some(account.account_id.as_str()) != active_id)
+        .collect()
+}
+
+fn inactive_accounts_section<'a>(
+    accounts: Vec<&'a ProviderAccountRuntimeState>,
+    has_active_account: bool,
+    config: &'a Config,
+) -> Element<'a, Message> {
+    let title = if has_active_account {
+        fl!("other-accounts-label")
+    } else {
+        fl!("accounts-label")
+    };
+    let mut list = column![].spacing(PROVIDER_ACCOUNT_LIST_SPACING).width(Length::Fill);
+    for account in accounts {
+        list = list.push(inactive_account_row(account, config));
+    }
+
+    Element::from(
+        column![widget::text(title).size(18), list]
+            .spacing(8)
+            .width(Length::Fill),
+    )
+}
+
+fn inactive_account_row<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    config: &'a Config,
+) -> Element<'a, Message> {
+    let snapshot = account.snapshot.as_ref();
+    let label = account_display_label(account, snapshot);
+    let mut header = row![
+        account_label_text(label, 14),
+        cosmic::iced::widget::Space::new().width(Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    if let Some(updated) = account.last_success_at.map(format_updated_label) {
+        header = header.push(widget::text(updated).size(12));
+    }
+
+    let mut content = column![header].spacing(6).width(Length::Fill);
+
+    if let Some(snapshot) = snapshot {
+        if let Some(window) = snapshot
+            .session_window()
+            .or_else(|| snapshot.headline_window())
+            .or_else(|| snapshot.windows.first())
+        {
+            let display = usage_display_data(
+                window,
+                config.reset_time_format,
+                config.usage_amount_format,
+                inactive_account_snapshot_time(account, snapshot),
+            );
+            content = content.push(widget::text(window.label.clone()).size(14));
+            content = content.push(muted_progress_bar(display.percent));
+            content = content.push(
+                row![
+                    widget::text(display.primary).size(13),
+                    cosmic::iced::widget::Space::new().width(Length::Fill),
+                    widget::text(display.secondary.unwrap_or_default()).size(12),
+                ]
+                .align_y(Alignment::Center),
+            );
+        } else {
+            content = content.push(widget::text(account.status_line()).size(13));
+        }
+    } else {
+        content = content.push(widget::text(account.status_line()).size(13));
+    }
+
+    Element::from(
+        container(content)
+            .width(Length::Fill)
+            .padding([10, 12])
+            .style(|theme| {
+                let cosmic = theme.cosmic();
+                let surface = &cosmic.background.component;
+                widget::container::Style {
+                    text_color: Some(apply_alpha(surface.on.into(), 0.68)),
+                    background: Some(Background::Color(apply_alpha(surface.base.into(), 0.6))),
+                    border: cosmic::iced::Border {
+                        radius: cosmic.corner_radii.radius_s.into(),
+                        width: 1.0,
+                        color: apply_alpha(surface.divider.into(), 0.85),
+                    },
+                    shadow: cosmic::iced::Shadow::default(),
+                    icon_color: Some(apply_alpha(surface.on.into(), 0.68)),
+                    snap: true,
+                }
+            }),
+    )
+}
+
+fn account_display_label<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    snapshot: Option<&'a UsageSnapshot>,
+) -> &'a str {
+    snapshot
+        .and_then(|snapshot| snapshot.identity.email.as_deref())
+        .filter(|label| !label.trim().is_empty())
+        .unwrap_or(account.label.as_str())
+}
+
+fn inactive_account_snapshot_time(
+    account: &ProviderAccountRuntimeState,
+    snapshot: &UsageSnapshot,
+) -> DateTime<Utc> {
+    account.last_success_at.unwrap_or(snapshot.updated_at)
 }
 
 fn usage_section(
@@ -1796,16 +1950,19 @@ fn usage_section(
     reset_time_format: ResetTimeFormat,
     usage_amount_format: UsageAmountFormat,
 ) -> Element<'static, Message> {
-    let now = chrono::Utc::now();
-    let pct = usage_display::displayed_amount_percent(window, now, usage_amount_format);
-    let pace = usage_display::pace(window, now);
+    let display = usage_display_data(
+        window,
+        reset_time_format,
+        usage_amount_format,
+        Utc::now(),
+    );
     usage_block(
         window.label.clone(),
-        pct,
-        usage_display::usage_amount_label(window, now, usage_amount_format),
-        usage_display::reset_label(window, now, reset_time_format),
-        pace,
-        pace_marker_percent(pace, usage_amount_format),
+        display.percent,
+        display.primary,
+        display.secondary,
+        display.pace,
+        pace_marker_percent(display.pace, usage_amount_format),
     )
 }
 
@@ -1815,16 +1972,19 @@ fn extra_section(
     usage_amount_format: UsageAmountFormat,
 ) -> Element<'static, Message> {
     let cost_text = cost.map(format_cost);
-    let now = chrono::Utc::now();
-    let pct = usage_display::displayed_amount_percent(window, now, usage_amount_format);
-    let pace = usage_display::pace(window, now);
+    let display = usage_display_data(
+        window,
+        ResetTimeFormat::Relative,
+        usage_amount_format,
+        Utc::now(),
+    );
     usage_block(
         window.label.clone(),
-        pct,
-        usage_display::usage_amount_label(window, now, usage_amount_format),
+        display.percent,
+        display.primary,
         cost_text,
-        pace,
-        pace_marker_percent(pace, usage_amount_format),
+        display.pace,
+        pace_marker_percent(display.pace, usage_amount_format),
     )
 }
 
@@ -1863,7 +2023,7 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
 
 fn account_section(account_label: &str, plan_label: Option<&str>) -> Element<'static, Message> {
     let mut heading = row![
-        widget::text(fl!("account-label")).size(18),
+        widget::text(fl!("active-account-label")).size(18),
         cosmic::iced::widget::Space::new().width(Length::Fill),
     ]
     .align_y(Alignment::Center);
@@ -1937,6 +2097,40 @@ fn usage_block(
     .spacing(6);
 
     card(col)
+}
+
+fn usage_display_data(
+    window: &UsageWindow,
+    reset_time_format: ResetTimeFormat,
+    usage_amount_format: UsageAmountFormat,
+    now: DateTime<Utc>,
+) -> UsageDisplayData {
+    UsageDisplayData {
+        percent: usage_display::displayed_amount_percent(window, now, usage_amount_format),
+        primary: usage_display::usage_amount_label(window, now, usage_amount_format),
+        secondary: usage_display::reset_label(window, now, reset_time_format),
+        pace: usage_display::pace(window, now),
+    }
+}
+
+fn muted_progress_bar(percent: f32) -> Element<'static, Message> {
+    progress_bar(0.0..=100.0, percent)
+        .length(Length::Fill)
+        .girth(Length::Fixed(8.0))
+        .class(cosmic::theme::ProgressBar::custom(|theme: &cosmic::Theme| {
+            let cosmic = theme.cosmic();
+            let surface = &cosmic.background.component;
+            cosmic::iced::widget::progress_bar::Style {
+                background: Background::Color(apply_alpha(surface.divider.into(), 0.35)),
+                bar: Background::Color(apply_alpha(surface.on.into(), 0.28)),
+                border: cosmic::iced::Border {
+                    radius: 4.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+            }
+        }))
+        .into()
 }
 
 fn paced_progress_bar(
@@ -2128,7 +2322,7 @@ fn active_last_success_at(
 }
 
 fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> String {
-    let age = chrono::Utc::now() - last_success_at;
+    let age = Utc::now() - last_success_at;
     if age.num_seconds() < 10 {
         fl!("updated-just-now")
     } else if age.num_minutes() < 1 {
@@ -2140,5 +2334,40 @@ fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> Strin
     } else {
         let date = last_success_at.format("%Y-%m-%d %H:%M").to_string();
         fl!("updated-at", date = date.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone};
+
+    fn strip_isolation_marks(s: &str) -> String {
+        s.replace(['\u{2068}', '\u{2069}'], "")
+    }
+
+    #[test]
+    fn usage_display_data_keeps_last_known_snapshot_value() {
+        let snapshot_time = Utc.with_ymd_and_hms(2026, 4, 26, 11, 0, 0).unwrap();
+        let window = UsageWindow {
+            label: "Session".to_string(),
+            used_percent: 61.2,
+            reset_at: Some(snapshot_time + Duration::minutes(30)),
+            window_seconds: None,
+            reset_description: None,
+        };
+
+        let display = usage_display_data(
+            &window,
+            ResetTimeFormat::Relative,
+            UsageAmountFormat::Used,
+            snapshot_time,
+        );
+
+        assert!((display.percent - 61.2).abs() < 0.001);
+        assert_eq!(
+            display.secondary.as_deref().map(strip_isolation_marks),
+            Some("Resets in 30m".to_string())
+        );
     }
 }

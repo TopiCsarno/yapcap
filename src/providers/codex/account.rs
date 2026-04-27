@@ -185,6 +185,23 @@ pub(crate) fn find_matching_account<'a>(
         .find(|account| account.email.as_deref().map(normalized_email) == Some(email.clone()))
 }
 
+pub(crate) fn find_matching_account_by_identity<'a>(
+    config: &'a Config,
+    provider_account_id: Option<&str>,
+    email: Option<&str>,
+) -> Option<&'a ManagedCodexAccountConfig> {
+    if let Some(provider_account_id) = provider_account_id
+        && let Some(account) = config
+            .codex_managed_accounts
+            .iter()
+            .find(|account| account.provider_account_id.as_deref() == Some(provider_account_id))
+    {
+        return Some(account);
+    }
+
+    find_matching_account(config, email)
+}
+
 pub(crate) fn managed_home(account_id: &str) -> PathBuf {
     paths().codex_accounts_dir.join(account_id)
 }
@@ -379,14 +396,9 @@ fn is_path_within(path: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support;
     use base64::Engine;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
@@ -418,7 +430,7 @@ mod tests {
 
     #[test]
     fn imports_external_codex_home_into_managed_storage() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-source");
         write_auth(&home, "acct-123", "user@example.com");
         let state_root = temp_dir("codex-import-state");
@@ -451,7 +463,7 @@ mod tests {
 
     #[test]
     fn reuses_existing_managed_account_for_same_email() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-email-source");
         write_auth(&home, "acct-456", "user@example.com");
         let managed_home = temp_dir("codex-import-email-managed");
@@ -493,7 +505,7 @@ mod tests {
 
     #[test]
     fn repairs_existing_managed_account_when_home_was_cleared() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-repair-source");
         write_auth(&home, "acct-456", "user@example.com");
         let state_root = temp_dir("codex-import-repair-state");

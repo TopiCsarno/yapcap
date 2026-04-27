@@ -51,14 +51,9 @@ pub fn new_account_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support;
     use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn test_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -70,7 +65,7 @@ mod tests {
 
     #[test]
     fn browser_command_uses_installed_brave_variant() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let bin_dir = test_dir("brave-bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
         std::fs::write(bin_dir.join("brave-browser"), "").unwrap();
@@ -89,7 +84,7 @@ mod tests {
 
     #[test]
     fn browser_command_falls_back_to_default_name_when_missing() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         unsafe {
             std::env::set_var("PATH", "");
         }

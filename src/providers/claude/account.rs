@@ -708,13 +708,8 @@ fn set_private_dir_permissions(_path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::auth::load_claude_auth_from_config_dir;
-    use std::sync::{Mutex, OnceLock};
+    use crate::test_support;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -777,7 +772,7 @@ mod tests {
 
     #[test]
     fn recovers_managed_claude_dir_when_config_empty() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let state_root = temp_dir("claude-recover-state");
         let skip_external = temp_dir("claude-recover-no-external");
         unsafe {
@@ -808,7 +803,7 @@ mod tests {
 
     #[test]
     fn imports_external_claude_config_into_managed_storage() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let source = temp_dir("claude-import-source");
         write_credentials(&source);
         fs::create_dir_all(source.join(".git")).unwrap();
@@ -845,7 +840,7 @@ mod tests {
     fn sync_managed_accounts_fills_email_from_access_token_when_missing() {
         use base64::Engine;
 
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let dir = temp_dir("claude-sync-email-from-jwt");
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("{}");
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -887,7 +882,7 @@ mod tests {
     fn repeated_external_import_does_not_add_duplicate_account() {
         use base64::Engine;
 
-        let _guard = env_lock().lock().unwrap();
+        let _guard = test_support::env_lock();
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("{}");
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(r#"{"email":"same@example.com"}"#);

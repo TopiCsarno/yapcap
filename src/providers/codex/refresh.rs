@@ -77,7 +77,11 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_decodes_access_token() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let listener = match TcpListener::bind(("127.0.0.1", 0)) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(error) => panic!("{error}"),
+        };
         let addr = listener.local_addr().unwrap();
 
         let server = tokio::task::spawn_blocking(move || {

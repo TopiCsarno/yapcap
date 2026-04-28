@@ -69,7 +69,7 @@ fn select_provider_falls_back_when_current_disabled() {
 fn applet_button_size_uses_panel_icon_style() {
     let core = cosmic::Core::default();
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
-    let (major_padding, minor_padding) = core.applet.suggested_padding(true);
+    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
     let horizontal_padding = if core.applet.is_horizontal() {
         major_padding
     } else {

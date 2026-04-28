@@ -38,7 +38,6 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 <td align="center" valign="top" colspan="2" width="50%">
 
 <strong>Popup — usage detail</strong><br />
-Multi-account view: two Codex columns with <strong>Show all accounts</strong> on.<br /><br />
 <img src="resources/screenshots/screenshot-detail.png" alt="YapCap popup showing Codex usage for two accounts" />
 
 </td>

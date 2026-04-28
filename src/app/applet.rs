@@ -140,7 +140,7 @@ pub(super) fn applet_button_size(
     n_accounts: usize,
 ) -> (f32, f32) {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
-    let (major_padding, minor_padding) = core.applet.suggested_padding(true);
+    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
     let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
         (major_padding, minor_padding)
     } else {

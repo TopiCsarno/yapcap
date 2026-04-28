@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 200]
+#[version = 201]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -23,11 +23,11 @@ pub struct Config {
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
-    pub active_codex_account_id: Option<String>,
+    pub selected_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
-    pub active_claude_account_id: Option<String>,
+    pub selected_claude_account_ids: Vec<String>,
     pub claude_managed_accounts: Vec<ManagedClaudeAccountConfig>,
-    pub active_cursor_account_id: Option<String>,
+    pub selected_cursor_account_ids: Vec<String>,
     pub cursor_managed_accounts: Vec<ManagedCursorAccountConfig>,
     pub cursor_browser: Browser,
     pub cursor_profile_id: Option<String>,
@@ -45,11 +45,11 @@ impl Default for Config {
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
-            active_codex_account_id: None,
+            selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
-            active_claude_account_id: None,
+            selected_claude_account_ids: Vec::new(),
             claude_managed_accounts: Vec::new(),
-            active_cursor_account_id: None,
+            selected_cursor_account_ids: Vec::new(),
             cursor_managed_accounts: Vec::new(),
             cursor_browser: Browser::Brave,
             cursor_profile_id: None,
@@ -69,6 +69,23 @@ impl Config {
             ProviderId::Codex => self.codex_enabled,
             ProviderId::Claude => self.claude_enabled,
             ProviderId::Cursor => self.cursor_enabled,
+        }
+    }
+
+    #[must_use]
+    pub fn selected_account_ids(&self, provider: ProviderId) -> &[String] {
+        match provider {
+            ProviderId::Codex => &self.selected_codex_account_ids,
+            ProviderId::Claude => &self.selected_claude_account_ids,
+            ProviderId::Cursor => &self.selected_cursor_account_ids,
+        }
+    }
+
+    pub fn selected_account_ids_mut(&mut self, provider: ProviderId) -> &mut Vec<String> {
+        match provider {
+            ProviderId::Codex => &mut self.selected_codex_account_ids,
+            ProviderId::Claude => &mut self.selected_claude_account_ids,
+            ProviderId::Cursor => &mut self.selected_cursor_account_ids,
         }
     }
 
@@ -508,11 +525,11 @@ mod tests {
                 "codex_enabled": true,
                 "claude_enabled": true,
                 "cursor_enabled": true,
-                "active_codex_account_id": null,
+                "selected_codex_account_ids": [],
                 "codex_managed_accounts": [],
-                "active_claude_account_id": null,
+                "selected_claude_account_ids": [],
                 "claude_managed_accounts": [],
-                "active_cursor_account_id": null,
+                "selected_cursor_account_ids": [],
                 "cursor_managed_accounts": [],
                 "cursor_browser": "brave",
                 "cursor_profile_id": null,

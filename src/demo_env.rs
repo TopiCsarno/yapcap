@@ -59,7 +59,7 @@ pub fn apply(config: &Config, state: &mut AppState) {
         state.upsert_provider(ProviderRuntimeState {
             provider,
             enabled: true,
-            active_account_id: Some(account_id),
+            selected_account_ids: vec![account_id],
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
             legacy_display_snapshot: None,

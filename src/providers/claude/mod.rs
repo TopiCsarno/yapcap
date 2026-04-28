@@ -84,13 +84,15 @@ pub async fn fetch(
     config_dir: PathBuf,
 ) -> Result<UsageSnapshot, ClaudeError> {
     let credentials_path = crate::auth::claude_credentials_path_for_config_dir(&config_dir);
-    let auth = load_fresh_auth(&credentials_path, Utc::now())?;
+    let (auth, was_refreshed) = load_fresh_auth(&credentials_path, Utc::now())?;
+    if was_refreshed {
+        return Err(ClaudeError::CredentialsRefreshed);
+    }
     let mut snapshot = match request_oauth(client, &auth).await {
         Err(ClaudeError::Unauthorized) => {
             warn!("claude usage endpoint returned 401; attempting Claude Code credential refresh");
             refresh_claude_credentials(&credentials_path)?;
-            let auth = load_claude_auth_from_path(&credentials_path)?;
-            request_oauth(client, &auth).await?
+            return Err(ClaudeError::CredentialsRefreshed);
         }
         Ok(s) => s,
         Err(e) => return Err(e),

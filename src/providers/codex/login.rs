@@ -162,20 +162,52 @@ async fn run_login_inner(
     Ok(CodexLoginSuccess { account, snapshot })
 }
 
+fn find_codex_binary() -> Option<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(':') {
+            let candidate = std::path::PathBuf::from(dir).join("codex");
+            if candidate.is_file() {
+                return Some((candidate, None));
+            }
+        }
+    }
+    let node_dir = dirs::home_dir()?.join(".nvm/versions/node");
+    let mut candidates: Vec<std::path::PathBuf> = std::fs::read_dir(&node_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("bin/codex"))
+        .filter(|p| p.is_file())
+        .collect();
+    candidates.sort_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
+    let binary = candidates.pop()?;
+    let bin_dir = binary.parent().map(Path::to_path_buf);
+    Some((binary, bin_dir))
+}
+
 async fn run_codex_login_process(
     flow_id: &str,
     pending_home: &Path,
     args: &[&str],
     output: &mut cosmic::iced::futures::channel::mpsc::Sender<CodexLoginEvent>,
 ) -> Result<(), String> {
-    let mut child = Command::new("codex")
+    let (binary, extra_bin_dir) =
+        find_codex_binary().ok_or_else(|| "Codex CLI not found".to_string())?;
+    let path_env = match extra_bin_dir {
+        Some(bin_dir) => {
+            let current = std::env::var("PATH").unwrap_or_default();
+            format!("{}:{current}", bin_dir.display())
+        }
+        None => std::env::var("PATH").unwrap_or_default(),
+    };
+    let mut child = Command::new(binary)
         .env("CODEX_HOME", pending_home)
+        .env("PATH", path_env)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| login_spawn_error(&error))?;
+        .map_err(|error| format!("failed to start Codex login: {error}"))?;
 
     if let Some(stderr) = child.stderr.take() {
         let flow_id = flow_id.to_string();
@@ -249,14 +281,6 @@ fn find_url(line: &str) -> Option<String> {
         })
 }
 
-fn login_spawn_error(error: &std::io::Error) -> String {
-    if error.kind() == std::io::ErrorKind::NotFound {
-        "Codex CLI not found".to_string()
-    } else {
-        format!("failed to start Codex login: {error}")
-    }
-}
-
 struct PendingDirGuard {
     path: PathBuf,
     keep: bool,
@@ -286,13 +310,6 @@ mod tests {
             find_url("Open https://example.com/device and sign in."),
             Some("https://example.com/device".to_string())
         );
-    }
-
-    #[test]
-    fn spawn_error_names_missing_cli() {
-        let error = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
-
-        assert_eq!(login_spawn_error(&error), "Codex CLI not found");
     }
 
     #[test]

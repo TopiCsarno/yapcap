@@ -53,10 +53,35 @@ pub fn refresh_provider_task(
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
-    Task::perform(
-        async move { runtime::refresh_one(config, provider, previous, previous_accounts).await },
-        |refresh_result| cosmic::Action::App(Message::ProviderRefreshed(Box::new(refresh_result))),
-    )
+
+    let account_ids = account_ids_to_refresh(&config, provider, previous.as_ref());
+    if account_ids.is_empty() {
+        return Task::none();
+    }
+
+    let tasks: Vec<Task<Message>> = account_ids
+        .into_iter()
+        .map(|account_id| {
+            let config = config.clone();
+            let previous = previous.clone();
+            let previous_accounts = previous_accounts.clone();
+            Task::perform(
+                async move {
+                    runtime::refresh_account(
+                        config,
+                        provider,
+                        account_id,
+                        previous,
+                        previous_accounts,
+                    )
+                    .await
+                },
+                |result| cosmic::Action::App(Message::ProviderRefreshed(Box::new(result))),
+            )
+        })
+        .collect();
+
+    Task::batch(tasks)
 }
 
 pub fn refresh_provider_account_statuses_task(
@@ -87,6 +112,25 @@ pub fn refresh_provider_account_statuses_task(
     )
 }
 
+fn account_ids_to_refresh(
+    config: &Config,
+    provider: ProviderId,
+    previous: Option<&crate::model::ProviderRuntimeState>,
+) -> Vec<String> {
+    let config_ids = config.selected_account_ids(provider);
+    if !config_ids.is_empty() {
+        return config_ids.to_vec();
+    }
+    if let Some(prev_id) = previous.and_then(|p| p.selected_account_ids.first()) {
+        return vec![prev_id.clone()];
+    }
+    registry::discover_accounts(provider, config)
+        .into_iter()
+        .next()
+        .map(|a| vec![a.account_id])
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,7 +139,7 @@ mod tests {
     fn mark_all_ready(state: &mut AppState) {
         for provider in &mut state.providers {
             provider.account_status = AccountSelectionStatus::Ready;
-            provider.active_account_id = Some("default".to_string());
+            provider.selected_account_ids = vec!["default".to_string()];
         }
     }
 

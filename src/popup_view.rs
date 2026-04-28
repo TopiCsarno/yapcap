@@ -20,7 +20,8 @@ use cosmic::iced::widget::{column, container, progress_bar, row, scrollable};
 use cosmic::iced::{Alignment, Background, Color, Length, Size};
 use cosmic::widget;
 
-const POPUP_WIDTH: f32 = 420.0;
+pub const POPUP_COLUMN_WIDTH: f32 = 420.0;
+const POPUP_WIDTH: f32 = POPUP_COLUMN_WIDTH;
 const POPUP_MAX_HEIGHT: f32 = 1080.0;
 const POPUP_PADDING: f32 = 32.0;
 const POPUP_CHROME_SPACING: f32 = 42.0;
@@ -106,30 +107,66 @@ pub fn popup_content<'a>(
         .width(Length::Fill)
         .height(Length::Fill);
 
-    let content = column![header, nav_row, body_panel, footer]
-        .spacing(14)
-        .padding(16)
-        .width(Length::Fill)
-        .height(Length::Fill);
+    let content = column![
+        narrow_chrome(header),
+        narrow_chrome(nav_row),
+        body_panel,
+        narrow_chrome(footer),
+    ]
+    .spacing(14)
+    .padding(16)
+    .width(Length::Fill)
+    .height(Length::Fill);
 
     Element::from(content)
 }
 
-pub fn popup_session_size(state: &AppState) -> Size {
+pub fn popup_max_width(state: &AppState) -> f32 {
+    ProviderId::ALL
+        .iter()
+        .map(|&p| selected_account_count(state, p))
+        .fold(1.0_f32, f32::max)
+        * POPUP_WIDTH
+}
+
+pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Size {
+    let n_cols = selected_account_count(state, selected_provider);
+    let width = POPUP_WIDTH * n_cols;
     let provider_height = state
         .providers
         .iter()
-        .map(|provider| provider_body_height(state, Some(provider)))
+        .map(|provider| provider_body_height_multi(state, Some(provider)))
         .fold(PROVIDER_SUMMARY_HEIGHT, f32::max);
-    let body_height = provider_height.max(settings_body_height(state));
     let height = POPUP_PADDING
         + POPUP_CHROME_SPACING
         + POPUP_HEADER_HEIGHT
         + POPUP_TAB_HEIGHT
         + POPUP_FOOTER_HEIGHT
-        + body_height;
+        + provider_height;
 
+    Size::new(width, height.clamp(1.0, POPUP_MAX_HEIGHT))
+}
+
+pub fn popup_settings_size(state: &AppState) -> Size {
+    let height = POPUP_PADDING
+        + POPUP_CHROME_SPACING
+        + POPUP_HEADER_HEIGHT
+        + POPUP_TAB_HEIGHT
+        + POPUP_FOOTER_HEIGHT
+        + settings_body_height(state);
     Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+}
+
+fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
+    let n = state.selected_accounts(provider).len().max(1);
+    f32::from(u8::try_from(n).unwrap_or(u8::MAX))
+}
+
+fn narrow_chrome<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(container(content.into()).width(Length::Fixed(POPUP_WIDTH)))
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+        .into()
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -413,7 +450,9 @@ fn codex_accounts_section<'a>(
     enabled: bool,
 ) -> Element<'a, Message> {
     let codex = state.provider(ProviderId::Codex);
-    let active_id = codex.and_then(|provider| provider.active_account_id.as_deref());
+    let selected_ids: Vec<&str> = codex
+        .map(|p| p.selected_account_ids.iter().map(String::as_str).collect())
+        .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Codex);
     let mut rows = column![].spacing(8).width(Length::Fill);
 
@@ -423,7 +462,10 @@ fn codex_accounts_section<'a>(
         let mut account_rows = column![].spacing(6).width(Length::Fill);
         for account in accounts {
             account_rows = account_rows.push(codex_account_settings_row(
-                account, active_id, config, enabled,
+                account,
+                &selected_ids,
+                config,
+                enabled,
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
@@ -450,9 +492,10 @@ fn claude_accounts_section<'a>(
     claude_login: Option<&'a ClaudeLoginState>,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let active_id = state
+    let selected_ids: Vec<&str> = state
         .provider(ProviderId::Claude)
-        .and_then(|p| p.active_account_id.as_deref());
+        .map(|p| p.selected_account_ids.iter().map(String::as_str).collect())
+        .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Claude);
     let mut rows = column![].spacing(8).width(Length::Fill);
 
@@ -462,7 +505,10 @@ fn claude_accounts_section<'a>(
         let mut account_rows = column![].spacing(6).width(Length::Fill);
         for account in accounts {
             account_rows = account_rows.push(claude_account_settings_row(
-                account, active_id, config, enabled,
+                account,
+                &selected_ids,
+                config,
+                enabled,
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
@@ -483,9 +529,10 @@ fn cursor_accounts_section<'a>(
     cursor_login: Option<&'a CursorLoginState>,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let active_id = state
+    let selected_ids: Vec<&str> = state
         .provider(ProviderId::Cursor)
-        .and_then(|p| p.active_account_id.as_deref());
+        .map(|p| p.selected_account_ids.iter().map(String::as_str).collect())
+        .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Cursor);
     let mut rows = column![].spacing(8).width(Length::Fill);
 
@@ -495,7 +542,10 @@ fn cursor_accounts_section<'a>(
         let mut account_rows = column![].spacing(6).width(Length::Fill);
         for account in accounts {
             account_rows = account_rows.push(cursor_account_settings_row(
-                account, active_id, config, enabled,
+                account,
+                &selected_ids,
+                config,
+                enabled,
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
@@ -512,11 +562,11 @@ fn cursor_accounts_section<'a>(
 
 fn cursor_account_settings_row<'a>(
     account: &'a ProviderAccountRuntimeState,
-    active_id: Option<&str>,
+    selected_ids: &[&str],
     config: &'a Config,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let is_active = active_id == Some(account.account_id.as_str());
+    let is_selected = selected_ids.contains(&account.account_id.as_str());
     let requires_action = cursor_account_requires_action(account);
     let action_support =
         account_action_support(config, ProviderId::Cursor, account.account_id.as_str());
@@ -545,15 +595,15 @@ fn cursor_account_settings_row<'a>(
         .width(Length::Fill);
 
     let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_active))
+        .class(account_row_button_class(is_selected))
         .width(Length::Fill)
-        .on_press_maybe((enabled && !is_active).then_some(Message::SetActiveAccount(
+        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
             ProviderId::Cursor,
             account_id.clone(),
         )));
 
     let delete_press = cursor_delete_message(config, account, enabled);
-    let mut actions = row![account_selected_marker(is_active, enabled)]
+    let mut actions = row![account_selected_marker(is_selected, enabled)]
         .spacing(0)
         .align_y(Alignment::Center);
     if can_reauthenticate {
@@ -576,7 +626,7 @@ fn cursor_account_settings_row<'a>(
     Element::from(account_row_container(
         selector.into(),
         actions.into(),
-        is_active,
+        is_selected,
         enabled,
         requires_action,
     ))
@@ -748,11 +798,11 @@ fn cursor_delete_message(
 
 fn codex_account_settings_row<'a>(
     account: &'a ProviderAccountRuntimeState,
-    active_id: Option<&str>,
+    selected_ids: &[&str],
     config: &'a Config,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let is_active = active_id == Some(account.account_id.as_str());
+    let is_selected = selected_ids.contains(&account.account_id.as_str());
     let account_id = account.account_id.clone();
     let selector_content = container(
         row![account_label_text(&account.label, 14),]
@@ -764,9 +814,9 @@ fn codex_account_settings_row<'a>(
     .width(Length::Fill);
 
     let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_active))
+        .class(account_row_button_class(is_selected))
         .width(Length::Fill)
-        .on_press_maybe((enabled && !is_active).then_some(Message::SetActiveAccount(
+        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
             ProviderId::Codex,
             account_id.clone(),
         )));
@@ -775,7 +825,7 @@ fn codex_account_settings_row<'a>(
         .is_some_and(|support| support.can_delete);
     let delete_press = (enabled && can_delete).then_some(Message::DeleteCodexAccount(account_id));
     let actions = row![
-        account_selected_marker(is_active, enabled),
+        account_selected_marker(is_selected, enabled),
         widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
             .class(account_row_icon_button_class())
             .tooltip(fl!("account-delete-tooltip"))
@@ -787,7 +837,7 @@ fn codex_account_settings_row<'a>(
     Element::from(account_row_container(
         selector.into(),
         actions.into(),
-        is_active,
+        is_selected,
         enabled,
         false,
     ))
@@ -812,11 +862,11 @@ fn claude_account_row_label(account: &ProviderAccountRuntimeState, config: &Conf
 
 fn claude_account_settings_row<'a>(
     account: &'a ProviderAccountRuntimeState,
-    active_id: Option<&str>,
+    selected_ids: &[&str],
     config: &'a Config,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let is_active = active_id == Some(account.account_id.as_str());
+    let is_selected = selected_ids.contains(&account.account_id.as_str());
     let account_id = account.account_id.clone();
     let row_label = claude_account_row_label(account, config);
     let selector_content = container(
@@ -829,9 +879,9 @@ fn claude_account_settings_row<'a>(
     .width(Length::Fill);
 
     let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_active))
+        .class(account_row_button_class(is_selected))
         .width(Length::Fill)
-        .on_press_maybe((enabled && !is_active).then_some(Message::SetActiveAccount(
+        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
             ProviderId::Claude,
             account_id.clone(),
         )));
@@ -840,7 +890,7 @@ fn claude_account_settings_row<'a>(
         .is_some_and(|support| support.can_delete);
     let delete_press = (enabled && can_delete).then_some(Message::DeleteClaudeAccount(account_id));
     let actions = row![
-        account_selected_marker(is_active, enabled),
+        account_selected_marker(is_selected, enabled),
         widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
             .class(account_row_icon_button_class())
             .tooltip(fl!("account-delete-tooltip"))
@@ -852,7 +902,7 @@ fn claude_account_settings_row<'a>(
     Element::from(account_row_container(
         selector.into(),
         actions.into(),
-        is_active,
+        is_selected,
         enabled,
         false,
     ))
@@ -1367,19 +1417,23 @@ fn provider_tab(
     provider: &ProviderRuntimeState,
     selected: bool,
 ) -> Element<'static, Message> {
-    let weekly = tab_percent(state, provider);
+    let percents = tab_percents(state, provider);
     let icon_variant = provider_icon_variant();
     let badge = widget::icon::icon(provider_icon_handle(provider.provider, icon_variant))
         .size(18)
         .width(Length::Fixed(18.0))
         .height(Length::Fixed(18.0));
     let label = widget::text(provider.provider.label()).size(12);
-    let bar = progress_bar(0.0..=100.0, weekly)
-        .length(Length::Fill)
-        .girth(Length::Fixed(4.0));
+    let bars = percents.into_iter().fold(column![].spacing(4), |col, pct| {
+        col.push(
+            progress_bar(0.0..=100.0, pct)
+                .length(Length::Fill)
+                .girth(Length::Fixed(4.0)),
+        )
+    });
 
     let content = container(
-        column![badge, label, bar]
+        column![badge, label, bars]
             .spacing(5)
             .align_x(Alignment::Center)
             .width(Length::Fill),
@@ -1461,11 +1515,7 @@ fn apply_alpha(mut color: Color, opacity: f32) -> Color {
     color
 }
 
-fn provider_summary(
-    provider: &ProviderRuntimeState,
-    active_account: Option<&ProviderAccountRuntimeState>,
-    state: &AppState,
-) -> Element<'static, Message> {
+fn provider_summary(provider: &ProviderRuntimeState) -> Element<'static, Message> {
     let title = row![
         widget::icon::icon(provider_icon_handle(
             provider.provider,
@@ -1478,22 +1528,8 @@ fn provider_summary(
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    let title_row = row![
-        title,
-        cosmic::iced::widget::Space::new().width(Length::Fill),
-        provider_status_badge(state, provider)
-    ]
-    .align_y(Alignment::Center);
-    let updated_label = active_account
-        .and_then(|account| account.last_success_at)
-        .map(format_updated_label);
 
-    let mut col = column![title_row].spacing(6);
-    if let Some(label) = updated_label {
-        col = col.push(widget::text(label).size(14));
-    }
-
-    card(col)
+    card(title)
 }
 
 fn badge_success(label: impl Into<String>) -> Element<'static, Message> {
@@ -1589,31 +1625,69 @@ fn selected_provider_view<'a>(
     let Some(provider) = provider else {
         return no_providers_view();
     };
-    let active_account = state.active_account(provider.provider);
-    let snapshot = active_account
-        .and_then(|account| account.snapshot.as_ref())
-        .or(provider.legacy_display_snapshot.as_ref());
+    let accounts = state.selected_accounts(provider.provider);
+    let summary = provider_summary(provider);
 
-    let summary = provider_summary(provider, active_account, state);
-    let mut content = column![summary]
-        .spacing(PROVIDER_CARD_SPACING)
-        .width(Length::Fill);
+    if accounts.len() <= 1 {
+        let account = accounts.first().copied();
+        let items = account_column_items(account, provider, state, config);
+        let mut content = column![summary]
+            .spacing(PROVIDER_CARD_SPACING)
+            .width(Length::Fill);
+        for item in items {
+            content = content.push(item);
+        }
+        Element::from(content)
+    } else {
+        let mut col = column![summary]
+            .spacing(PROVIDER_CARD_SPACING)
+            .width(Length::Fill);
+        let mut cols_row = row![].spacing(8).height(Length::Fill);
+        for account in &accounts {
+            cols_row = cols_row.push(account_column_view(account, provider, state, config));
+        }
+        col = col.push(cols_row);
+        Element::from(col)
+    }
+}
 
+fn account_column_items<'a>(
+    account: Option<&'a ProviderAccountRuntimeState>,
+    provider: &'a ProviderRuntimeState,
+    state: &'a AppState,
+    config: &'a Config,
+) -> Vec<Element<'a, Message>> {
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+    if let Some(account) = account {
+        items.push(account_column_header(account, provider));
+    }
+    items.extend(account_column_body_items(account, provider, state, config));
+    items
+}
+
+fn account_column_body_items<'a>(
+    account: Option<&'a ProviderAccountRuntimeState>,
+    provider: &'a ProviderRuntimeState,
+    state: &'a AppState,
+    config: &'a Config,
+) -> Vec<Element<'a, Message>> {
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+    let snapshot = active_snapshot_for_account(account, provider);
     if let Some(snapshot) = snapshot {
-        if active_account.is_some_and(|account| account.health == ProviderHealth::Error) {
-            content = content.push(provider_status_info(provider, state, active_account));
+        if account.is_some_and(|a| a.health == ProviderHealth::Error) {
+            items.push(provider_status_info(provider, state, account));
         }
         let mut cost_shown = false;
         for window in &snapshot.windows {
             if window.label == "Extra" && snapshot.provider_cost.is_some() {
-                content = content.push(extra_section(
+                items.push(extra_section(
                     window,
                     snapshot.provider_cost.as_ref(),
                     config.usage_amount_format,
                 ));
                 cost_shown = true;
             } else {
-                content = content.push(usage_section(
+                items.push(usage_section(
                     window,
                     config.reset_time_format,
                     config.usage_amount_format,
@@ -1621,24 +1695,85 @@ fn selected_provider_view<'a>(
             }
         }
         if !cost_shown && let Some(cost) = &snapshot.provider_cost {
-            content = content.push(cost_section(provider.provider, cost));
-        }
-        let account_label = snapshot
-            .identity
-            .email
-            .as_deref()
-            .or_else(|| active_account.map(|a| a.label.as_str()));
-        if let Some(account_label) = account_label {
-            content = content.push(account_section(
-                account_label,
-                snapshot.identity.plan.as_deref(),
-            ));
+            items.push(cost_section(provider.provider, cost));
         }
     } else {
-        content = content.push(provider_status_info(provider, state, active_account));
+        items.push(provider_status_info(provider, state, account));
+    }
+    items
+}
+
+fn account_column_header<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    provider: &'a ProviderRuntimeState,
+) -> Element<'a, Message> {
+    let snapshot = account.snapshot.as_ref();
+    let account_label = snapshot
+        .and_then(|s| s.identity.email.as_deref())
+        .filter(|e| !e.is_empty())
+        .unwrap_or(account.label.as_str());
+    let plan_label = snapshot.and_then(|s| s.identity.plan.as_deref());
+
+    let mut label_row = row![account_label_text(account_label, 14)]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+    label_row = label_row.push(cosmic::iced::widget::Space::new().width(Length::Fill));
+    if let Some(plan) = plan_label.filter(|p| !p.trim().is_empty()) {
+        label_row = label_row.push(plan_badge(plan));
     }
 
-    Element::from(content)
+    let status = account_status_badge(account, provider);
+    let mut status_row = row![status].spacing(8).align_y(Alignment::Center);
+    if let Some(updated) = account.last_success_at.map(format_updated_label) {
+        status_row = status_row.push(cosmic::iced::widget::Space::new().width(Length::Fill));
+        status_row = status_row.push(widget::text(updated).size(12));
+    }
+
+    card(
+        column![
+            widget::text(fl!("account-label")).size(18),
+            label_row,
+            status_row,
+        ]
+        .spacing(6)
+        .width(Length::Fill),
+    )
+}
+
+fn account_column_view<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    provider: &'a ProviderRuntimeState,
+    state: &'a AppState,
+    config: &'a Config,
+) -> Element<'a, Message> {
+    let header = account_column_header(account, provider);
+    let body = account_column_body_items(Some(account), provider, state, config);
+    let mut content = column![header]
+        .spacing(PROVIDER_CARD_SPACING)
+        .width(Length::Fill);
+    for item in body {
+        content = content.push(item);
+    }
+    container(content)
+        .width(Length::FillPortion(1))
+        .padding([0, 8])
+        .style(|theme: &cosmic::Theme| {
+            let cosmic = theme.cosmic();
+            widget::container::Style {
+                text_color: None,
+                background: Some(Background::Color(cosmic.background.component.base.into())),
+                border: cosmic::iced::Border {
+                    radius: cosmic.corner_radii.radius_m.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: cosmic::iced::Shadow::default(),
+                icon_color: None,
+                snap: false,
+            }
+        })
+        .into()
 }
 
 fn no_providers_view<'a>() -> Element<'a, Message> {
@@ -1755,15 +1890,32 @@ fn settings_body_height(state: &AppState) -> f32 {
         .max(placeholder_height)
 }
 
-fn provider_body_height(state: &AppState, provider: Option<&ProviderRuntimeState>) -> f32 {
+fn provider_body_height_multi(state: &AppState, provider: Option<&ProviderRuntimeState>) -> f32 {
     let Some(provider) = provider else {
         return PROVIDER_SUMMARY_HEIGHT;
     };
+    let accounts = state.selected_accounts(provider.provider);
+    if accounts.is_empty() {
+        return provider_body_height_for_account(state, provider, None);
+    }
+    accounts
+        .iter()
+        .map(|a| provider_body_height_for_account(state, provider, Some(a)))
+        .fold(PROVIDER_SUMMARY_HEIGHT, f32::max)
+}
 
+fn provider_body_height_for_account(
+    _state: &AppState,
+    provider: &ProviderRuntimeState,
+    account: Option<&ProviderAccountRuntimeState>,
+) -> f32 {
     let mut sections = 1usize;
-    let snapshot = active_snapshot(state, provider);
+    let snapshot = account
+        .and_then(|a| a.snapshot.as_ref())
+        .or(provider.legacy_display_snapshot.as_ref());
     if let Some(snapshot) = snapshot {
-        if active_health(state, provider) == Some(ProviderHealth::Error) {
+        let health = account.map(|a| a.health.clone());
+        if health == Some(ProviderHealth::Error) {
             sections += 1;
         }
 
@@ -1778,8 +1930,7 @@ fn provider_body_height(state: &AppState, provider: Option<&ProviderRuntimeState
         if !cost_shown && snapshot.provider_cost.is_some() {
             sections += 1;
         }
-        let active_account = state.active_account(provider.provider);
-        if snapshot.identity.email.is_some() || active_account.is_some() {
+        if snapshot.identity.email.is_some() || account.is_some() {
             sections += 1;
         }
     } else {
@@ -1789,6 +1940,15 @@ fn provider_body_height(state: &AppState, provider: Option<&ProviderRuntimeState
     let extra_sections = f32::from(u16::try_from(sections.saturating_sub(1)).unwrap_or(u16::MAX));
     PROVIDER_SUMMARY_HEIGHT
         + extra_sections * (PROVIDER_SECTION_HEIGHT + PROVIDER_HEIGHT_SECTION_SPACING)
+}
+
+fn active_snapshot_for_account<'a>(
+    account: Option<&'a ProviderAccountRuntimeState>,
+    provider: &'a ProviderRuntimeState,
+) -> Option<&'a UsageSnapshot> {
+    account
+        .and_then(|a| a.snapshot.as_ref())
+        .or(provider.legacy_display_snapshot.as_ref())
 }
 
 fn usage_section(
@@ -1858,26 +2018,6 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
             widget::text(fl!("credits-available", balance = balance.as_str())).size(14),
         ]
         .spacing(6),
-    )
-}
-
-fn account_section(account_label: &str, plan_label: Option<&str>) -> Element<'static, Message> {
-    let mut heading = row![
-        widget::text(fl!("account-label")).size(18),
-        cosmic::iced::widget::Space::new().width(Length::Fill),
-    ]
-    .align_y(Alignment::Center);
-
-    if let Some(plan_label) = plan_label
-        && !plan_label.trim().is_empty()
-    {
-        heading = heading.push(plan_badge(plan_label));
-    }
-
-    card(
-        column![heading, account_label_text(account_label, 14)]
-            .spacing(6)
-            .width(Length::Fill),
     )
 }
 
@@ -2046,60 +2186,57 @@ fn selected_state(
         .or_else(|| state.providers.iter().find(|p| p.enabled))
 }
 
-fn tab_percent(state: &AppState, provider: &ProviderRuntimeState) -> f32 {
-    active_snapshot(state, provider)
-        .and_then(|s| s.headline_window())
-        .map_or(0.0, |w| {
-            usage_display::displayed_percent(w, chrono::Utc::now())
+fn tab_percents(state: &AppState, provider: &ProviderRuntimeState) -> Vec<f32> {
+    let now = chrono::Utc::now();
+    let accounts = state.selected_accounts(provider.provider);
+    if accounts.is_empty() {
+        let pct = active_snapshot(state, provider)
+            .and_then(|s| s.headline_window())
+            .map_or(0.0, |w| usage_display::displayed_percent(w, now));
+        return vec![pct];
+    }
+    accounts
+        .into_iter()
+        .map(|account| {
+            account
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.headline_window())
+                .map_or(0.0, |w| usage_display::displayed_percent(w, now))
         })
+        .collect()
 }
 
-fn provider_status_badge(
-    state: &AppState,
+fn account_status_badge(
+    account: &ProviderAccountRuntimeState,
     provider: &ProviderRuntimeState,
 ) -> Element<'static, Message> {
-    if !provider.enabled {
-        return badge_neutral(fl!("badge-disabled"));
-    }
     if provider.is_refreshing {
         return badge_neutral(fl!("badge-refreshing"));
     }
-    if provider.account_status == AccountSelectionStatus::LoginRequired
-        || provider.account_status == AccountSelectionStatus::Unavailable
-    {
+    if account.auth_state == AuthState::ActionRequired {
         return badge_warning(fl!("badge-login-required"));
     }
-    if provider.account_status == AccountSelectionStatus::SelectionRequired {
-        return badge_warning(fl!("badge-select-required"));
+    if account.health == ProviderHealth::Error {
+        return badge_destructive(fl!("badge-error"));
     }
-    let has_snapshot = active_snapshot(state, provider).is_some();
-    match (
-        active_health(state, provider),
-        has_snapshot,
-        provider_is_live(state, provider),
-    ) {
-        (Some(ProviderHealth::Ok), true, true) => badge_success(fl!("badge-live")),
-        (_, true, _) => badge_warning(fl!("badge-stale")),
-        (Some(ProviderHealth::Error), false, _) => badge_destructive(fl!("badge-error")),
-        _ => badge_neutral(fl!("badge-loading")),
+    let now = chrono::Utc::now();
+    if account.health == ProviderHealth::Ok
+        && account.snapshot.is_some()
+        && account
+            .last_success_at
+            .is_some_and(|t| now - t < STALE_THRESHOLD)
+    {
+        return badge_success(fl!("badge-live"));
     }
+    if account.snapshot.is_some() {
+        return badge_warning(fl!("badge-stale"));
+    }
+    badge_neutral(fl!("badge-loading"))
 }
 
 fn cursor_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
     account.provider == ProviderId::Cursor && account.auth_state == AuthState::ActionRequired
-}
-
-fn provider_is_live(state: &AppState, provider: &ProviderRuntimeState) -> bool {
-    if !provider.enabled
-        || provider.is_refreshing
-        || provider.account_status != AccountSelectionStatus::Ready
-        || active_health(state, provider) != Some(ProviderHealth::Ok)
-        || active_snapshot(state, provider).is_none()
-    {
-        return false;
-    }
-    let now = chrono::Utc::now();
-    active_last_success_at(state, provider).is_some_and(|t| now - t < STALE_THRESHOLD)
 }
 
 fn active_snapshot<'a>(
@@ -2110,21 +2247,6 @@ fn active_snapshot<'a>(
         .active_account(provider.provider)
         .and_then(|account| account.snapshot.as_ref())
         .or(provider.legacy_display_snapshot.as_ref())
-}
-
-fn active_health(state: &AppState, provider: &ProviderRuntimeState) -> Option<ProviderHealth> {
-    state
-        .active_account(provider.provider)
-        .map(|account| account.health.clone())
-}
-
-fn active_last_success_at(
-    state: &AppState,
-    provider: &ProviderRuntimeState,
-) -> Option<chrono::DateTime<chrono::Utc>> {
-    state
-        .active_account(provider.provider)
-        .and_then(|account| account.last_success_at)
 }
 
 fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> String {

@@ -40,6 +40,7 @@ const REFRESH_INTERVAL_MIN_SECS: u64 = 10;
 const POPUP_MAX_HEIGHT: u16 = 1080;
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
+const APPLET_ACCOUNT_GAP: f32 = 4.0;
 const APPLET_PERCENT_DIGITS: f32 = 7.0;
 const APPLET_PERCENT_GLYPH_WIDTH: f32 = 8.0;
 const APPLET_PERCENT_TEXT_WIDTH: f32 = APPLET_PERCENT_DIGITS * APPLET_PERCENT_GLYPH_WIDTH;
@@ -93,7 +94,7 @@ pub enum Message {
     SelectProvider(ProviderId),
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
-    SetActiveAccount(ProviderId, String),
+    ToggleAccountSelection(ProviderId, String),
     DeleteCodexAccount(String),
     StartCodexLogin,
     CancelCodexLogin,
@@ -169,8 +170,9 @@ impl cosmic::Application for AppModel {
         let refresh_task = refresh_provider_tasks(&initial_config, &mut state);
         let cursor_status_task =
             refresh_provider_account_statuses_task(&initial_config, &state, ProviderId::Cursor);
+        let n_accounts_init = state.selected_accounts(selected_provider).len().max(1);
         let (applet_width, applet_height) =
-            applet_button_size(&core, initial_config.panel_icon_style);
+            applet_button_size(&core, initial_config.panel_icon_style, n_accounts_init);
         core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
         let app = AppModel {
             core,
@@ -219,17 +221,27 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
+        let n_accounts = self
+            .state
+            .selected_accounts(self.selected_provider)
+            .len()
+            .max(1);
         let indicator = applet_indicator(
             &self.state,
             self.selected_provider,
             self.config.panel_icon_style,
             self.config.usage_amount_format,
             &self.core,
+            n_accounts,
         );
-        let button: Element<'_, Message> =
-            applet_button(&self.core, self.config.panel_icon_style, indicator)
-                .on_press(Message::TogglePopup)
-                .into();
+        let button: Element<'_, Message> = applet_button(
+            &self.core,
+            self.config.panel_icon_style,
+            n_accounts,
+            indicator,
+        )
+        .on_press(Message::TogglePopup)
+        .into();
 
         match self.launch_mode {
             LaunchMode::Panel => self.core.applet.autosize_window(button).into(),
@@ -240,7 +252,7 @@ impl cosmic::Application for AppModel {
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
         let popup_size = self
             .popup_size
-            .unwrap_or_else(|| popup_view::popup_session_size(&self.state));
+            .unwrap_or_else(|| popup_view::popup_session_size(&self.state, self.selected_provider));
         let content = popup_view::popup_content(
             &self.state,
             &self.config,
@@ -343,11 +355,11 @@ impl AppModel {
             }
 
             Message::SelectProvider(provider) => {
-                self.selected_provider = provider;
+                return self.select_provider_tab(provider);
             }
 
             Message::NavigateTo(route) => {
-                self.popup_route = route;
+                return self.navigate_to(route);
             }
 
             Message::UpdateChecked { status, attempt } => {
@@ -390,8 +402,8 @@ impl AppModel {
                 return Some(self.set_panel_icon_style(style));
             }
 
-            Message::SetActiveAccount(provider, account_id) => {
-                return Some(self.set_active_account(provider, &account_id));
+            Message::ToggleAccountSelection(provider, account_id) => {
+                return Some(self.toggle_account_selection(provider, &account_id));
             }
 
             Message::DeleteCodexAccount(account_id) => {
@@ -529,7 +541,20 @@ impl CursorMessageResult {
 
 pub fn applet_settings() -> cosmic::app::Settings {
     let preview_core = cosmic::Core::default();
-    let (width, height) = applet_button_size(&preview_core, Config::default().panel_icon_style);
+    let config =
+        cosmic_config::Config::new(<AppModel as cosmic::Application>::APP_ID, Config::VERSION)
+            .ok()
+            .map(|ctx| match Config::get_entry(&ctx) {
+                Ok(cfg) | Err((_, cfg)) => cfg,
+            })
+            .unwrap_or_default();
+    let n_accounts = ProviderId::ALL
+        .iter()
+        .filter(|&&p| config.provider_enabled(p))
+        .map(|&p| config.selected_account_ids(p).len().max(1))
+        .max()
+        .unwrap_or(1);
+    let (width, height) = applet_button_size(&preview_core, config.panel_icon_style, n_accounts);
 
     cosmic::app::Settings::default()
         .size(Size::new(width, height))
@@ -552,36 +577,48 @@ fn applet_indicator<'a>(
     style: PanelIconStyle,
     usage_amount_format: UsageAmountFormat,
     core: &cosmic::Core,
+    n_accounts: usize,
 ) -> Element<'a, Message> {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
     let compact_px = suggested_w.min(suggested_h);
     let logo_size_px = compact_px.saturating_sub(8).max(11);
     let logo_size = f32::from(logo_size_px);
     let bar_width = applet_bar_width(suggested_w, suggested_h);
-    let (top_usage, bottom_usage) =
-        selected_provider_percents(state, selected_provider, usage_amount_format);
     let percent = selected_provider_percent(state, selected_provider, usage_amount_format);
 
-    let bars = column![
-        progress_bar(0.0..=100.0, top_usage)
-            .length(Length::Fixed(bar_width))
-            .girth(Length::Fixed(6.0)),
-        progress_bar(0.0..=100.0, bottom_usage)
-            .length(Length::Fixed(bar_width))
-            .girth(Length::Fixed(3.0)),
-    ]
-    .spacing(3)
-    .width(Length::Fixed(bar_width));
+    let account_percents =
+        selected_provider_all_percents(state, selected_provider, usage_amount_format);
+
+    let bars_row = {
+        let mut r = row![].align_y(Alignment::Center);
+        for i in 0..n_accounts {
+            if i > 0 {
+                r = r.push(
+                    cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_ACCOUNT_GAP)),
+                );
+            }
+            let (p0, p1) = account_percents.get(i).copied().unwrap_or((0.0, 0.0));
+            r = r.push(
+                column![
+                    progress_bar(0.0..=100.0, p0).girth(Length::Fixed(6.0)),
+                    progress_bar(0.0..=100.0, p1).girth(Length::Fixed(3.0)),
+                ]
+                .spacing(3)
+                .width(Length::Fixed(bar_width)),
+            );
+        }
+        r
+    };
 
     match style {
         PanelIconStyle::LogoAndBars => row![
             provider_logo(selected_provider, logo_size_px, logo_size),
-            bars,
+            bars_row,
         ]
         .spacing(6)
         .align_y(Alignment::Center)
         .into(),
-        PanelIconStyle::BarsOnly => bars.into(),
+        PanelIconStyle::BarsOnly => bars_row.into(),
         PanelIconStyle::LogoAndPercent => row![
             provider_logo(selected_provider, logo_size_px, logo_size),
             widget::text(applet_percent_text(percent)).size(13),
@@ -608,6 +645,7 @@ fn provider_logo<'a>(
 fn applet_button<'a>(
     core: &cosmic::Core,
     style: PanelIconStyle,
+    n_accounts: usize,
     content: impl Into<Element<'a, Message>>,
 ) -> widget::Button<'a, Message> {
     let (major_padding, minor_padding) = core.applet.suggested_padding(true);
@@ -616,19 +654,20 @@ fn applet_button<'a>(
     } else {
         minor_padding
     };
-    let (width, height) = applet_button_size(core, style);
+    let (width, height) = applet_button_size(core, style, n_accounts);
 
     widget::button::custom(
         widget::layer_container(content)
             .padding(cosmic::iced::Padding::from([0, horizontal_padding]))
             .align_y(cosmic::iced::alignment::Vertical::Center.into()),
     )
+    .padding(0)
     .width(Length::Fixed(width))
     .height(Length::Fixed(height))
     .class(CosmicButton::AppletIcon)
 }
 
-fn applet_button_size(core: &cosmic::Core, style: PanelIconStyle) -> (f32, f32) {
+fn applet_button_size(core: &cosmic::Core, style: PanelIconStyle, n_accounts: usize) -> (f32, f32) {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
     let (major_padding, minor_padding) = core.applet.suggested_padding(true);
     let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
@@ -639,9 +678,11 @@ fn applet_button_size(core: &cosmic::Core, style: PanelIconStyle) -> (f32, f32) 
     let compact_px = suggested_w.min(suggested_h);
     let logo_width = f32::from(compact_px.saturating_sub(8).max(11));
     let bar_width = applet_bar_width(suggested_w, suggested_h);
+    let n = f32::from(u8::try_from(n_accounts.max(1)).unwrap_or(u8::MAX));
+    let bars_total = n * bar_width + (n - 1.0) * APPLET_ACCOUNT_GAP;
     let content_width = match style {
-        PanelIconStyle::LogoAndBars => logo_width + APPLET_ICON_GAP + bar_width,
-        PanelIconStyle::BarsOnly => bar_width,
+        PanelIconStyle::LogoAndBars => logo_width + APPLET_ICON_GAP + bars_total,
+        PanelIconStyle::BarsOnly => bars_total,
         PanelIconStyle::LogoAndPercent => logo_width + APPLET_ICON_GAP + APPLET_PERCENT_TEXT_WIDTH,
         PanelIconStyle::PercentOnly => APPLET_PERCENT_TEXT_WIDTH,
     };
@@ -661,33 +702,42 @@ fn applet_percent_text(percent: f32) -> String {
     format!("{percent:.1}%")
 }
 
-fn selected_provider_percents(
+fn selected_provider_all_percents(
     state: &AppState,
     selected_provider: ProviderId,
     usage_amount_format: UsageAmountFormat,
-) -> (f32, f32) {
+) -> Vec<(f32, f32)> {
     let now = chrono::Utc::now();
-    state
-        .providers
+    let accounts = state.selected_accounts(selected_provider);
+    if accounts.is_empty() {
+        let snapshot = state
+            .provider(selected_provider)
+            .and_then(|p| p.legacy_display_snapshot.as_ref());
+        let (w0, w1) = snapshot.map_or((None, None), |s| s.applet_windows());
+        let p0 = w0.map_or(0.0, |w| {
+            usage_display::displayed_amount_percent(w, now, usage_amount_format)
+        });
+        let p1 = w1.map_or(0.0, |w| {
+            usage_display::displayed_amount_percent(w, now, usage_amount_format)
+        });
+        return vec![(p0, p1)];
+    }
+    accounts
         .iter()
-        .find(|p| p.provider == selected_provider)
-        .and_then(|p| {
-            state
-                .active_account(p.provider)
-                .and_then(|account| account.snapshot.as_ref())
-                .or(p.legacy_display_snapshot.as_ref())
+        .map(|account| {
+            let (w0, w1) = account
+                .snapshot
+                .as_ref()
+                .map_or((None, None), |s| s.applet_windows());
+            let p0 = w0.map_or(0.0, |w| {
+                usage_display::displayed_amount_percent(w, now, usage_amount_format)
+            });
+            let p1 = w1.map_or(0.0, |w| {
+                usage_display::displayed_amount_percent(w, now, usage_amount_format)
+            });
+            (p0, p1)
         })
-        .map_or((0.0, 0.0), |snapshot| {
-            let (primary, secondary) = snapshot.applet_windows();
-            (
-                primary.map_or(0.0, |w| {
-                    usage_display::displayed_amount_percent(w, now, usage_amount_format)
-                }),
-                secondary.map_or(0.0, |w| {
-                    usage_display::displayed_amount_percent(w, now, usage_amount_format)
-                }),
-            )
-        })
+        .collect()
 }
 
 fn selected_provider_percent(
@@ -802,16 +852,8 @@ impl AppModel {
         refresh_result: ProviderRefreshResult,
     ) -> Task<Message> {
         let ProviderRefreshResult { provider, accounts } = refresh_result;
-        let codex_active_id = (provider.provider == ProviderId::Codex)
-            .then(|| provider.active_account_id.clone())
-            .flatten();
-        let cursor_active_id = (provider.provider == ProviderId::Cursor)
-            .then(|| provider.active_account_id.clone())
-            .flatten();
-        let claude_active_id = (provider.provider == ProviderId::Claude)
-            .then(|| provider.active_account_id.clone())
-            .flatten();
         let refreshed_provider = provider.provider;
+        let refreshed_selected_ids = provider.selected_account_ids.clone();
         self.state.upsert_provider(provider);
         for account in accounts {
             self.state.upsert_account(account);
@@ -827,35 +869,17 @@ impl AppModel {
         if refreshed_provider == ProviderId::Cursor {
             self.update_cursor_metadata_from_state();
         }
-        if refreshed_provider == ProviderId::Codex
-            && self.config.active_codex_account_id != codex_active_id
+        if self.config.selected_account_ids(refreshed_provider) != refreshed_selected_ids.as_slice()
         {
             self.write_config(|new_config| {
                 new_config
-                    .active_codex_account_id
-                    .clone_from(&codex_active_id);
-            });
-        }
-        if refreshed_provider == ProviderId::Claude
-            && self.config.active_claude_account_id != claude_active_id
-        {
-            self.write_config(|new_config| {
-                new_config
-                    .active_claude_account_id
-                    .clone_from(&claude_active_id);
-            });
-        }
-        if refreshed_provider == ProviderId::Cursor
-            && self.config.active_cursor_account_id != cursor_active_id
-        {
-            self.write_config(|new_config| {
-                new_config
-                    .active_cursor_account_id
-                    .clone_from(&cursor_active_id);
+                    .selected_account_ids_mut(refreshed_provider)
+                    .clone_from(&refreshed_selected_ids);
             });
         }
         runtime::persist_state(&self.state);
         self.selected_provider = select_provider(self.selected_provider, &self.state);
+        self.sync_panel_suggested_bounds();
         if refreshed_provider == ProviderId::Cursor {
             return refresh_provider_account_statuses_task(
                 &self.config,
@@ -880,6 +904,54 @@ impl AppModel {
         Task::none()
     }
 
+    fn navigate_to(&mut self, route: PopupRoute) -> Option<Task<Message>> {
+        let resize = self.resize_popup_to_route(&route);
+        self.popup_route = route;
+        resize
+    }
+
+    fn popup_size_for_route(&self, route: &PopupRoute) -> Size {
+        match route {
+            PopupRoute::ProviderDetail => {
+                popup_view::popup_session_size(&self.state, self.selected_provider)
+            }
+            PopupRoute::Settings(_) => popup_view::popup_settings_size(&self.state),
+        }
+    }
+
+    fn sync_panel_suggested_bounds(&mut self) {
+        let n_accounts = self
+            .state
+            .selected_accounts(self.selected_provider)
+            .len()
+            .max(1);
+        let (w, h) = applet_button_size(&self.core, self.config.panel_icon_style, n_accounts);
+        self.core.applet.suggested_bounds = Some(Size::new(w, h));
+    }
+
+    fn select_provider_tab(&mut self, provider: ProviderId) -> Option<Task<Message>> {
+        self.selected_provider = provider;
+        self.sync_panel_suggested_bounds();
+        self.resize_popup_to_provider(provider)
+    }
+
+    fn resize_popup_to_provider(&mut self, provider: ProviderId) -> Option<Task<Message>> {
+        let new_size = popup_view::popup_session_size(&self.state, provider);
+        self.resize_popup_to_size(new_size)
+    }
+
+    fn resize_popup_to_route(&mut self, route: &PopupRoute) -> Option<Task<Message>> {
+        let new_size = self.popup_size_for_route(route);
+        self.resize_popup_to_size(new_size)
+    }
+
+    fn resize_popup_to_size(&mut self, new_size: Size) -> Option<Task<Message>> {
+        let popup_id = self.popup?;
+        self.popup_size = Some(new_size);
+        let (w, h) = popup_size_tuple(new_size);
+        Some(resize_popup(popup_id, w, h))
+    }
+
     fn toggle_popup(&mut self) -> Task<Message> {
         if let Some(p) = self.popup.take() {
             self.popup_size = None;
@@ -888,7 +960,8 @@ impl AppModel {
             )));
         }
 
-        let popup_size = popup_view::popup_session_size(&self.state);
+        let popup_size = self.popup_size_for_route(&self.popup_route.clone());
+        let max_width = popup_view::popup_max_width(&self.state);
         self.popup_size = Some(popup_size);
         cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(
             app_popup::<Self>(
@@ -902,7 +975,8 @@ impl AppModel {
                         None,
                         None,
                     );
-                    popup_settings.positioner.size_limits = popup_size_limits(popup_size);
+                    popup_settings.positioner.size_limits =
+                        popup_size_limits_with_max_width(popup_size, max_width);
                     popup_settings.positioner.reactive = false;
                     popup_settings
                 },
@@ -964,8 +1038,7 @@ impl AppModel {
         self.write_config(|new_config| {
             new_config.panel_icon_style = style;
         });
-        let (width, height) = applet_button_size(&self.core, style);
-        self.core.applet.suggested_bounds = Some(Size::new(width, height));
+        self.sync_panel_suggested_bounds();
         Task::none()
     }
 
@@ -974,25 +1047,32 @@ impl AppModel {
         runtime::reconcile_state(&self.config, &mut self.state);
         demo_env::apply(&self.config, &mut self.state);
         runtime::persist_state(&self.state);
+        self.sync_panel_suggested_bounds();
     }
 
-    fn set_active_account(&mut self, provider: ProviderId, account_id: &str) -> Task<Message> {
+    fn toggle_account_selection(
+        &mut self,
+        provider: ProviderId,
+        account_id: &str,
+    ) -> Task<Message> {
         self.write_config(|new_config| {
-            registry::set_active_account_preference(
-                provider,
-                new_config,
-                Some(account_id.to_string()),
-            );
+            registry::toggle_account_selection(provider, new_config, account_id);
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        if let Some(account) = self
+        let is_selected = self
             .state
-            .provider_accounts
-            .iter_mut()
-            .find(|entry| entry.provider == provider && entry.account_id == account_id)
+            .provider(provider)
+            .is_some_and(|p| p.selected_account_ids.contains(&account_id.to_string()));
+        if is_selected
+            && let Some(account) = self
+                .state
+                .provider_accounts
+                .iter_mut()
+                .find(|entry| entry.provider == provider && entry.account_id == account_id)
         {
             account.error = None;
         }
+        self.sync_panel_suggested_bounds();
         refresh_provider_task(&self.config, &mut self.state, provider)
     }
 
@@ -1012,7 +1092,7 @@ impl AppModel {
         remove_managed_codex_home(&account.codex_home);
         self.write_config(|new_config| {
             let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_active_preference_with_discoveries(new_config, provider);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         runtime::persist_state(&self.state);
@@ -1043,7 +1123,7 @@ impl AppModel {
         claude::remove_managed_config_dir(&account.config_dir);
         self.write_config(|new_config| {
             let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_active_preference_with_discoveries(new_config, provider);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         runtime::persist_state(&self.state);
@@ -1069,7 +1149,7 @@ impl AppModel {
         cursor::remove_managed_profile(&account.account_root);
         self.write_config(|new_config| {
             let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_active_preference_with_discoveries(new_config, provider);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         runtime::persist_state(&self.state);
@@ -1189,7 +1269,9 @@ impl AppModel {
                             account.health == ProviderHealth::Ok && account.snapshot.is_some();
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Codex) {
-                            provider.active_account_id = Some(account_id);
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id);
+                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                             if refresh_succeeded {
@@ -1409,7 +1491,9 @@ impl AppModel {
                             account.health == ProviderHealth::Ok && account.snapshot.is_some();
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Claude) {
-                            provider.active_account_id = Some(account_id);
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id);
+                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                             if refresh_succeeded {
@@ -1518,7 +1602,9 @@ impl AppModel {
                         account.error = None;
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
-                            provider.active_account_id = Some(account_id);
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id);
+                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                         }
@@ -1654,9 +1740,14 @@ fn apply_cursor_metadata_update(
     account.updated_at = chrono::Utc::now();
 }
 
-fn popup_size_limits(size: Size) -> Limits {
+fn resize_popup(id: Id, width: u32, height: u32) -> Task<Message> {
+    cosmic::iced::platform_specific::shell::wayland::commands::popup::set_size(id, width, height)
+}
+
+fn popup_size_limits_with_max_width(size: Size, max_width: f32) -> Limits {
     Limits::NONE
-        .width(size.width)
+        .min_width(1.0)
+        .max_width(max_width.max(size.width))
         .height(size.height.clamp(1.0, f32::from(POPUP_MAX_HEIGHT)))
 }
 
@@ -1688,11 +1779,11 @@ mod tests {
     use chrono::Utc;
 
     #[test]
-    fn popup_limits_lock_to_selected_size() {
-        let limits = popup_size_limits(Size::new(420.0, 640.0));
+    fn popup_limits_allow_wider_max() {
+        let limits = popup_size_limits_with_max_width(Size::new(420.0, 640.0), 840.0);
 
-        assert_eq!(limits.min().width, 420.0);
-        assert_eq!(limits.max().width, 420.0);
+        assert_eq!(limits.min().width, 1.0);
+        assert_eq!(limits.max().width, 840.0);
         assert_eq!(limits.min().height, 640.0);
         assert_eq!(limits.max().height, 640.0);
     }
@@ -1753,13 +1844,13 @@ mod tests {
         let logo_width = f32::from(compact_px.saturating_sub(8).max(11));
         let bar_width = applet_bar_width(suggested_w, suggested_h);
         let padding_width = f32::from(2 * horizontal_padding);
-        let (logo_bars_width, height) = applet_button_size(&core, PanelIconStyle::LogoAndBars);
+        let (logo_bars_width, height) = applet_button_size(&core, PanelIconStyle::LogoAndBars, 1);
         let (bars_only_width, bars_only_height) =
-            applet_button_size(&core, PanelIconStyle::BarsOnly);
+            applet_button_size(&core, PanelIconStyle::BarsOnly, 1);
         let (percent_width, percent_height) =
-            applet_button_size(&core, PanelIconStyle::LogoAndPercent);
+            applet_button_size(&core, PanelIconStyle::LogoAndPercent, 1);
         let (percent_only_width, percent_only_height) =
-            applet_button_size(&core, PanelIconStyle::PercentOnly);
+            applet_button_size(&core, PanelIconStyle::PercentOnly, 1);
 
         assert_eq!(bars_only_width, bar_width + padding_width);
         assert_eq!(
@@ -1777,6 +1868,21 @@ mod tests {
         assert_eq!(height, bars_only_height);
         assert_eq!(height, percent_height);
         assert_eq!(height, percent_only_height);
+    }
+
+    #[test]
+    fn applet_button_size_scales_with_account_count() {
+        let core = cosmic::Core::default();
+        let (w1, _) = applet_button_size(&core, PanelIconStyle::BarsOnly, 1);
+        let (w2, _) = applet_button_size(&core, PanelIconStyle::BarsOnly, 2);
+        let (w3, _) = applet_button_size(&core, PanelIconStyle::BarsOnly, 3);
+        let (suggested_w, suggested_h) = core.applet.suggested_size(false);
+        let bar_width = applet_bar_width(suggested_w, suggested_h);
+        assert_eq!(w2 - w1, bar_width + APPLET_ACCOUNT_GAP);
+        assert_eq!(w3 - w2, bar_width + APPLET_ACCOUNT_GAP);
+        let (lw2, _) = applet_button_size(&core, PanelIconStyle::LogoAndBars, 2);
+        let (lw1, _) = applet_button_size(&core, PanelIconStyle::LogoAndBars, 1);
+        assert_eq!(lw2 - lw1, bar_width + APPLET_ACCOUNT_GAP);
     }
 
     #[test]
@@ -1817,7 +1923,7 @@ mod tests {
         state
             .provider_mut(ProviderId::Codex)
             .unwrap()
-            .active_account_id = Some("codex-1".to_string());
+            .selected_account_ids = vec!["codex-1".to_string()];
         state.upsert_account(account);
 
         assert_eq!(

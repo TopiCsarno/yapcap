@@ -38,7 +38,10 @@ pub fn upsert_managed_account(
         }
         account.account_root = managed_account_dir(&account.id);
     }
-    config.active_cursor_account_id = Some(managed_account_id(&account.id));
+    let new_managed_id = managed_account_id(&account.id);
+    if !config.selected_cursor_account_ids.contains(&new_managed_id) {
+        config.selected_cursor_account_ids.push(new_managed_id);
+    }
     config
         .cursor_managed_accounts
         .retain(|existing| existing.email != account.email);
@@ -51,8 +54,8 @@ pub fn upsert_managed_account(
 
 pub fn sync_managed_accounts(config: &mut Config) -> bool {
     let original_accounts = config.cursor_managed_accounts.clone();
-    let original_active = config.active_cursor_account_id.clone();
-    let mut active_id = original_active.clone();
+    let original_selected = config.selected_cursor_account_ids.clone();
+    let mut selected_ids = original_selected.clone();
     let mut deduped = Vec::new();
 
     for mut account in config.cursor_managed_accounts.drain(..) {
@@ -75,15 +78,18 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
             .position(|existing: &ManagedCursorAccountConfig| existing.email == account.email)
         {
             let existing = deduped.remove(index);
-            let keep_existing =
-                prefer_managed_account(&existing, &account, original_active.as_deref());
+            let keep_existing = prefer_managed_account(&existing, &account, &original_selected);
             let (mut winner, loser) = if keep_existing {
                 (existing, account)
             } else {
                 (account, existing)
             };
-            if active_id.as_deref() == Some(managed_account_id(&loser.id).as_str()) {
-                active_id = Some(managed_account_id(&winner.id));
+            let loser_managed_id = managed_account_id(&loser.id);
+            let winner_managed_id = managed_account_id(&winner.id);
+            for id in &mut selected_ids {
+                if *id == loser_managed_id {
+                    id.clone_from(&winner_managed_id);
+                }
             }
             merge_metadata(&mut winner, &loser);
             write_account_metadata(&winner).ok();
@@ -94,24 +100,23 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     }
 
     deduped.sort_by(|left, right| left.email.cmp(&right.email));
-    if let Some(raw) = active_id.clone()
-        && let Some(key) = managed_config_id(&raw)
-        && key.contains('@')
-        && let Some(acc) = deduped.iter().find(|a| a.email == key)
-    {
-        active_id = Some(managed_account_id(&acc.id));
+    for id in &mut selected_ids {
+        if let Some(key) = managed_config_id(id)
+            && key.contains('@')
+            && let Some(acc) = deduped.iter().find(|a| a.email == key)
+        {
+            *id = managed_account_id(&acc.id);
+        }
     }
-    if active_id.as_deref().is_some_and(|id| {
-        !deduped
+    selected_ids.retain(|id| {
+        deduped
             .iter()
-            .any(|account| managed_account_id(&account.id) == id)
-    }) {
-        active_id = None;
-    }
+            .any(|account| managed_account_id(&account.id) == *id)
+    });
 
-    let changed = deduped != original_accounts || active_id != original_active;
+    let changed = deduped != original_accounts || selected_ids != original_selected;
     config.cursor_managed_accounts = deduped;
-    config.active_cursor_account_id = active_id;
+    config.selected_cursor_account_ids = selected_ids;
     changed
 }
 
@@ -180,14 +185,20 @@ fn normalize_account_layout(
 fn prefer_managed_account(
     existing: &ManagedCursorAccountConfig,
     candidate: &ManagedCursorAccountConfig,
-    active_managed_id: Option<&str>,
+    selected_managed_ids: &[String],
 ) -> bool {
     let existing_id = managed_account_id(&existing.id);
     let candidate_id = managed_account_id(&candidate.id);
-    if active_managed_id == Some(existing_id.as_str()) {
+    if selected_managed_ids
+        .iter()
+        .any(|id| id == existing_id.as_str())
+    {
         return true;
     }
-    if active_managed_id == Some(candidate_id.as_str()) {
+    if selected_managed_ids
+        .iter()
+        .any(|id| id == candidate_id.as_str())
+    {
         return false;
     }
     existing.last_authenticated_at.or(Some(existing.updated_at))
@@ -344,8 +355,8 @@ mod tests {
         assert_eq!(config.cursor_managed_accounts.len(), 1);
         let expected = stable_storage_id_from_normalized_email("user@example.com");
         assert_eq!(
-            config.active_cursor_account_id.as_deref(),
-            Some(managed_account_id(&expected).as_str())
+            config.selected_cursor_account_ids.as_slice(),
+            [managed_account_id(&expected).as_str()]
         );
     }
 

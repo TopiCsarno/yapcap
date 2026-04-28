@@ -120,7 +120,7 @@ pub struct ProviderRuntimeState {
     pub provider: ProviderId,
     pub enabled: bool,
     #[serde(default)]
-    pub active_account_id: Option<String>,
+    pub selected_account_ids: Vec<String>,
     #[serde(default)]
     pub account_status: AccountSelectionStatus,
     pub is_refreshing: bool,
@@ -135,7 +135,7 @@ impl ProviderRuntimeState {
         Self {
             provider,
             enabled: true,
-            active_account_id: None,
+            selected_account_ids: Vec::new(),
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -148,7 +148,7 @@ impl ProviderRuntimeState {
         Self {
             provider,
             enabled: false,
-            active_account_id: None,
+            selected_account_ids: Vec::new(),
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,

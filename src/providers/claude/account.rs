@@ -38,25 +38,18 @@ pub fn discover_accounts(config: &Config) -> Vec<ClaudeAccount> {
                 .or_else(|| managed.subscription_type.clone()),
             config_dir: managed.config_dir.clone(),
         };
-        match discovered.email.as_deref().map(normalized_email) {
-            Some(email_key) => {
-                if let Some(index) = accounts.iter().position(|existing: &ClaudeAccount| {
-                    existing.email.as_deref().map(normalized_email) == Some(email_key.clone())
-                }) {
-                    let existing = &accounts[index];
-                    if prefer_account(
-                        existing,
-                        &discovered,
-                        config.active_claude_account_id.as_deref(),
-                    ) {
-                        continue;
-                    }
-                    accounts[index] = discovered;
-                } else {
-                    accounts.push(discovered);
+        if let Some(email_key) = discovered.email.as_deref().map(normalized_email) {
+            if let Some(index) = accounts.iter().position(|existing: &ClaudeAccount| {
+                existing.email.as_deref().map(normalized_email) == Some(email_key.clone())
+            }) {
+                let existing = &accounts[index];
+                if prefer_account(existing, &discovered, &config.selected_claude_account_ids) {
+                    continue;
                 }
+                accounts[index] = discovered;
+            } else {
+                accounts.push(discovered);
             }
-            None => accounts.push(discovered),
         }
     }
     accounts
@@ -64,7 +57,9 @@ pub fn discover_accounts(config: &Config) -> Vec<ClaudeAccount> {
 
 pub fn apply_login_account(config: &mut Config, account: ManagedClaudeAccountConfig) {
     let account_id = account.id.clone();
-    config.active_claude_account_id = Some(account_id.clone());
+    if !config.selected_claude_account_ids.contains(&account_id) {
+        config.selected_claude_account_ids.push(account_id.clone());
+    }
     config
         .claude_managed_accounts
         .retain(|existing| existing.id != account_id);
@@ -80,7 +75,33 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
         dedupe_managed_accounts(config);
     }
     changed |= ensure_single_claude_active(config);
+    cleanup_orphan_lock_dirs();
     Ok(changed)
+}
+
+fn cleanup_orphan_lock_dirs() {
+    let root = paths().claude_accounts_dir;
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if !name_str.ends_with(".lock") {
+            continue;
+        }
+        let lock_path = entry.path();
+        if !lock_path.is_dir() {
+            continue;
+        }
+        let account_path = root.join(name_str.trim_end_matches(".lock"));
+        if account_path.exists() {
+            continue;
+        }
+        if let Err(error) = fs::remove_dir_all(&lock_path) {
+            tracing::warn!(path = %lock_path.display(), error = %error, "failed to remove orphan Claude lock dir");
+        }
+    }
 }
 
 pub fn sync_managed_accounts(config: &mut Config) -> bool {
@@ -192,7 +213,10 @@ fn recover_orphan_managed_claude_dirs(config: &mut Config) -> Result<bool, Strin
         let entry = entry.map_err(|error| format!("failed to read {}: {error}", root.display()))?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if !name_str.starts_with("claude-") || name_str.starts_with("pending-") {
+        if !name_str.starts_with("claude-")
+            || name_str.starts_with("pending-")
+            || name_str.ends_with(".lock")
+        {
             continue;
         }
         let path = entry.path();
@@ -278,8 +302,8 @@ fn import_external_claude_config(config: &mut Config) -> Result<bool, String> {
     }
 
     if let Some(existing) = find_managed_with_same_access_token(config, &auth.access_token) {
-        if config.active_claude_account_id.is_none() {
-            config.active_claude_account_id = Some(existing.id.clone());
+        if config.selected_claude_account_ids.is_empty() {
+            config.selected_claude_account_ids.push(existing.id.clone());
             return Ok(true);
         }
         return Ok(false);
@@ -294,8 +318,8 @@ fn import_external_claude_config(config: &mut Config) -> Result<bool, String> {
     create_private_dir(&managed_root)?;
     if let Some(existing) = find_matching_account(config, email.as_deref()).cloned() {
         if load_claude_auth_from_config_dir(&existing.config_dir).is_ok() {
-            if config.active_claude_account_id.is_none() {
-                config.active_claude_account_id = Some(existing.id.clone());
+            if config.selected_claude_account_ids.is_empty() {
+                config.selected_claude_account_ids.push(existing.id.clone());
                 return Ok(true);
             }
             return Ok(false);
@@ -364,10 +388,10 @@ fn ensure_single_claude_active(config: &mut Config) -> bool {
         return false;
     }
     let id = config.claude_managed_accounts[0].id.clone();
-    if config.active_claude_account_id.as_deref() == Some(id.as_str()) {
+    if config.selected_claude_account_ids.contains(&id) {
         return false;
     }
-    config.active_claude_account_id = Some(id);
+    config.selected_claude_account_ids.push(id);
     true
 }
 
@@ -440,8 +464,8 @@ fn is_path_within(path: &Path, root: &Path) -> bool {
 }
 
 pub fn dedupe_managed_accounts(config: &mut Config) -> bool {
-    let original_active = config.active_claude_account_id.clone();
-    let mut active_id = original_active.clone();
+    let original_selected = config.selected_claude_account_ids.clone();
+    let mut selected_ids = original_selected.clone();
     let original_len = config.claude_managed_accounts.len();
     let mut deduped = Vec::new();
 
@@ -458,8 +482,7 @@ pub fn dedupe_managed_accounts(config: &mut Config) -> bool {
             })
         {
             let existing = deduped.remove(index);
-            let keep_existing =
-                prefer_managed_account(&existing, &account, original_active.as_deref());
+            let keep_existing = prefer_managed_account(&existing, &account, &original_selected);
             let (mut winner, loser) = if keep_existing {
                 (existing, account)
             } else {
@@ -468,8 +491,10 @@ pub fn dedupe_managed_accounts(config: &mut Config) -> bool {
             let loser_id = loser.id.clone();
             let winner_id = winner.id.clone();
             merge_account_metadata(&mut winner, &loser);
-            if active_id.as_deref() == Some(loser_id.as_str()) {
-                active_id = Some(winner_id);
+            for id in &mut selected_ids {
+                if id == loser_id.as_str() {
+                    id.clone_from(&winner_id);
+                }
             }
             deduped.push(winner);
             continue;
@@ -478,9 +503,9 @@ pub fn dedupe_managed_accounts(config: &mut Config) -> bool {
         deduped.push(account);
     }
 
-    let changed = deduped.len() != original_len || active_id != original_active;
+    let changed = deduped.len() != original_len || selected_ids != original_selected;
     config.claude_managed_accounts = deduped;
-    config.active_claude_account_id = active_id;
+    config.selected_claude_account_ids = selected_ids;
     changed
 }
 
@@ -575,12 +600,12 @@ pub(crate) fn normalized_email(email: &str) -> String {
 fn prefer_account(
     existing: &ClaudeAccount,
     candidate: &ClaudeAccount,
-    active_id: Option<&str>,
+    selected_ids: &[String],
 ) -> bool {
-    if active_id == Some(existing.id.as_str()) {
+    if selected_ids.iter().any(|id| id == existing.id.as_str()) {
         return true;
     }
-    if active_id == Some(candidate.id.as_str()) {
+    if selected_ids.iter().any(|id| id == candidate.id.as_str()) {
         return false;
     }
     existing.id >= candidate.id
@@ -589,12 +614,12 @@ fn prefer_account(
 fn prefer_managed_account(
     existing: &ManagedClaudeAccountConfig,
     candidate: &ManagedClaudeAccountConfig,
-    active_id: Option<&str>,
+    selected_ids: &[String],
 ) -> bool {
-    if active_id == Some(existing.id.as_str()) {
+    if selected_ids.iter().any(|id| id == existing.id.as_str()) {
         return true;
     }
-    if active_id == Some(candidate.id.as_str()) {
+    if selected_ids.iter().any(|id| id == candidate.id.as_str()) {
         return false;
     }
     let existing_auth = existing.last_authenticated_at.or(Some(existing.updated_at));
@@ -735,7 +760,7 @@ mod tests {
     #[test]
     fn dedupes_managed_accounts_by_email() {
         let mut config = Config {
-            active_claude_account_id: Some("claude-1".to_string()),
+            selected_claude_account_ids: vec!["claude-1".to_string()],
             claude_managed_accounts: vec![
                 managed_account("claude-1", Some("user@example.com")),
                 managed_account("claude-2", Some("USER@example.com")),
@@ -747,7 +772,7 @@ mod tests {
 
         assert!(changed);
         assert_eq!(config.claude_managed_accounts.len(), 1);
-        assert_eq!(config.active_claude_account_id.as_deref(), Some("claude-1"));
+        assert_eq!(config.selected_claude_account_ids.as_slice(), ["claude-1"]);
     }
 
     #[test]
@@ -775,8 +800,8 @@ mod tests {
         assert_eq!(config.claude_managed_accounts.len(), 1);
         assert_eq!(config.claude_managed_accounts[0].id, "claude-recover-test");
         assert_eq!(
-            config.active_claude_account_id.as_deref(),
-            Some("claude-recover-test")
+            config.selected_claude_account_ids.as_slice(),
+            ["claude-recover-test"]
         );
         assert!(load_claude_auth_from_config_dir(&account_dir).is_ok());
     }
@@ -808,8 +833,8 @@ mod tests {
         assert_eq!(config.claude_managed_accounts.len(), 1);
         let account = &config.claude_managed_accounts[0];
         assert_eq!(
-            config.active_claude_account_id.as_deref(),
-            Some(account.id.as_str())
+            config.selected_claude_account_ids.as_slice(),
+            [account.id.as_str()]
         );
         assert!(account.config_dir.join(".credentials.json").exists());
         assert!(!account.config_dir.join("extra.txt").exists());
@@ -911,5 +936,56 @@ mod tests {
         assert!(dir.join(".credentials.json").exists());
         assert!(!dir.join("extra.txt").exists());
         assert!(!dir.join(".git").exists());
+    }
+
+    #[test]
+    fn discover_accounts_excludes_accounts_without_email() {
+        let dir = temp_dir("claude-discover-no-email");
+        write_credentials(&dir);
+
+        let config = Config {
+            claude_managed_accounts: vec![ManagedClaudeAccountConfig {
+                id: "claude-no-email".to_string(),
+                label: "Claude account".to_string(),
+                config_dir: dir,
+                email: None,
+                organization: None,
+                subscription_type: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Config::default()
+        };
+
+        let accounts = discover_accounts(&config);
+
+        assert!(accounts.is_empty());
+    }
+
+    #[test]
+    fn discover_accounts_includes_accounts_with_email() {
+        let dir = temp_dir("claude-discover-with-email");
+        write_credentials(&dir);
+
+        let config = Config {
+            claude_managed_accounts: vec![ManagedClaudeAccountConfig {
+                id: "claude-with-email".to_string(),
+                label: "user@example.com".to_string(),
+                config_dir: dir,
+                email: Some("user@example.com".to_string()),
+                organization: None,
+                subscription_type: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Config::default()
+        };
+
+        let accounts = discover_accounts(&config);
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].email.as_deref(), Some("user@example.com"));
     }
 }

@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.2 · **Last updated:** 2026-04-24 (account state reconciled with config and cache)
+**Status:** As-built v0.2 · **Last updated:** 2026-04-27 (multi-account concurrent refresh, multi-column popup, Claude credential refresh fixes, account cards, per-route popup height)
 
 ## Document Metadata
 
@@ -83,8 +83,8 @@ Binary-only modules (`src/`, compiled only into the applet binary):
 | Module | Purpose |
 | --- | --- |
 | `app` | `AppModel`, `Message`, libcosmic `Application` impl. Panel button, popup open/close, tick scheduling. |
-| `app_refresh` | Dispatches one `Task::perform` per enabled provider. |
-| `popup_view` | `popup_content` renders the popup. Tabs, status badge, usage bars, cost block. All strings via `fl!()`. |
+| `app_refresh` | Dispatches one `Task::perform` per selected account per enabled provider; tasks run concurrently via `Task::batch`. |
+| `popup_view` | `popup_content` renders the popup. Tabs, per-account status badges, usage bars, cost block. Multi-account providers render as side-by-side columns; the popup width expands proportionally. All strings via `fl!()`. |
 | `provider_assets` | Embedded SVG icon handles; dark/light variant selection. |
 | `i18n` | `fl!()` macro, `i18n_embed` loader wired to `i18n/en/yapcap.ftl`. |
 
@@ -125,9 +125,9 @@ sequenceDiagram
     App->>Timer: subscription()
     Timer-->>App: Message::Tick
     App->>Refresh: refresh_provider_tasks(config, state)
-    Refresh->>Task: spawn one Task per enabled provider
-    Task->>Provider: runtime::refresh_one(provider, previous)
-    Provider-->>Task: ProviderRuntimeState
+    Refresh->>Task: spawn one Task per selected account per enabled provider
+    Task->>Provider: runtime::refresh_account(provider, account_id, previous)
+    Provider-->>Task: ProviderRefreshResult
     Task-->>App: Message::ProviderRefreshed(provider + account state)
     App->>App: state.upsert_provider/provider_account(state)
     App->>App: persist_state
@@ -140,12 +140,13 @@ sequenceDiagram
   After Cursor browser discovery finishes, that auto-init mode is marked
   complete so later launches preserve the user’s explicit provider toggles.
 - `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
-- `Message::RefreshNow` is the popup's "Refresh now" button and uses the same dispatcher.
+- `Message::RefreshNow` is the popup’s "Refresh now" button and uses the same dispatcher.
 - Account switching marks and refreshes only the selected provider instead of dispatching a global refresh.
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.
-- Per-provider results arrive independently; the popup rerenders on each.
-- `runtime::refresh_provider_account` keeps the previous account snapshot on error so the UI never drops data on a transient failure. It instead flips the account's `ProviderHealth::Error`.
+- When multiple accounts are selected for a provider, `app_refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
+- `runtime::refresh_account` takes an explicit `account_id` and resolves which discovered account to fetch. If the requested account is not found it falls back to the first available account; if no accounts exist it returns a `LoginRequired` state.
+- `runtime::refresh_provider_account` keeps the previous account snapshot on error so the UI never drops data on a transient failure. It instead flips the account’s `ProviderHealth::Error`.
 
 ## 3. Providers
 
@@ -264,6 +265,8 @@ Claude account discovery:
   prunes the managed directory down to `.credentials.json`, commits that
   directory into `~/.local/state/yapcap/claude-accounts/<id>/`, and stores
   only non-secret account metadata in config.
+- Accounts without a resolved email are excluded from `discover_accounts` and never appear in the UI. They remain in `claude_managed_accounts` and become visible once background sync successfully populates their email.
+- On startup, orphaned `.lock` directories left in `claude-accounts/` by a killed `claude auth status` process are deleted. A `.lock` directory is considered orphaned when no sibling directory with the same base name exists.
 - Managed Claude account labels follow the account email address when available.
 - After a successful Claude usage fetch, `UsageSnapshot.identity.email` is filled
   from the usage JSON `email` field when present, else `claude auth status --json`,
@@ -279,8 +282,8 @@ Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 - `Authorization: Bearer <claudeAiOauth.accessToken>`
 - `anthropic-beta: oauth-2025-04-20`
 - Token must carry scope `user:profile`; otherwise `MissingProfileScope` is returned before the request.
-- Before the request, YapCap checks `claudeAiOauth.expiresAt`. If the access token expires within 5 minutes, it runs `claude auth status --json` with `CLAUDE_CONFIG_DIR` set to the active account config directory, then reloads `.credentials.json`.
-- If the usage endpoint returns HTTP 401, YapCap runs `claude auth status --json` once for the active account, reloads `.credentials.json`, and retries the usage request once.
+- Before the request, YapCap checks `claudeAiOauth.expiresAt`. If the access token expires within 5 minutes, it runs `claude auth status --json` with `CLAUDE_CONFIG_DIR` set to the active account config directory, reloads `.credentials.json`, and returns `ClaudeError::CredentialsRefreshed` (transient) without making the usage request. The next scheduled refresh cycle will use the fresh token.
+- If the usage endpoint returns HTTP 401, YapCap runs `claude auth status --json` once for the active account and returns `ClaudeError::CredentialsRefreshed` (transient) without retrying the usage request. The next scheduled refresh cycle retries with the updated token. This single-request-per-cycle rule prevents back-to-back requests that trigger Claude's rate limiter.
 
 Response shape:
 
@@ -297,7 +300,7 @@ Usage fallback: none. Claude usage is OAuth-only because the CLI does not expose
 
 Credential refresh is delegated to Claude Code. YapCap shells out directly to the `claude` binary, without a shell, and lets Claude Code manage its own OAuth refresh flow and credential file. YapCap does not call Claude's private token endpoint directly.
 
-HTTP 401 surfaces as `ClaudeError::Unauthorized` after the one refresh retry fails (user action required). HTTP 429 surfaces as `ClaudeError::RateLimited` and is marked transient so the badge shows "Stale" rather than "Error."
+HTTP 401 surfaces as `ClaudeError::Unauthorized` only when it occurs before a credential refresh attempt is possible (e.g. `claude` binary not found); the post-refresh cycle is handled by `CredentialsRefreshed` (user action not required). HTTP 429 surfaces as `ClaudeError::RateLimited`, is marked transient, and displays the message "Rate limited by Claude — consider increasing the Auto refresh interval in Settings".
 
 ### 3.3 Cursor
 
@@ -457,11 +460,11 @@ provider_visibility_mode = "auto_init_pending"
 codex_enabled = true
 claude_enabled = true
 cursor_enabled = true
-active_codex_account_id = null
+selected_codex_account_ids = []
 codex_managed_accounts = []
-active_claude_account_id = null
+selected_claude_account_ids = []
 claude_managed_accounts = []
-active_cursor_account_id = null
+selected_cursor_account_ids = []
 cursor_managed_accounts = []
 cursor_browser = "brave"
 cursor_profile_id = null
@@ -477,22 +480,26 @@ log_level = "info"
 - If `cursor_profile_id` is set, Cursor cookie import uses only that discovered profile.
 - `YAPCAP_CURSOR_BROWSER` overrides `cursor_browser` at runtime.
 - The refresh interval is clamped to a 10-second floor at subscription time.
-- `active_codex_account_id` is a preference, not proof that credentials exist.
-  It resolves to `Ready` only when a matching managed account source is valid.
+- `selected_codex_account_ids` is a preference list, not proof that credentials exist.
+  Each id resolves to `Ready` only when a matching managed account source is valid.
+  When empty, YapCap auto-selects the first discovered account. Multiple ids
+  cause concurrent refresh and a multi-column popup view.
 - `codex_managed_accounts` stores non-secret metadata only: id, label,
   managed Codex home path, optional email/provider account id, and timestamps.
   There is at most one managed account per normalized email.
-- `active_claude_account_id` is a preference, not proof that credentials exist.
-  It resolves to `Ready` only when a matching managed Claude account source is
-  valid.
+- `selected_claude_account_ids` is a preference list, not proof that credentials exist.
+  Each id resolves to `Ready` only when a matching managed Claude account source is
+  valid. When empty, YapCap auto-selects the first discovered account. Multiple ids
+  cause concurrent refresh and a multi-column popup view.
 - `claude_managed_accounts` stores non-secret metadata only: id, label, Claude
   config directory path, optional identity metadata, subscription type, and
   timestamps.
   There is at most one managed account per normalized email.
-- `active_cursor_account_id` is a preference, not proof that credentials exist.
-  It stores `cursor-managed:<storage-id>` (opaque folder name, not the email)
+- `selected_cursor_account_ids` is a preference list, not proof that credentials exist.
+  Each entry stores `cursor-managed:<storage-id>` (opaque folder name, not the email)
   and resolves to `Ready` only when that account's session cookie can be read
-  and the Cursor API responds successfully.
+  and the Cursor API responds successfully. Multiple ids cause concurrent refresh
+  and a multi-column popup view.
 - `cursor_managed_accounts` stores non-secret metadata only: opaque `id`,
   canonical email, label, managed account root path, credential source, optional
   browser metadata, optional identity metadata, plan, and timestamps. There is
@@ -519,7 +526,7 @@ AppState
     +-- ProviderRuntimeState
           provider: ProviderId
           enabled / is_refreshing
-          active_account_id
+          selected_account_ids: Vec<String>
           account_status
           legacy_display_snapshot
           error
@@ -596,7 +603,7 @@ enum AccountSelectionStatus { Ready, LoginRequired, SelectionRequired, Unavailab
 struct ProviderRuntimeState {
     provider: ProviderId,
     enabled: bool,
-    active_account_id: Option<String>,
+    selected_account_ids: Vec<String>,
     account_status: AccountSelectionStatus,
     is_refreshing: bool,
     legacy_display_snapshot: Option<UsageSnapshot>,
@@ -623,20 +630,20 @@ struct ProviderAccountRuntimeState {
 
 ### 5.3 Stale/Fresh Rules
 
-`STALE_AFTER = 10 minutes` governs the popup status badge.
+`STALE_AFTER = 10 minutes` governs the per-account status badge shown in the popup.
 
 | Condition | Badge |
 | --- | --- |
-| `!enabled` | Disabled |
-| `is_refreshing` | Refreshing |
-| account selection `LoginRequired` | Login |
-| account selection `SelectionRequired` | Select |
-| active account `health=Ok`, snapshot present, `now - last_success_at < STALE_AFTER` | Live |
+| `is_refreshing` (provider level) | Refreshing |
+| `auth_state = ActionRequired` | Login |
+| `health = Error` | Error |
+| `health=Ok`, snapshot present, `now - last_success_at < STALE_AFTER` | Live |
 | snapshot present, any other condition | Stale |
-| active account `health=Error`, no snapshot | Error |
-| active account `health=Ok`, no snapshot | … |
+| no snapshot | Loading |
 
-`ProviderRuntimeState::status_line` applies the same rule and appends `(stale)` to the headline line when appropriate. This prevents "Live · Updated 21 hours ago" on cold-start from the cache.
+In single-account view the badge appears in the account header. In multi-account view each column shows its own badge independently, and the shared provider title row carries no badge.
+
+`ProviderRuntimeState::status_line` applies the same rule at the provider level (using the first selected account) and appends `(stale)` when appropriate. This prevents "Live · Updated 21 hours ago" on cold-start from the cache.
 
 ## 6. Persistence, Logging, Paths
 
@@ -666,6 +673,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Local `cargo run` launches through `cosmic::app::run` with `LaunchMode::Standalone`; `applet_settings()` gives the standalone preview the same calculated button dimensions without using the applet autosize wrapper.
 - Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset.
+- When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running.
@@ -680,7 +688,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
   - settings: category tabs for General, Codex, Claude, and Cursor, using a theme-symbolic gear icon for General and provider icons for provider settings.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
-  - Provider view is rendered as a stack of consistent cards (summary, usage windows, cost/credits, account, and error/source state).
+  - Provider view always starts with a provider title card (icon + name). Below it, each selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one selected account the column fills the full popup width. When a provider has two or more selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to the widest provider across all tabs.
   - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
@@ -689,7 +697,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
-The popup width is fixed at 420px. The popup height is fixed for the duration of one open session (chosen conservatively up front, capped at 1080px) to avoid Wayland popup resize/reposition flicker. The body panel scrolls when content exceeds the available space.
+The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands horizontally to `n × 420 px` when the selected provider has `n` selected accounts, and shrinks back when switching to a single-account provider or opening Settings. Horizontal resize is applied via `xdg_popup::reposition` (`set_size`) each time the provider tab or route changes. The popup height is computed separately for the provider-detail route and the settings route: provider height is the tallest provider across all tabs (independent of settings height); settings height covers only the settings content. The window resizes when switching between the two routes. Both heights are capped at 1080 px; the body panel scrolls when content exceeds the available space. The header, navigation row, and footer are constrained to a single 420 px column centered within the wider popup surface; only the body expands with the additional columns.
 
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 

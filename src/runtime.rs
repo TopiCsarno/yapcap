@@ -101,25 +101,20 @@ pub async fn refresh_provider_account_statuses(
     providers::registry::refresh_account_statuses(provider, config, previous_accounts).await
 }
 
-pub async fn refresh_one(
+pub async fn refresh_account(
     config: Config,
     provider: ProviderId,
+    account_id: String,
     previous: Option<ProviderRuntimeState>,
     previous_accounts: Vec<ProviderAccountRuntimeState>,
 ) -> ProviderRefreshResult {
     let enabled = config.provider_enabled(provider);
     let client = http_client();
-    let active_id = previous
-        .as_ref()
-        .and_then(|p| p.active_account_id.as_deref());
-
     let accounts = providers::registry::discover_accounts(provider, &config);
-    let preferred = providers::registry::active_account_preference(provider, &config);
-    let preferred_id = preferred.as_deref().or(active_id);
 
     let Some(account) = accounts
         .iter()
-        .find(|a| preferred_id == Some(a.account_id.as_str()))
+        .find(|a| a.account_id == account_id)
         .or_else(|| accounts.first())
     else {
         return no_provider_accounts(provider, enabled, previous.as_ref());
@@ -174,7 +169,7 @@ fn not_ready_provider(
     state.provider = provider;
     state.enabled = true;
     state.is_refreshing = false;
-    state.active_account_id = None;
+    state.selected_account_ids = Vec::new();
     state.account_status = AccountSelectionStatus::LoginRequired;
     state.error = Some("Login required".to_string());
     state
@@ -205,7 +200,9 @@ where
     state.provider = provider;
     state.enabled = true;
     state.is_refreshing = true;
-    state.active_account_id = Some(account_id.clone());
+    if !state.selected_account_ids.contains(&account_id) {
+        state.selected_account_ids.push(account_id.clone());
+    }
     state.account_status = AccountSelectionStatus::Ready;
     state.error = None;
 
@@ -276,7 +273,7 @@ pub fn reconcile_state(config: &Config, state: &mut AppState) {
         provider.is_refreshing = false;
         if !provider.enabled {
             provider.account_status = AccountSelectionStatus::Unavailable;
-            provider.active_account_id = None;
+            provider.selected_account_ids = Vec::new();
         }
     }
 }
@@ -289,7 +286,7 @@ pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: Provi
         entry.is_refreshing = false;
         if !entry.enabled {
             entry.account_status = AccountSelectionStatus::Unavailable;
-            entry.active_account_id = None;
+            entry.selected_account_ids = Vec::new();
         }
     }
 }
@@ -469,8 +466,8 @@ mod tests {
             AccountSelectionStatus::LoginRequired
         );
         assert_eq!(
-            result.provider.active_account_id.as_deref(),
-            Some("cursor-managed:user@example.com")
+            result.provider.selected_account_ids.as_slice(),
+            ["cursor-managed:user@example.com"]
         );
         assert_eq!(result.provider.error.as_deref(), Some("Login required"));
         assert_eq!(account.auth_state, AuthState::ActionRequired);

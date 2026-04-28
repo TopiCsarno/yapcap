@@ -344,7 +344,9 @@ pub enum ClaudeError {
     CliStatusFailed { status: String },
     #[error("failed to decode claude auth status JSON")]
     DecodeCliStatus(#[source] serde_json::Error),
-    #[error("claude usage endpoint rate limited (429)")]
+    #[error("claude credentials refreshed; will retry on next refresh")]
+    CredentialsRefreshed,
+    #[error("Rate limited by Claude — consider increasing the Auto refresh interval in Settings")]
     RateLimited,
     #[error("claude usage endpoint returned HTTP {status}")]
     UsageEndpoint {
@@ -391,7 +393,7 @@ impl ClaudeError {
 
     #[must_use]
     pub fn is_transient(&self) -> bool {
-        matches!(self, Self::RateLimited)
+        matches!(self, Self::RateLimited | Self::CredentialsRefreshed)
     }
 }
 

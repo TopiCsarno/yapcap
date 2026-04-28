@@ -42,11 +42,7 @@ pub fn discover_accounts(config: &Config) -> Vec<CodexAccount> {
                     existing.email.as_deref().map(normalized_email) == Some(email_key.clone())
                 }) {
                     let existing = &accounts[index];
-                    if prefer_account(
-                        existing,
-                        &discovered,
-                        config.active_codex_account_id.as_deref(),
-                    ) {
+                    if prefer_account(existing, &discovered, &config.selected_codex_account_ids) {
                         continue;
                     }
                     accounts[index] = discovered;
@@ -62,20 +58,27 @@ pub fn discover_accounts(config: &Config) -> Vec<CodexAccount> {
 
 pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
     let mut changed = dedupe_managed_accounts(config);
-    let prefer_imported = config.active_codex_account_id.as_deref() == Some("system")
-        || config.active_codex_account_id.is_none();
+    let has_system = config
+        .selected_codex_account_ids
+        .iter()
+        .any(|id| id == "system");
+    let prefer_imported = has_system || config.selected_codex_account_ids.is_empty();
 
     let Ok(source_home) = codex_home() else {
-        if config.active_codex_account_id.as_deref() == Some("system") {
-            config.active_codex_account_id = None;
+        if has_system {
+            config
+                .selected_codex_account_ids
+                .retain(|id| id != "system");
             return Ok(true);
         }
         return Ok(changed);
     };
 
     let Ok(source_auth) = load_codex_auth_from_home(&source_home) else {
-        if config.active_codex_account_id.as_deref() == Some("system") {
-            config.active_codex_account_id = None;
+        if has_system {
+            config
+                .selected_codex_account_ids
+                .retain(|id| id != "system");
             return Ok(true);
         }
         return Ok(changed);
@@ -83,8 +86,10 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
 
     let managed_root = paths().codex_accounts_dir;
     if is_path_within(&source_home, &managed_root) {
-        if config.active_codex_account_id.as_deref() == Some("system") {
-            config.active_codex_account_id = None;
+        if has_system {
+            config
+                .selected_codex_account_ids
+                .retain(|id| id != "system");
             changed = true;
         }
         return Ok(changed);
@@ -98,10 +103,11 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
     create_private_dir(&managed_root)?;
     if let Some(existing) = find_matching_account(config, email.as_deref()).cloned() {
         if load_codex_auth_from_home(&existing.codex_home).is_ok() {
-            if prefer_imported
-                && config.active_codex_account_id.as_deref() != Some(existing.id.as_str())
-            {
-                config.active_codex_account_id = Some(existing.id);
+            if prefer_imported && !config.selected_codex_account_ids.contains(&existing.id) {
+                config
+                    .selected_codex_account_ids
+                    .retain(|id| id != "system");
+                config.selected_codex_account_ids.push(existing.id);
                 changed = true;
             }
             return Ok(changed);
@@ -153,7 +159,9 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
 
 pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConfig) {
     let account_id = account.id.clone();
-    config.active_codex_account_id = Some(account_id.clone());
+    if !config.selected_codex_account_ids.contains(&account_id) {
+        config.selected_codex_account_ids.push(account_id.clone());
+    }
     config
         .codex_managed_accounts
         .retain(|existing| existing.id != account_id);
@@ -228,8 +236,8 @@ pub(crate) fn replacement_backup_path(target_home: &Path) -> PathBuf {
 }
 
 fn dedupe_managed_accounts(config: &mut Config) -> bool {
-    let original_active = config.active_codex_account_id.clone();
-    let mut active_id = original_active.clone();
+    let original_selected = config.selected_codex_account_ids.clone();
+    let mut selected_ids = original_selected.clone();
     let original_len = config.codex_managed_accounts.len();
     let mut deduped = Vec::new();
 
@@ -246,8 +254,7 @@ fn dedupe_managed_accounts(config: &mut Config) -> bool {
             })
         {
             let existing = deduped.remove(index);
-            let keep_existing =
-                prefer_managed_account(&existing, &account, original_active.as_deref());
+            let keep_existing = prefer_managed_account(&existing, &account, &original_selected);
             let (mut winner, loser) = if keep_existing {
                 (existing, account)
             } else {
@@ -256,8 +263,10 @@ fn dedupe_managed_accounts(config: &mut Config) -> bool {
             let loser_id = loser.id.clone();
             let winner_id = winner.id.clone();
             merge_account_metadata(&mut winner, &loser);
-            if active_id.as_deref() == Some(loser_id.as_str()) {
-                active_id = Some(winner_id);
+            for id in &mut selected_ids {
+                if id == loser_id.as_str() {
+                    id.clone_from(&winner_id);
+                }
             }
             deduped.push(winner);
             continue;
@@ -266,24 +275,22 @@ fn dedupe_managed_accounts(config: &mut Config) -> bool {
         deduped.push(account);
     }
 
-    if active_id.as_deref() == Some("system") {
-        active_id = None;
-    }
-    let changed = deduped.len() != original_len || active_id != original_active;
+    selected_ids.retain(|id| id != "system");
+    let changed = deduped.len() != original_len || selected_ids != original_selected;
     config.codex_managed_accounts = deduped;
-    config.active_codex_account_id = active_id;
+    config.selected_codex_account_ids = selected_ids;
     changed
 }
 
 fn prefer_account(
     existing: &CodexAccount,
     candidate: &CodexAccount,
-    active_id: Option<&str>,
+    selected_ids: &[String],
 ) -> bool {
-    if active_id == Some(existing.id.as_str()) {
+    if selected_ids.iter().any(|id| id == existing.id.as_str()) {
         return true;
     }
-    if active_id == Some(candidate.id.as_str()) {
+    if selected_ids.iter().any(|id| id == candidate.id.as_str()) {
         return false;
     }
     existing.id >= candidate.id
@@ -292,12 +299,12 @@ fn prefer_account(
 fn prefer_managed_account(
     existing: &ManagedCodexAccountConfig,
     candidate: &ManagedCodexAccountConfig,
-    active_id: Option<&str>,
+    selected_ids: &[String],
 ) -> bool {
-    if active_id == Some(existing.id.as_str()) {
+    if selected_ids.iter().any(|id| id == existing.id.as_str()) {
         return true;
     }
-    if active_id == Some(candidate.id.as_str()) {
+    if selected_ids.iter().any(|id| id == candidate.id.as_str()) {
         return false;
     }
     let existing_auth = existing.last_authenticated_at.or(Some(existing.updated_at));
@@ -433,8 +440,8 @@ mod tests {
         assert_eq!(config.codex_managed_accounts.len(), 1);
         let account = &config.codex_managed_accounts[0];
         assert_eq!(
-            config.active_codex_account_id.as_deref(),
-            Some(account.id.as_str())
+            config.selected_codex_account_ids.as_slice(),
+            [account.id.as_str()]
         );
         assert_eq!(account.provider_account_id.as_deref(), Some("acct-123"));
         assert_eq!(account.email.as_deref(), Some("user@example.com"));
@@ -479,8 +486,8 @@ mod tests {
         assert_eq!(config.codex_managed_accounts.len(), 1);
         assert_eq!(config.codex_managed_accounts[0].id, "codex-existing");
         assert_eq!(
-            config.active_codex_account_id.as_deref(),
-            Some("codex-existing")
+            config.selected_codex_account_ids.as_slice(),
+            ["codex-existing"]
         );
     }
 
@@ -499,7 +506,7 @@ mod tests {
 
         let now = Utc::now();
         let mut config = Config {
-            active_codex_account_id: Some("codex-existing".to_string()),
+            selected_codex_account_ids: vec!["codex-existing".to_string()],
             codex_managed_accounts: vec![ManagedCodexAccountConfig {
                 id: "codex-existing".to_string(),
                 label: "user@example.com".to_string(),
@@ -538,7 +545,7 @@ mod tests {
         write_auth(&home_b, "acct-999", "USER@example.com");
 
         let mut config = Config {
-            active_codex_account_id: Some("codex-b".to_string()),
+            selected_codex_account_ids: vec!["codex-b".to_string()],
             codex_managed_accounts: vec![
                 ManagedCodexAccountConfig {
                     id: "codex-a".to_string(),
@@ -572,7 +579,7 @@ mod tests {
             config.codex_managed_accounts[0].email.as_deref(),
             Some("USER@example.com")
         );
-        assert_eq!(config.active_codex_account_id.as_deref(), Some("codex-b"));
+        assert_eq!(config.selected_codex_account_ids.as_slice(), ["codex-b"]);
         assert_eq!(
             config.codex_managed_accounts[0]
                 .provider_account_id
@@ -590,7 +597,7 @@ mod tests {
         write_auth(&home_b, "acct-999", "USER@example.com");
 
         let config = Config {
-            active_codex_account_id: Some("codex-b".to_string()),
+            selected_codex_account_ids: vec!["codex-b".to_string()],
             codex_managed_accounts: vec![
                 ManagedCodexAccountConfig {
                     id: "codex-a".to_string(),

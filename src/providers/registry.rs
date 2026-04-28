@@ -163,23 +163,12 @@ fn cursor_account_to_discovered(
     }
 }
 
-pub fn active_account_preference(provider: ProviderId, config: &Config) -> Option<String> {
-    match provider {
-        ProviderId::Codex => config.active_codex_account_id.clone(),
-        ProviderId::Claude => config.active_claude_account_id.clone(),
-        ProviderId::Cursor => config.active_cursor_account_id.clone(),
-    }
-}
-
-pub fn set_active_account_preference(
-    provider: ProviderId,
-    config: &mut Config,
-    account_id: Option<String>,
-) {
-    match provider {
-        ProviderId::Codex => config.active_codex_account_id = account_id,
-        ProviderId::Claude => config.active_claude_account_id = account_id,
-        ProviderId::Cursor => config.active_cursor_account_id = account_id,
+pub fn toggle_account_selection(provider: ProviderId, config: &mut Config, account_id: &str) {
+    let ids = config.selected_account_ids_mut(provider);
+    if let Some(pos) = ids.iter().position(|id| id == account_id) {
+        ids.remove(pos);
+    } else {
+        ids.push(account_id.to_string());
     }
 }
 
@@ -194,14 +183,16 @@ fn set_provider_enabled_flag(config: &mut Config, provider: ProviderId, enabled:
     changed
 }
 
-pub fn sync_active_preference_with_discoveries(config: &mut Config, provider: ProviderId) {
+pub fn sync_selected_ids_with_discoveries(config: &mut Config, provider: ProviderId) {
     let valid: Vec<String> = discover_accounts(provider, config)
         .into_iter()
         .map(|a| a.account_id)
         .collect();
-    let preferred = active_account_preference(provider, config);
-    let next = resolve_active_account(preferred.as_deref(), &valid);
-    set_active_account_preference(provider, config, next);
+    let ids = config.selected_account_ids_mut(provider);
+    ids.retain(|id| valid.contains(id));
+    if ids.is_empty() && valid.len() == 1 {
+        ids.push(valid.into_iter().next().unwrap());
+    }
 }
 
 pub async fn fetch_handle(
@@ -240,9 +231,9 @@ pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Confi
             let email = account.email.clone();
             cursor::remove_managed_profile(&account.account_root);
             config.cursor_managed_accounts.retain(|a| a.email != email);
-            if config.active_cursor_account_id.as_deref() == Some(account_id) {
-                config.active_cursor_account_id = None;
-            }
+            config
+                .selected_cursor_account_ids
+                .retain(|id| id != account_id);
             true
         }
         ProviderId::Codex => {
@@ -256,9 +247,9 @@ pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Confi
             };
             remove_managed_codex_home(&account.codex_home);
             config.codex_managed_accounts.retain(|a| a.id != account_id);
-            if config.active_codex_account_id.as_deref() == Some(account_id) {
-                config.active_codex_account_id = None;
-            }
+            config
+                .selected_codex_account_ids
+                .retain(|id| id != account_id);
             true
         }
         ProviderId::Claude => {
@@ -274,9 +265,9 @@ pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Confi
             config
                 .claude_managed_accounts
                 .retain(|a| a.id != account_id);
-            if config.active_claude_account_id.as_deref() == Some(account_id) {
-                config.active_claude_account_id = None;
-            }
+            config
+                .selected_claude_account_ids
+                .retain(|id| id != account_id);
             true
         }
     }
@@ -285,8 +276,16 @@ pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Confi
 pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state: &mut AppState) {
     let accounts = discover_accounts(provider, config);
     let valid_ids: Vec<String> = accounts.iter().map(|a| a.account_id.clone()).collect();
-    let preferred = active_account_preference(provider, config);
-    let active_id = resolve_active_account(preferred.as_deref(), &valid_ids);
+
+    let mut selected_ids: Vec<String> = config
+        .selected_account_ids(provider)
+        .iter()
+        .filter(|id| valid_ids.contains(id))
+        .cloned()
+        .collect();
+    if selected_ids.is_empty() && valid_ids.len() == 1 {
+        selected_ids = valid_ids.first().cloned().into_iter().collect();
+    }
 
     state
         .provider_accounts
@@ -308,7 +307,7 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
         entry.label.clone_from(&account.label);
 
         if entry.snapshot.is_none()
-            && active_id.as_deref() == Some(account.account_id.as_str())
+            && selected_ids.contains(&account.account_id)
             && accounts.len() == 1
             && let Some(snapshot) = state
                 .provider(provider)
@@ -322,31 +321,18 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
 
     if let Some(provider_state) = state.provider_mut(provider) {
         provider_state.enabled = config.provider_enabled(provider);
-        provider_state.active_account_id = active_id;
-        provider_state.account_status =
-            account_status(provider_state.active_account_id.as_deref(), accounts.len());
+        provider_state.account_status = account_status(&selected_ids, accounts.len());
         provider_state.error = match provider_state.account_status {
             AccountSelectionStatus::LoginRequired => Some("Login required".to_string()),
             AccountSelectionStatus::SelectionRequired => Some("Select an account".to_string()),
             _ => provider_state.error.take(),
         };
+        provider_state.selected_account_ids = selected_ids;
     }
 }
 
-fn resolve_active_account(persisted: Option<&str>, valid_ids: &[String]) -> Option<String> {
-    if let Some(persisted) = persisted
-        && valid_ids.iter().any(|id| id == persisted)
-    {
-        return Some(persisted.to_string());
-    }
-    if valid_ids.len() == 1 {
-        return valid_ids.first().cloned();
-    }
-    None
-}
-
-fn account_status(active_id: Option<&str>, valid_count: usize) -> AccountSelectionStatus {
-    if active_id.is_some() {
+fn account_status(selected_ids: &[String], valid_count: usize) -> AccountSelectionStatus {
+    if !selected_ids.is_empty() {
         AccountSelectionStatus::Ready
     } else if valid_count == 0 {
         AccountSelectionStatus::LoginRequired

@@ -33,11 +33,26 @@ impl AppState {
 
     #[must_use]
     pub fn active_account(&self, provider: ProviderId) -> Option<&ProviderAccountRuntimeState> {
-        let provider_state = self.provider(provider)?;
-        let active_id = provider_state.active_account_id.as_ref()?;
+        let first_id = self.provider(provider)?.selected_account_ids.first()?;
         self.provider_accounts
             .iter()
-            .find(|entry| entry.provider == provider && entry.account_id == *active_id)
+            .find(|entry| entry.provider == provider && &entry.account_id == first_id)
+    }
+
+    #[must_use]
+    pub fn selected_accounts(&self, provider: ProviderId) -> Vec<&ProviderAccountRuntimeState> {
+        let selected_ids = self
+            .provider(provider)
+            .map(|p| p.selected_account_ids.as_slice())
+            .unwrap_or_default();
+        selected_ids
+            .iter()
+            .filter_map(|id| {
+                self.provider_accounts
+                    .iter()
+                    .find(|a| a.provider == provider && &a.account_id == id)
+            })
+            .collect()
     }
 
     #[must_use]

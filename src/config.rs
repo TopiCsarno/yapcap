@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 203]
+#[version = 300]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,

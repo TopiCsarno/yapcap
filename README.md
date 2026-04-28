@@ -50,7 +50,7 @@ Multi-account view: two Codex columns with <strong>Show all accounts</strong> on
 </td>
 <td align="center" valign="top" width="25%">
 
-<strong>Settings — Codex accounts</strong><br />
+<strong>Settings — Accounts</strong><br />
 <img src="resources/screenshots/screenshot-settings-codex.png" alt="YapCap Codex account settings" />
 
 </td>

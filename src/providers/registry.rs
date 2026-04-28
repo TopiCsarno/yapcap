@@ -9,12 +9,24 @@ use crate::model::{
     ProviderId, UsageSnapshot,
 };
 use crate::providers::interface::{
-    ProviderAccountActionSupport, ProviderAccountHandle, ProviderDiscoveredAccount,
+    BoxFuture, ProviderAccountDescriptor, ProviderAccountHandle, ProviderAdapter,
+    ProviderCapabilities, ProviderDiscoveredAccount,
 };
 use crate::providers::{claude, codex, cursor};
 use chrono::Utc;
 use std::collections::HashMap;
 use tokio::task::JoinSet;
+
+#[cfg(test)]
+mod tests;
+
+pub fn ambient_active_account_id(provider: ProviderId, config: &Config) -> Option<String> {
+    adapter(provider).ambient_active_account_id(config)
+}
+
+pub fn capabilities(provider: ProviderId) -> ProviderCapabilities {
+    adapter(provider).capabilities()
+}
 
 pub fn startup_cleanup() {
     cursor::cleanup_pending_dirs();
@@ -42,7 +54,7 @@ pub fn initialize_provider_visibility(config: &mut Config, providers: &[Provider
     let mut changed = false;
     for &provider in providers {
         let enabled = !discover_accounts(provider, config).is_empty();
-        changed |= set_provider_enabled_flag(config, provider, enabled);
+        changed |= config.set_provider_enabled(provider, enabled);
     }
     changed
 }
@@ -76,111 +88,44 @@ pub async fn browser_account_discovery(
     cursor::discover_browser_accounts(config, client)
         .await
         .into_iter()
-        .map(cursor_account_to_discovered)
+        .map(cursor_account_descriptor)
         .collect()
 }
 
 pub fn upsert_discovered_accounts(config: &mut Config, accounts: &[ProviderDiscoveredAccount]) {
-    for account in accounts {
-        if let ProviderAccountHandle::Cursor(managed) = &account.handle {
-            cursor::upsert_managed_account(config, managed.clone());
+    let providers = ProviderId::ALL.map(|provider| {
+        accounts
+            .iter()
+            .filter(|account| account.provider == provider)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    for provider_accounts in providers {
+        if let Some(account) = provider_accounts.first() {
+            adapter(account.provider).upsert_discovered_accounts(config, &provider_accounts);
         }
     }
 }
 
 pub fn discover_accounts(provider: ProviderId, config: &Config) -> Vec<ProviderDiscoveredAccount> {
-    match provider {
-        ProviderId::Codex => {
-            let action_support = ProviderAccountActionSupport {
-                can_delete: true,
-                can_reauthenticate: false,
-                supports_background_status_refresh: false,
-            };
-            codex::discover_accounts(config)
-                .into_iter()
-                .filter_map(|account| {
-                    config
-                        .codex_managed_accounts
-                        .iter()
-                        .find(|managed| managed.id == account.id)
-                        .cloned()
-                        .map(|managed| ProviderDiscoveredAccount {
-                            provider,
-                            account_id: account.id,
-                            label: account.label,
-                            action_support: action_support.clone(),
-                            handle: ProviderAccountHandle::Codex(managed),
-                        })
-                })
-                .collect()
-        }
-        ProviderId::Claude => {
-            let action_support = ProviderAccountActionSupport {
-                can_delete: true,
-                can_reauthenticate: false,
-                supports_background_status_refresh: false,
-            };
-            claude::discover_accounts(config)
-                .into_iter()
-                .filter_map(|account| {
-                    config
-                        .claude_managed_accounts
-                        .iter()
-                        .find(|managed| managed.id == account.id)
-                        .cloned()
-                        .map(|managed| ProviderDiscoveredAccount {
-                            provider,
-                            account_id: account.id,
-                            label: account.label,
-                            action_support: action_support.clone(),
-                            handle: ProviderAccountHandle::Claude(managed),
-                        })
-                })
-                .collect()
-        }
-        ProviderId::Cursor => cursor::discover_accounts(config)
-            .into_iter()
-            .map(cursor_account_to_discovered)
-            .collect(),
-    }
-}
-
-fn cursor_account_to_discovered(
-    account: crate::config::ManagedCursorAccountConfig,
-) -> ProviderDiscoveredAccount {
-    let account_id = cursor::managed_account_id(&account.id);
-    let label = account.email.clone();
-    ProviderDiscoveredAccount {
-        provider: ProviderId::Cursor,
-        account_id,
-        label,
-        action_support: ProviderAccountActionSupport {
-            can_delete: true,
-            can_reauthenticate: true,
-            supports_background_status_refresh: true,
-        },
-        handle: ProviderAccountHandle::Cursor(account),
-    }
+    adapter(provider).discover_accounts(config)
 }
 
 pub fn toggle_account_selection(provider: ProviderId, config: &mut Config, account_id: &str) {
+    if !config.show_all_accounts(provider) {
+        let ids = config.selected_account_ids_mut(provider);
+        if ids.as_slice() != [account_id] {
+            ids.clear();
+            ids.push(account_id.to_string());
+        }
+        return;
+    }
     let ids = config.selected_account_ids_mut(provider);
     if let Some(pos) = ids.iter().position(|id| id == account_id) {
         ids.remove(pos);
     } else {
         ids.push(account_id.to_string());
     }
-}
-
-fn set_provider_enabled_flag(config: &mut Config, provider: ProviderId, enabled: bool) -> bool {
-    let target = match provider {
-        ProviderId::Codex => &mut config.codex_enabled,
-        ProviderId::Claude => &mut config.claude_enabled,
-        ProviderId::Cursor => &mut config.cursor_enabled,
-    };
-    let changed = *target != enabled;
-    *target = enabled;
-    changed
 }
 
 pub fn sync_selected_ids_with_discoveries(config: &mut Config, provider: ProviderId) {
@@ -199,82 +144,319 @@ pub async fn fetch_handle(
     handle: &ProviderAccountHandle,
     client: &reqwest::Client,
 ) -> crate::error::Result<UsageSnapshot, AppError> {
-    match handle {
-        ProviderAccountHandle::Codex(account) => codex::fetch(client, account.codex_home.clone())
-            .await
-            .map_err(AppError::from),
-        ProviderAccountHandle::Claude(account) => claude::fetch(client, account.config_dir.clone())
-            .await
-            .map_err(AppError::from),
-        ProviderAccountHandle::Cursor(account) => {
-            cursor::fetch(client, account).await.map_err(AppError::from)
-        }
-    }
+    let provider = match handle {
+        ProviderAccountHandle::Codex(_) => ProviderId::Codex,
+        ProviderAccountHandle::Claude(_) => ProviderId::Claude,
+        ProviderAccountHandle::Cursor(_) => ProviderId::Cursor,
+    };
+    adapter(provider).fetch_account(handle, client).await
 }
 
 pub fn supports_background_status_refresh(provider: ProviderId) -> bool {
-    matches!(provider, ProviderId::Cursor)
+    capabilities(provider).supports_background_status_refresh
 }
 
 pub fn auth_error_requires_reauth_prompt(provider: ProviderId) -> bool {
-    matches!(provider, ProviderId::Cursor)
+    capabilities(provider).requires_auth_prompt_on_auth_failure
 }
 
 pub fn delete_account(provider: ProviderId, account_id: &str, config: &mut Config) -> bool {
-    match provider {
-        ProviderId::Cursor => {
-            let Some(account) =
-                cursor::find_managed_account(&config.cursor_managed_accounts, account_id).cloned()
-            else {
-                return false;
-            };
-            let email = account.email.clone();
-            cursor::remove_managed_profile(&account.account_root);
-            config.cursor_managed_accounts.retain(|a| a.email != email);
-            config
-                .selected_cursor_account_ids
-                .retain(|id| id != account_id);
-            true
-        }
-        ProviderId::Codex => {
-            let account = config
-                .codex_managed_accounts
-                .iter()
-                .find(|a| a.id == account_id)
-                .cloned();
-            let Some(account) = account else {
-                return false;
-            };
-            remove_managed_codex_home(&account.codex_home);
-            config.codex_managed_accounts.retain(|a| a.id != account_id);
-            config
-                .selected_codex_account_ids
-                .retain(|id| id != account_id);
-            true
-        }
-        ProviderId::Claude => {
-            let account = config
-                .claude_managed_accounts
-                .iter()
-                .find(|a| a.id == account_id)
-                .cloned();
-            let Some(account) = account else {
-                return false;
-            };
-            claude::remove_managed_config_dir(&account.config_dir);
-            config
-                .claude_managed_accounts
-                .retain(|a| a.id != account_id);
-            config
-                .selected_claude_account_ids
-                .retain(|id| id != account_id);
-            true
-        }
-    }
+    adapter(provider).delete_account(account_id, config)
 }
 
 pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state: &mut AppState) {
-    let accounts = discover_accounts(provider, config);
+    adapter(provider).reconcile_provider_accounts(config, state);
+}
+
+pub async fn refresh_account_statuses(
+    provider: ProviderId,
+    config: Config,
+    previous_accounts: Vec<ProviderAccountRuntimeState>,
+) -> Vec<ProviderAccountRuntimeState> {
+    adapter(provider)
+        .refresh_account_statuses(config, previous_accounts)
+        .await
+}
+
+fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
+    match provider {
+        ProviderId::Codex => &CODEX_ADAPTER,
+        ProviderId::Claude => &CLAUDE_ADAPTER,
+        ProviderId::Cursor => &CURSOR_ADAPTER,
+    }
+}
+
+static CODEX_ADAPTER: CodexAdapter = CodexAdapter;
+static CLAUDE_ADAPTER: ClaudeAdapter = ClaudeAdapter;
+static CURSOR_ADAPTER: CursorAdapter = CursorAdapter;
+
+struct CodexAdapter;
+
+impl ProviderAdapter for CodexAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::Codex
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_delete: true,
+            supports_reauthentication: false,
+            supports_background_status_refresh: false,
+            requires_auth_prompt_on_auth_failure: false,
+        }
+    }
+
+    fn ambient_active_account_id(&self, config: &Config) -> Option<String> {
+        codex::ambient_active_account_id(config)
+    }
+
+    fn discover_accounts(&self, config: &Config) -> Vec<ProviderAccountDescriptor> {
+        let capabilities = self.capabilities();
+        codex::discover_accounts(config)
+            .into_iter()
+            .filter_map(|account| {
+                config
+                    .codex_managed_accounts
+                    .iter()
+                    .find(|managed| managed.id == account.id)
+                    .cloned()
+                    .map(|managed| ProviderAccountDescriptor {
+                        provider: self.id(),
+                        account_id: account.id,
+                        label: account.label,
+                        capabilities,
+                        handle: ProviderAccountHandle::Codex(managed),
+                    })
+            })
+            .collect()
+    }
+
+    fn delete_account(&self, account_id: &str, config: &mut Config) -> bool {
+        let account = config
+            .codex_managed_accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .cloned();
+        let Some(account) = account else {
+            return false;
+        };
+        remove_managed_codex_home(&account.codex_home);
+        config.codex_managed_accounts.retain(|a| a.id != account_id);
+        config
+            .selected_codex_account_ids
+            .retain(|id| id != account_id);
+        true
+    }
+
+    fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState) {
+        let accounts = self.discover_accounts(config);
+        reconcile_provider_account_descriptors(self.id(), config, state, &accounts);
+    }
+
+    fn fetch_account<'a>(
+        &self,
+        handle: &'a ProviderAccountHandle,
+        client: &'a reqwest::Client,
+    ) -> BoxFuture<'a, crate::error::Result<UsageSnapshot, AppError>> {
+        Box::pin(async move {
+            match handle {
+                ProviderAccountHandle::Codex(account) => {
+                    codex::fetch(client, account.codex_home.clone())
+                        .await
+                        .map_err(AppError::from)
+                }
+                _ => unreachable!(),
+            }
+        })
+    }
+}
+
+struct ClaudeAdapter;
+
+impl ProviderAdapter for ClaudeAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::Claude
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_delete: true,
+            supports_reauthentication: false,
+            supports_background_status_refresh: false,
+            requires_auth_prompt_on_auth_failure: false,
+        }
+    }
+
+    fn ambient_active_account_id(&self, config: &Config) -> Option<String> {
+        claude::ambient_active_account_id(config)
+    }
+
+    fn discover_accounts(&self, config: &Config) -> Vec<ProviderAccountDescriptor> {
+        let capabilities = self.capabilities();
+        claude::discover_accounts(config)
+            .into_iter()
+            .filter_map(|account| {
+                config
+                    .claude_managed_accounts
+                    .iter()
+                    .find(|managed| managed.id == account.id)
+                    .cloned()
+                    .map(|managed| ProviderAccountDescriptor {
+                        provider: self.id(),
+                        account_id: account.id,
+                        label: account.label,
+                        capabilities,
+                        handle: ProviderAccountHandle::Claude(managed),
+                    })
+            })
+            .collect()
+    }
+
+    fn delete_account(&self, account_id: &str, config: &mut Config) -> bool {
+        let account = config
+            .claude_managed_accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .cloned();
+        let Some(account) = account else {
+            return false;
+        };
+        claude::remove_managed_config_dir(&account.config_dir);
+        config
+            .claude_managed_accounts
+            .retain(|a| a.id != account_id);
+        config
+            .selected_claude_account_ids
+            .retain(|id| id != account_id);
+        true
+    }
+
+    fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState) {
+        let accounts = self.discover_accounts(config);
+        reconcile_provider_account_descriptors(self.id(), config, state, &accounts);
+    }
+
+    fn fetch_account<'a>(
+        &self,
+        handle: &'a ProviderAccountHandle,
+        client: &'a reqwest::Client,
+    ) -> BoxFuture<'a, crate::error::Result<UsageSnapshot, AppError>> {
+        Box::pin(async move {
+            match handle {
+                ProviderAccountHandle::Claude(account) => {
+                    claude::fetch(client, account.config_dir.clone())
+                        .await
+                        .map_err(AppError::from)
+                }
+                _ => unreachable!(),
+            }
+        })
+    }
+}
+
+struct CursorAdapter;
+
+impl ProviderAdapter for CursorAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::Cursor
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_delete: true,
+            supports_reauthentication: true,
+            supports_background_status_refresh: true,
+            requires_auth_prompt_on_auth_failure: true,
+        }
+    }
+
+    fn ambient_active_account_id(&self, config: &Config) -> Option<String> {
+        cursor::ambient_active_account_id(config)
+    }
+
+    fn discover_accounts(&self, config: &Config) -> Vec<ProviderAccountDescriptor> {
+        cursor::discover_accounts(config)
+            .into_iter()
+            .map(cursor_account_descriptor)
+            .collect()
+    }
+
+    fn upsert_discovered_accounts(
+        &self,
+        config: &mut Config,
+        accounts: &[ProviderAccountDescriptor],
+    ) {
+        for account in accounts {
+            if let ProviderAccountHandle::Cursor(managed) = &account.handle {
+                cursor::upsert_managed_account(config, managed.clone());
+            }
+        }
+    }
+
+    fn delete_account(&self, account_id: &str, config: &mut Config) -> bool {
+        let Some(account) =
+            cursor::find_managed_account(&config.cursor_managed_accounts, account_id).cloned()
+        else {
+            return false;
+        };
+        let email = account.email.clone();
+        cursor::remove_managed_profile(&account.account_root);
+        config.cursor_managed_accounts.retain(|a| a.email != email);
+        config
+            .selected_cursor_account_ids
+            .retain(|id| id != account_id);
+        true
+    }
+
+    fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState) {
+        let accounts = self.discover_accounts(config);
+        reconcile_provider_account_descriptors(self.id(), config, state, &accounts);
+    }
+
+    fn fetch_account<'a>(
+        &self,
+        handle: &'a ProviderAccountHandle,
+        client: &'a reqwest::Client,
+    ) -> BoxFuture<'a, crate::error::Result<UsageSnapshot, AppError>> {
+        Box::pin(async move {
+            match handle {
+                ProviderAccountHandle::Cursor(account) => {
+                    cursor::fetch(client, account).await.map_err(AppError::from)
+                }
+                _ => unreachable!(),
+            }
+        })
+    }
+
+    fn refresh_account_statuses(
+        &self,
+        config: Config,
+        previous_accounts: Vec<ProviderAccountRuntimeState>,
+    ) -> BoxFuture<'static, Vec<ProviderAccountRuntimeState>> {
+        Box::pin(refresh_cursor_account_statuses(config, previous_accounts))
+    }
+}
+
+fn cursor_account_descriptor(
+    account: crate::config::ManagedCursorAccountConfig,
+) -> ProviderAccountDescriptor {
+    let account_id = cursor::managed_account_id(&account.id);
+    let label = account.email.clone();
+    ProviderAccountDescriptor {
+        provider: ProviderId::Cursor,
+        account_id,
+        label,
+        capabilities: capabilities(ProviderId::Cursor),
+        handle: ProviderAccountHandle::Cursor(account),
+    }
+}
+
+fn reconcile_provider_account_descriptors(
+    provider: ProviderId,
+    config: &Config,
+    state: &mut AppState,
+    accounts: &[ProviderAccountDescriptor],
+) {
     let valid_ids: Vec<String> = accounts.iter().map(|a| a.account_id.clone()).collect();
 
     let mut selected_ids: Vec<String> = config
@@ -283,6 +465,18 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
         .filter(|id| valid_ids.contains(id))
         .cloned()
         .collect();
+
+    if !config.show_all_accounts(provider) {
+        let active_id = ambient_active_account_id(provider, config);
+        if let Some(ref id) = active_id
+            && selected_ids.contains(id)
+        {
+            selected_ids = vec![id.clone()];
+        } else {
+            selected_ids.truncate(1);
+        }
+    }
+
     if selected_ids.is_empty() && valid_ids.len() == 1 {
         selected_ids = valid_ids.first().cloned().into_iter().collect();
     }
@@ -291,7 +485,7 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
         .provider_accounts
         .retain(|entry| entry.provider != provider || valid_ids.contains(&entry.account_id));
 
-    for account in &accounts {
+    for account in accounts {
         let mut entry = state
             .provider_accounts
             .iter()
@@ -328,6 +522,7 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
             _ => provider_state.error.take(),
         };
         provider_state.selected_account_ids = selected_ids;
+        provider_state.active_account_id = ambient_active_account_id(provider, config);
     }
 }
 
@@ -339,17 +534,6 @@ fn account_status(selected_ids: &[String], valid_count: usize) -> AccountSelecti
     } else {
         AccountSelectionStatus::SelectionRequired
     }
-}
-
-pub async fn refresh_account_statuses(
-    provider: ProviderId,
-    config: Config,
-    previous_accounts: Vec<ProviderAccountRuntimeState>,
-) -> Vec<ProviderAccountRuntimeState> {
-    if !supports_background_status_refresh(provider) {
-        return Vec::new();
-    }
-    refresh_cursor_account_statuses(config, previous_accounts).await
 }
 
 async fn refresh_cursor_account_statuses(
@@ -434,99 +618,5 @@ fn remove_managed_codex_home(codex_home: &std::path::Path) {
     }
     if let Err(error) = std::fs::remove_dir_all(&home) {
         tracing::warn!(path = %home.display(), error = %error, "failed to delete codex account home");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ProviderVisibilityMode;
-    use crate::config::{Config, CursorCredentialSource, ManagedCursorAccountConfig};
-    use chrono::Utc;
-    use std::path::PathBuf;
-
-    #[test]
-    fn cursor_supports_background_status_refresh() {
-        assert!(supports_background_status_refresh(ProviderId::Cursor));
-        assert!(!supports_background_status_refresh(ProviderId::Codex));
-        assert!(!supports_background_status_refresh(ProviderId::Claude));
-    }
-
-    #[test]
-    fn cursor_requires_reauth_prompt_on_auth_error() {
-        assert!(auth_error_requires_reauth_prompt(ProviderId::Cursor));
-        assert!(!auth_error_requires_reauth_prompt(ProviderId::Codex));
-        assert!(!auth_error_requires_reauth_prompt(ProviderId::Claude));
-    }
-
-    #[test]
-    fn each_provider_resolves_accounts() {
-        let config = Config::default();
-        for provider in ProviderId::ALL {
-            let accounts = discover_accounts(provider, &config);
-            assert!(
-                accounts.is_empty(),
-                "default config should have no accounts for {provider:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn initialize_provider_visibility_disables_empty_provider_for_new_config() {
-        let mut config = Config::default();
-
-        assert!(initialize_provider_visibility(
-            &mut config,
-            &[ProviderId::Cursor]
-        ));
-        assert!(!config.cursor_enabled);
-        assert_eq!(
-            config.provider_visibility_mode,
-            ProviderVisibilityMode::AutoInitPending
-        );
-    }
-
-    #[test]
-    fn initialize_provider_visibility_enables_provider_when_account_exists() {
-        let now = Utc::now();
-        let mut config = Config {
-            cursor_enabled: false,
-            cursor_managed_accounts: vec![ManagedCursorAccountConfig {
-                id: "cursor-test".to_string(),
-                email: "user@example.com".to_string(),
-                label: "user@example.com".to_string(),
-                account_root: PathBuf::from("/tmp/cursor-test"),
-                credential_source: CursorCredentialSource::ImportedBrowserProfile,
-                browser: None,
-                display_name: None,
-                plan: None,
-                created_at: now,
-                updated_at: now,
-                last_authenticated_at: Some(now),
-            }],
-            ..Config::default()
-        };
-
-        assert!(initialize_provider_visibility(
-            &mut config,
-            &[ProviderId::Cursor]
-        ));
-        assert!(config.cursor_enabled);
-    }
-
-    #[test]
-    fn initialize_provider_visibility_is_noop_after_initialization() {
-        let mut config = Config {
-            provider_visibility_mode: ProviderVisibilityMode::UserManaged,
-            ..Config::default()
-        };
-
-        assert!(!initialize_provider_visibility(
-            &mut config,
-            &[ProviderId::Codex, ProviderId::Claude, ProviderId::Cursor]
-        ));
-        assert!(config.codex_enabled);
-        assert!(config.claude_enabled);
-        assert!(config.cursor_enabled);
     }
 }

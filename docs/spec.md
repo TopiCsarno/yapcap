@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.2 · **Last updated:** 2026-04-27 (multi-account concurrent refresh, multi-column popup, Claude credential refresh fixes, account cards, per-route popup height)
+**Status:** As-built v0.2 · **Last updated:** 2026-04-28 (per-provider show-all toggle, single-account active-follow mode, import selection fixes, conditional toggle visibility)
 
 ## Document Metadata
 
@@ -82,17 +82,13 @@ Binary-only modules (`src/`, compiled only into the applet binary):
 
 | Module | Purpose |
 | --- | --- |
-| `app` | `AppModel`, `Message`, libcosmic `Application` impl. Panel button, popup open/close, tick scheduling. |
-| `app_refresh` | Dispatches one `Task::perform` per selected account per enabled provider; tasks run concurrently via `Task::batch`. |
-| `popup_view` | `popup_content` renders the popup. Tabs, per-account status badges, usage bars, cost block. Multi-account providers render as side-by-side columns; the popup width expands proportionally. All strings via `fl!()`. |
-| `provider_assets` | Embedded SVG icon handles; dark/light variant selection. |
+| `app` | `src/app/` module tree. `mod.rs` owns `AppModel`, `Message`, and the libcosmic `Application` impl. Submodules split applet rendering, popup/window sizing, login flows, provider refresh/account actions, popup UI, provider icon assets, and app-only unit tests. `popup_view.rs` keeps the top-level popup shell and shared widgets, `popup_view/detail.rs` renders provider detail columns, and `popup_view/settings/` splits general settings from provider/account settings rows and login controls. |
 | `i18n` | `fl!()` macro, `i18n_embed` loader wired to `i18n/en/yapcap.ftl`. |
 
 Library modules (`src/`, also usable from tests):
 
 | Module | Purpose |
 | --- | --- |
-| `app_state` | Methods on `AppState` for provider upsert and "mark refreshing." |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
 | `providers::codex` | Codex account import/discovery, managed login/reauth, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
 | `providers::claude` | Managed account discovery/login under `src/providers/claude/`, OAuth usage fetch, and credential refresh via `claude auth status`. |
@@ -116,7 +112,7 @@ sequenceDiagram
     participant Cache as cache
     participant Timer as "iced time::every"
     participant App as "AppModel::update"
-    participant Refresh as app_refresh
+    participant Refresh as app::refresh
     participant Task as "Task::perform"
     participant Provider as "providers::*"
     App->>Cache: load_initial_state()
@@ -142,9 +138,10 @@ sequenceDiagram
 - `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
 - `Message::RefreshNow` is the popup’s "Refresh now" button and uses the same dispatcher.
 - Account switching marks and refreshes only the selected provider instead of dispatching a global refresh.
+- Each provider has a persisted `show_all_accounts` setting. When it is off, selecting an account makes that provider single-account and YapCap keeps only one selected account for it. When it is on, the provider can keep multiple selected accounts and render one column per account.
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.
-- When multiple accounts are selected for a provider, `app_refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
+- When multiple accounts are selected for a provider, `app::refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
 - `runtime::refresh_account` takes an explicit `account_id` and resolves which discovered account to fetch. If the requested account is not found it falls back to the first available account; if no accounts exist it returns a `LoginRequired` state.
 - `runtime::refresh_provider_account` keeps the previous account snapshot on error so the UI never drops data on a transient failure. It instead flips the account’s `ProviderHealth::Error`.
 
@@ -157,6 +154,9 @@ Codex account import and discovery:
 - On startup, if `CODEX_HOME` or `~/.codex` contains a usable `auth.json`,
   YapCap imports that Codex home into YapCap-managed storage unless a managed
   account with the same normalized email already exists.
+- An inotify watcher on the Codex and Claude auth directories (`~/.codex/` and
+  `~/.claude/`) automatically imports new accounts when a login is detected at
+  runtime, without requiring a restart.
 - Managed accounts are read from `Config.codex_managed_accounts`; each entry
   points at an isolated Codex home and is valid only when that home's
   `auth.json` parses.
@@ -181,6 +181,9 @@ Codex account import and discovery:
   has been deleted or is no longer readable, startup import repairs that
   managed entry by repopulating its managed home from the ambient Codex home
   instead of treating the stale config entry as already imported.
+- Startup import and add-account flows select the imported Codex account
+  immediately in single-account mode. In show-all mode they preserve existing
+  selections and append the imported account when appropriate.
 
 Managed Codex add-account flow:
 
@@ -267,6 +270,9 @@ Claude account discovery:
   only non-secret account metadata in config.
 - Accounts without a resolved email are excluded from `discover_accounts` and never appear in the UI. They remain in `claude_managed_accounts` and become visible once background sync successfully populates their email.
 - On startup, orphaned `.lock` directories left in `claude-accounts/` by a killed `claude auth status` process are deleted. A `.lock` directory is considered orphaned when no sibling directory with the same base name exists.
+- Startup import and add-account flows select the imported Claude account
+  immediately in single-account mode. In show-all mode they preserve existing
+  selections and append the imported account only when needed.
 - Managed Claude account labels follow the account email address when available.
 - After a successful Claude usage fetch, `UsageSnapshot.identity.email` is filled
   from the usage JSON `email` field when present, else `claude auth status --json`,
@@ -675,12 +681,13 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset.
 - When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
 - Clicking toggles the popup.
-- Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
+- Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running.
 
 ### 7.2 Popup
 
-`popup_view::popup_content`:
+`app::popup_view::popup_content` composes the popup shell, while `app::popup_view::detail`
+owns provider detail cards and `app::popup_view::settings::*` owns the settings routes:
 
 - Header: "YapCap" + "Refresh now" button.
 - Navigation row:
@@ -690,9 +697,10 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
   - Provider view always starts with a provider title card (icon + name). Below it, each selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one selected account the column fills the full popup width. When a provider has two or more selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to the widest provider across all tabs.
   - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive.
+  - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means every selected account renders as its own column in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) applies a fixed synthetic `AppState` for screenshots, skips the default startup `Task` batch, makes provider-refresh a no-op, skips writing the snapshot cache, and re-applies after each in-app `reconcile` on config updates.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) now seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled, each gets managed demo accounts, Codex defaults to two selected accounts with `Show all accounts` on, Cursor includes a re-auth-needed account in Settings, the default startup `Task` batch is skipped, provider-refresh becomes a no-op, snapshot-cache writes are skipped, and the demo data is re-applied after config reconciliation.
   - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow, and Codex re-authentication appears only after an auth failure that requires user action. Claude add-account runs the Claude Code auth flow from Settings. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label; browser-auto-imported accounts and login-created accounts appear the same in the UI. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
@@ -703,7 +711,7 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
 
 ## 8. Localization
 
-Most user-visible strings in `popup_view.rs` use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent. (Some provider-facing status strings are still produced in the model layer.)
+Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail.rs`, and the `src/app/popup_view/settings/` submodules use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent. (Some provider-facing status strings are still produced in the model layer.)
 
 - String catalog: `i18n/en/yapcap.ftl` — buttons, section titles, status badges, update-check states, last-updated timestamps, and usage reset labels.
 - The `i18n/` directory is compiled into the binary at build time via `rust-embed`; no runtime file access is needed.

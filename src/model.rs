@@ -82,11 +82,6 @@ impl UsageSnapshot {
     }
 
     #[must_use]
-    pub fn session_window(&self) -> Option<&UsageWindow> {
-        self.windows.iter().find(|window| window.label == "Session")
-    }
-
-    #[must_use]
     pub fn applet_windows(&self) -> (Option<&UsageWindow>, Option<&UsageWindow>) {
         if self.provider == ProviderId::Cursor {
             return (
@@ -127,6 +122,8 @@ pub struct ProviderRuntimeState {
     #[serde(default)]
     pub selected_account_ids: Vec<String>,
     #[serde(default)]
+    pub active_account_id: Option<String>,
+    #[serde(default)]
     pub account_status: AccountSelectionStatus,
     pub is_refreshing: bool,
     #[serde(default, alias = "snapshot")]
@@ -141,6 +138,7 @@ impl ProviderRuntimeState {
             provider,
             enabled: true,
             selected_account_ids: Vec::new(),
+            active_account_id: None,
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -154,6 +152,7 @@ impl ProviderRuntimeState {
             provider,
             enabled: false,
             selected_account_ids: Vec::new(),
+            active_account_id: None,
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -310,25 +309,6 @@ mod tests {
         let (first, second) = snap.applet_windows();
         assert_eq!(first.map(|w| w.label.as_str()), Some("Total"));
         assert_eq!(second.map(|w| w.label.as_str()), Some("API"));
-    }
-
-    #[test]
-    fn session_window_prefers_named_session() {
-        let mut snapshot = snapshot(ProviderId::Claude);
-        snapshot.windows = vec![window("Weekly"), window("Session"), window("Extra")];
-
-        assert_eq!(
-            snapshot.session_window().map(|window| window.label.as_str()),
-            Some("Session")
-        );
-    }
-
-    #[test]
-    fn session_window_returns_none_when_missing() {
-        let mut snapshot = snapshot(ProviderId::Cursor);
-        snapshot.windows = vec![window("Total"), window("API")];
-
-        assert!(snapshot.session_window().is_none());
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 **A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, and Cursor.**
 
-<img src="resources/screenshot.png" alt="YapCap panel applet" width="780" />
+<img src="resources/screenshots/screenshot.png" alt="YapCap panel applet" width="780" />
 
 [![CI](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml/badge.svg)](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/TopiCsarno/yapcap?label=release)](https://github.com/TopiCsarno/yapcap/releases/latest)
@@ -23,13 +23,61 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 ## Highlights
 
 - **Three providers**
-    - <img src="resources/providers/codex.svg" height="14" valign="middle"> **Codex** — 5h/weekly windows + credits
-    - <img src="resources/providers/claude.svg" height="14" valign="middle"> **Claude Code** — session/weekly/extra usage
-    - <img src="resources/providers/cursor.svg" height="14" valign="middle"> **Cursor** — plan usage + billing cycle end
-- **Multi-account support** — add, switch, and remove accounts for each provider from within the popup
+    - **Codex** — 5h/weekly windows + credits
+    - **Claude Code** — session/weekly/extra usage
+    - **Cursor** — plan usage + billing cycle end
+- **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
 - **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
 - **Auto-discovery** — on first launch, imports existing Codex and Claude CLI credentials and Cursor browser sessions automatically
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
+
+## Screenshots
+
+<table>
+<tr>
+<td align="center" valign="top" colspan="2" width="50%">
+
+<strong>Popup — usage detail</strong><br />
+Multi-account view: two Codex columns with <strong>Show all accounts</strong> on.<br /><br />
+<img src="resources/screenshots/screenshot-detail.png" alt="YapCap popup showing Codex usage for two accounts" />
+
+</td>
+<td align="center" valign="top" width="25%">
+
+<strong>Settings — General</strong><br />
+<img src="resources/screenshots/screenshot-settings-general.png" alt="YapCap General settings" />
+
+</td>
+<td align="center" valign="top" width="25%">
+
+<strong>Settings — Codex accounts</strong><br />
+<img src="resources/screenshots/screenshot-settings-codex.png" alt="YapCap Codex account settings" />
+
+</td>
+</tr>
+<tr>
+<td colspan="4" align="center">
+
+<strong>COSMIC system theme</strong><br />
+YapCap follows your COSMIC system theme—the popup and panel pick up light or dark mode and accent colors from your desktop appearance settings.
+
+</td>
+</tr>
+<tr>
+<td align="center" valign="top" width="25%">
+<img src="resources/screenshots/screenshot_theme1.png" alt="YapCap popup matching COSMIC system theme (1)" />
+</td>
+<td align="center" valign="top" width="25%">
+<img src="resources/screenshots/screenshot_theme2.png" alt="YapCap popup matching COSMIC system theme (2)" />
+</td>
+<td align="center" valign="top" width="25%">
+<img src="resources/screenshots/screenshot_theme3.png" alt="YapCap popup matching COSMIC system theme (3)" />
+</td>
+<td align="center" valign="top" width="25%">
+<img src="resources/screenshots/screenshot_theme4.png" alt="YapCap popup matching COSMIC system theme (4)" />
+</td>
+</tr>
+</table>
 
 ## Install
 

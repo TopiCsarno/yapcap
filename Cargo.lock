@@ -2742,8 +2742,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd5b3eaf1a28b758ac0faa5a4254e8ab2705605496f1b1f3fbbc3988ad73d199"
 dependencies = [
  "bitflags 2.11.1",
+ "futures-core",
  "inotify-sys",
  "libc",
+ "tokio",
 ]
 
 [[package]]
@@ -7334,6 +7336,7 @@ dependencies = [
  "dirs",
  "i18n-embed",
  "i18n-embed-fl",
+ "inotify",
  "libcosmic",
  "pbkdf2",
  "reqwest",

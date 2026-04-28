@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+mod active;
 mod debug;
 mod discovery;
 mod identity;
@@ -10,6 +11,7 @@ mod shared;
 mod storage;
 mod types;
 
+pub use active::ambient_active_account_id;
 pub use login::{CursorLoginEvent, CursorLoginState, CursorLoginStatus, LOGIN_URL, prepare};
 pub use refresh::{fetch, fetch_at};
 

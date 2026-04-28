@@ -8,3 +8,4 @@
 - Do not edit the template `justfile` unless explicitly asked.
 - Before committing, update `docs/spec.md` when behavior or user-facing expectations change.
 - Before committing, run `just check` and `cargo test` and `cargo fmt`, then fix all warnings, errors, and failures.
+- Do not add agent or AI attribution to commit messages (no `Co-Authored-By: Claude` or similar).

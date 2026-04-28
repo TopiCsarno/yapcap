@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 mod app;
-mod app_refresh;
-mod app_state;
 mod auth;
 mod browser;
 mod cache;
@@ -11,11 +9,10 @@ mod config;
 mod debug_env;
 mod demo_env;
 mod error;
+mod file_watcher;
 mod i18n;
 mod logging;
 mod model;
-mod popup_view;
-mod provider_assets;
 mod providers;
 mod runtime;
 #[cfg(test)]
@@ -27,7 +24,12 @@ fn main() -> cosmic::iced::Result {
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
     i18n::init(&requested_languages);
 
-    let _log_guard = logging::init("info").ok();
+    let default_level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    let _log_guard = logging::init(default_level).ok();
 
     if running_in_cosmic_panel() {
         cosmic::applet::run::<app::AppModel>(app::LaunchMode::Panel)

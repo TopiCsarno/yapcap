@@ -12,22 +12,22 @@ pub enum ProviderIconVariant {
 pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) -> Handle {
     let bytes: &[u8] = match (provider, variant) {
         (ProviderId::Codex, ProviderIconVariant::Default) => {
-            include_bytes!("../resources/providers/codex.svg")
+            include_bytes!("../../resources/providers/codex.svg")
         }
         (ProviderId::Codex, ProviderIconVariant::Reversed) => {
-            include_bytes!("../resources/providers/codex-reversed.svg")
+            include_bytes!("../../resources/providers/codex-reversed.svg")
         }
         (ProviderId::Claude, ProviderIconVariant::Default) => {
-            include_bytes!("../resources/providers/claude.svg")
+            include_bytes!("../../resources/providers/claude.svg")
         }
         (ProviderId::Claude, ProviderIconVariant::Reversed) => {
-            include_bytes!("../resources/providers/claude-reversed.svg")
+            include_bytes!("../../resources/providers/claude-reversed.svg")
         }
         (ProviderId::Cursor, ProviderIconVariant::Default) => {
-            include_bytes!("../resources/providers/cursor.svg")
+            include_bytes!("../../resources/providers/cursor.svg")
         }
         (ProviderId::Cursor, ProviderIconVariant::Reversed) => {
-            include_bytes!("../resources/providers/cursor-reversed.svg")
+            include_bytes!("../../resources/providers/cursor-reversed.svg")
         }
     };
 

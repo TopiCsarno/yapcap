@@ -6,13 +6,14 @@ use chrono::{DateTime, Utc};
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 use dirs::{cache_dir, state_dir};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const CURSOR_BROWSER_ENV: &str = "YAPCAP_CURSOR_BROWSER";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 201]
+#[version = 203]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -23,6 +24,8 @@ pub struct Config {
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
+    #[serde(default)]
+    pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub selected_claude_account_ids: Vec<String>,
@@ -45,6 +48,7 @@ impl Default for Config {
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
+            show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
             selected_claude_account_ids: Vec::new(),
@@ -87,6 +91,30 @@ impl Config {
             ProviderId::Claude => &mut self.selected_claude_account_ids,
             ProviderId::Cursor => &mut self.selected_cursor_account_ids,
         }
+    }
+
+    #[must_use]
+    pub fn show_all_accounts(&self, provider: ProviderId) -> bool {
+        self.show_all_accounts.contains(&provider)
+    }
+
+    pub fn set_provider_show_all(&mut self, provider: ProviderId, show_all: bool) {
+        if show_all {
+            self.show_all_accounts.insert(provider);
+        } else {
+            self.show_all_accounts.remove(&provider);
+        }
+    }
+
+    pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> bool {
+        let target = match provider {
+            ProviderId::Codex => &mut self.codex_enabled,
+            ProviderId::Claude => &mut self.claude_enabled,
+            ProviderId::Cursor => &mut self.cursor_enabled,
+        };
+        let changed = *target != enabled;
+        *target = enabled;
+        changed
     }
 
     #[must_use]

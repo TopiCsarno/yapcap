@@ -101,15 +101,15 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
         .and_then(email_from_id_token);
 
     create_private_dir(&managed_root)?;
-    if let Some(existing) = find_matching_account(config, email.as_deref()).cloned() {
+    if let Some(existing) = find_matching_account_by_identity(
+        config,
+        source_auth.account_id.as_deref(),
+        email.as_deref(),
+    )
+    .cloned()
+    {
         if load_codex_auth_from_home(&existing.codex_home).is_ok() {
-            if prefer_imported && !config.selected_codex_account_ids.contains(&existing.id) {
-                config
-                    .selected_codex_account_ids
-                    .retain(|id| id != "system");
-                config.selected_codex_account_ids.push(existing.id);
-                changed = true;
-            }
+            changed |= update_codex_selection(config, &existing.id, prefer_imported);
             return Ok(changed);
         }
 
@@ -118,6 +118,9 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
         commit_pending_home(&pending_home, &existing.codex_home)?;
 
         let now = Utc::now();
+        if !config.show_all_accounts(crate::model::ProviderId::Codex) {
+            config.selected_codex_account_ids.clear();
+        }
         apply_login_account(
             config,
             ManagedCodexAccountConfig {
@@ -141,6 +144,9 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
     commit_pending_home(&pending_home, &target_home)?;
 
     let now = Utc::now();
+    if !config.show_all_accounts(crate::model::ProviderId::Codex) {
+        config.selected_codex_account_ids.clear();
+    }
     apply_login_account(
         config,
         ManagedCodexAccountConfig {
@@ -157,6 +163,34 @@ pub fn sync_imported_account(config: &mut Config) -> Result<bool, String> {
     Ok(true)
 }
 
+fn update_codex_selection(config: &mut Config, account_id: &str, prefer_imported: bool) -> bool {
+    if !config.show_all_accounts(crate::model::ProviderId::Codex) {
+        let already_only = config.selected_codex_account_ids == [account_id];
+        if already_only {
+            return false;
+        }
+        config.selected_codex_account_ids.clear();
+        config
+            .selected_codex_account_ids
+            .push(account_id.to_string());
+        return true;
+    }
+    if prefer_imported
+        && !config
+            .selected_codex_account_ids
+            .contains(&account_id.to_string())
+    {
+        config
+            .selected_codex_account_ids
+            .retain(|id| id != "system");
+        config
+            .selected_codex_account_ids
+            .push(account_id.to_string());
+        return true;
+    }
+    false
+}
+
 pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConfig) {
     let account_id = account.id.clone();
     if !config.selected_codex_account_ids.contains(&account_id) {
@@ -167,6 +201,18 @@ pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConf
         .retain(|existing| existing.id != account_id);
     config.codex_managed_accounts.push(account);
     dedupe_managed_accounts(config);
+}
+
+pub fn ambient_active_account_id(config: &Config) -> Option<String> {
+    let source_home = codex_home().ok()?;
+    let managed_root = paths().codex_accounts_dir;
+    if is_path_within(&source_home, &managed_root) {
+        return None;
+    }
+    let auth = load_codex_auth_from_home(&source_home).ok()?;
+    let email = auth.id_token.as_deref().and_then(email_from_id_token);
+    find_matching_account_by_identity(config, auth.account_id.as_deref(), email.as_deref())
+        .map(|a| a.id.clone())
 }
 
 pub fn normalized_email(email: &str) -> String {

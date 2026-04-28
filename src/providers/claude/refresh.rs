@@ -24,15 +24,13 @@ pub struct ClaudeAccountStatus {
     pub subscription_type: Option<String>,
 }
 
-pub fn load_fresh_auth(path: &Path, now: DateTime<Utc>) -> Result<(ClaudeAuth, bool), ClaudeError> {
+pub fn load_fresh_auth(path: &Path, now: DateTime<Utc>) -> Result<ClaudeAuth, ClaudeError> {
     let auth = load_claude_auth_from_path(path)?;
     if should_refresh_auth(&auth, now) {
         refresh_claude_credentials(path)?;
-        let refreshed = load_claude_auth_from_path(path)?;
-        let was_refreshed = !should_refresh_auth(&refreshed, now);
-        return Ok((refreshed, was_refreshed));
+        return Ok(load_claude_auth_from_path(path)?);
     }
-    Ok((auth, false))
+    Ok(auth)
 }
 
 pub fn load_account_status(config_dir: &Path) -> Result<ClaudeAccountStatus, ClaudeError> {
@@ -159,15 +157,13 @@ fn load_fresh_auth_with_binary(
     path: &Path,
     now: DateTime<Utc>,
     binary: &Path,
-) -> Result<(ClaudeAuth, bool), ClaudeError> {
+) -> Result<ClaudeAuth, ClaudeError> {
     let auth = load_claude_auth_from_path(path)?;
     if should_refresh_auth(&auth, now) {
         refresh_claude_credentials_with_binary(path, binary)?;
-        let refreshed = load_claude_auth_from_path(path)?;
-        let was_refreshed = !should_refresh_auth(&refreshed, now);
-        return Ok((refreshed, was_refreshed));
+        return Ok(load_claude_auth_from_path(path)?);
     }
-    Ok((auth, false))
+    Ok(auth)
 }
 
 #[cfg(test)]
@@ -279,10 +275,8 @@ JSON
         fs::set_permissions(&fake_claude, fs::Permissions::from_mode(0o755)).unwrap();
 
         let now = Utc.timestamp_millis_opt(1_700_000_000_000).unwrap();
-        let (auth, was_refreshed) =
-            load_fresh_auth_with_binary(&credentials_path, now, &fake_claude).unwrap();
+        let auth = load_fresh_auth_with_binary(&credentials_path, now, &fake_claude).unwrap();
 
-        assert!(was_refreshed);
         assert_eq!(auth.access_token, "new-token");
         assert_eq!(auth.expires_at_ms, Some(1_700_007_200_000));
         let raw = fs::read_to_string(credentials_path).unwrap();
@@ -307,10 +301,8 @@ printf '{"email":"user@example.com","orgName":"Org","subscriptionType":"pro"}'
         fs::set_permissions(&fake_claude, fs::Permissions::from_mode(0o755)).unwrap();
 
         let now = Utc.timestamp_millis_opt(1_700_000_000_000).unwrap();
-        let (auth, was_refreshed) =
-            load_fresh_auth_with_binary(&credentials_path, now, &fake_claude).unwrap();
+        let auth = load_fresh_auth_with_binary(&credentials_path, now, &fake_claude).unwrap();
 
-        assert!(!was_refreshed);
         assert_eq!(auth.access_token, "current-token");
         assert_eq!(auth.expires_at_ms, Some(1_700_007_200_000));
     }

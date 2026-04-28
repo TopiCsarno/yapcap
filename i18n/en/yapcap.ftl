@@ -63,6 +63,8 @@ reset-time-section-title = Reset time
 reset-time-relative = Relative
 reset-time-absolute = Absolute
 usage-amount-section-title = Usage amount
+show-all-accounts-label = Show all accounts
+show-all-accounts-detail = Show each account as its own column. When off, the panel follows the active account automatically.
 usage-amount-used = Used
 usage-amount-left = Left
 usage-used-label = { $percent } used
@@ -94,13 +96,24 @@ credits-available = { $balance } available
 
 ## Provider status badges
 badge-disabled = Disabled
+badge-disabled-tooltip = This provider is disabled in settings
 badge-refreshing = Refreshing
+badge-refreshing-tooltip = Usage data is being refreshed right now
+badge-active = Active
+badge-active-tooltip = This account is currently selected as active
 badge-live = Live
+badge-live-tooltip = Usage data is fresh and up to date
 badge-stale = Stale
+badge-stale-tooltip = Usage data is outdated — the last successful refresh was a while ago
 badge-error = Error
+badge-error-tooltip = Failed to fetch usage data — check your connection or credentials
 badge-loading = …
+badge-loading-tooltip = Fetching usage data for the first time
 badge-login-required = Login
+badge-login-required-tooltip = Re-login required to refresh usage data
 badge-select-required = Select
+badge-reauth-tooltip = This account needs re-authentication
+badge-plan-tooltip = Your subscription plan
 
 ## Last-updated timestamps
 updated-just-now = Updated just now

@@ -15,12 +15,14 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
+pub(crate) use account::external_claude_config_dir_candidate;
 pub use account::{
-    apply_login_account, discover_accounts, remove_managed_config_dir, sync_imported_account,
-    sync_managed_accounts,
+    ambient_active_account_id, apply_login_account, discover_accounts, remove_managed_config_dir,
+    sync_imported_account, sync_managed_accounts,
 };
 pub use login::{ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus, prepare};
-pub use refresh::{load_fresh_auth, refresh_claude_credentials};
+use refresh::load_fresh_auth;
+pub use refresh::refresh_claude_credentials;
 
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_ACCOUNT_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/account";
@@ -84,15 +86,13 @@ pub async fn fetch(
     config_dir: PathBuf,
 ) -> Result<UsageSnapshot, ClaudeError> {
     let credentials_path = crate::auth::claude_credentials_path_for_config_dir(&config_dir);
-    let (auth, was_refreshed) = load_fresh_auth(&credentials_path, Utc::now())?;
-    if was_refreshed {
-        return Err(ClaudeError::CredentialsRefreshed);
-    }
+    let auth = load_fresh_auth(&credentials_path, Utc::now())?;
     let mut snapshot = match request_oauth(client, &auth).await {
         Err(ClaudeError::Unauthorized) => {
             warn!("claude usage endpoint returned 401; attempting Claude Code credential refresh");
             refresh_claude_credentials(&credentials_path)?;
-            return Err(ClaudeError::CredentialsRefreshed);
+            let refreshed = load_claude_auth_from_path(&credentials_path)?;
+            request_oauth(client, &refreshed).await?
         }
         Ok(s) => s,
         Err(e) => return Err(e),

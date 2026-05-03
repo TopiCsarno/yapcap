@@ -85,6 +85,13 @@ pub(crate) fn debug_env_value_enabled(value: &str) -> bool {
         || value.eq_ignore_ascii_case("off"))
 }
 
+pub(crate) fn rate_limit_backoff_secs(consecutive: u32) -> u64 {
+    const BASE: u64 = 300;
+    const CAP: u64 = 3600;
+    let shift = consecutive.saturating_sub(1).min(12);
+    BASE.saturating_mul(1u64 << shift).min(CAP)
+}
+
 pub(crate) fn classify_auth_state(error: &AppError) -> AuthState {
     if error.requires_user_action() {
         AuthState::ActionRequired
@@ -225,6 +232,8 @@ where
             account.last_success_at = Some(Utc::now());
             account.snapshot = Some(snapshot);
             account.error = None;
+            account.rate_limit_until = None;
+            account.consecutive_rate_limits = 0;
             if provider == ProviderId::Claude
                 && let Some(email) = account
                     .snapshot
@@ -254,6 +263,14 @@ where
             account.health = ProviderHealth::Error;
             account.auth_state = classify_auth_state(&error);
             account.error = Some(user_message);
+            if error.is_rate_limited() {
+                account.consecutive_rate_limits = account.consecutive_rate_limits.saturating_add(1);
+                let backoff_secs = error
+                    .rate_limit_retry_after_secs()
+                    .unwrap_or_else(|| rate_limit_backoff_secs(account.consecutive_rate_limits));
+                account.rate_limit_until =
+                    Some(Utc::now() + chrono::Duration::seconds(backoff_secs.cast_signed()));
+            }
         }
     }
 
@@ -414,6 +431,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn claude_refresh_auth_failure_requires_action_and_keeps_previous_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Claude);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Claude,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "claude-1".to_string(),
+            "Claude".to_string(),
+            async {
+                Err(AppError::from(ClaudeError::TokenRefreshHttp {
+                    status: 400,
+                }))
+            },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.auth_state, AuthState::ActionRequired);
+        assert!(account.snapshot.is_some());
+        assert!(account.last_success_at.is_some());
+    }
+
+    #[tokio::test]
     async fn refresh_provider_transient_error_sets_error_state() {
         let result = refresh_provider_account(
             ProviderId::Claude,
@@ -422,7 +469,11 @@ mod tests {
             None,
             "default".to_string(),
             "Default".to_string(),
-            async { Err(AppError::from(ClaudeError::RateLimited)) },
+            async {
+                Err(AppError::from(ClaudeError::RateLimited {
+                    retry_after_secs: None,
+                }))
+            },
         )
         .await;
         let account = result.accounts.first().unwrap();

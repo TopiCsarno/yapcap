@@ -1,8 +1,6 @@
 use super::*;
+use crate::config::Config;
 use crate::config::ProviderVisibilityMode;
-use crate::config::{Config, CursorCredentialSource, ManagedCursorAccountConfig};
-use chrono::Utc;
-use std::path::PathBuf;
 
 #[test]
 fn providers_expose_expected_capabilities() {
@@ -19,7 +17,7 @@ fn providers_expose_expected_capabilities() {
         capabilities(ProviderId::Claude),
         ProviderCapabilities {
             supports_delete: true,
-            supports_reauthentication: false,
+            supports_reauthentication: true,
             supports_background_status_refresh: false,
             requires_auth_prompt_on_auth_failure: false,
         }
@@ -62,46 +60,20 @@ fn each_provider_resolves_accounts() {
 }
 
 #[test]
-fn initialize_provider_visibility_disables_empty_provider_for_new_config() {
-    let mut config = Config::default();
-
-    assert!(initialize_provider_visibility(
-        &mut config,
-        &[ProviderId::Cursor]
-    ));
-    assert!(!config.cursor_enabled);
-    assert_eq!(
-        config.provider_visibility_mode,
-        ProviderVisibilityMode::AutoInitPending
-    );
-}
-
-#[test]
-fn initialize_provider_visibility_enables_provider_when_account_exists() {
-    let now = Utc::now();
+fn initialize_provider_visibility_enables_provider_regardless_of_accounts() {
     let mut config = Config {
         cursor_enabled: false,
-        cursor_managed_accounts: vec![ManagedCursorAccountConfig {
-            id: "cursor-test".to_string(),
-            email: "user@example.com".to_string(),
-            label: "user@example.com".to_string(),
-            account_root: PathBuf::from("/tmp/cursor-test"),
-            credential_source: CursorCredentialSource::ImportedBrowserProfile,
-            browser: None,
-            display_name: None,
-            plan: None,
-            created_at: now,
-            updated_at: now,
-            last_authenticated_at: Some(now),
-        }],
         ..Config::default()
     };
-
     assert!(initialize_provider_visibility(
         &mut config,
         &[ProviderId::Cursor]
     ));
     assert!(config.cursor_enabled);
+    assert_eq!(
+        config.provider_visibility_mode,
+        ProviderVisibilityMode::AutoInitPending
+    );
 }
 
 #[test]

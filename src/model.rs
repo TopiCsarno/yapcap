@@ -123,6 +123,8 @@ pub struct ProviderRuntimeState {
     pub selected_account_ids: Vec<String>,
     #[serde(default)]
     pub active_account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_active_account_id: Option<String>,
     #[serde(default)]
     pub account_status: AccountSelectionStatus,
     pub is_refreshing: bool,
@@ -139,6 +141,7 @@ impl ProviderRuntimeState {
             enabled: true,
             selected_account_ids: Vec::new(),
             active_account_id: None,
+            system_active_account_id: None,
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -153,6 +156,7 @@ impl ProviderRuntimeState {
             enabled: false,
             selected_account_ids: Vec::new(),
             active_account_id: None,
+            system_active_account_id: None,
             account_status: AccountSelectionStatus::Unavailable,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -208,6 +212,10 @@ pub struct ProviderAccountRuntimeState {
     pub health: ProviderHealth,
     pub auth_state: AuthState,
     pub error: Option<String>,
+    #[serde(default)]
+    pub rate_limit_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub consecutive_rate_limits: u32,
 }
 
 impl ProviderAccountRuntimeState {
@@ -227,7 +235,15 @@ impl ProviderAccountRuntimeState {
             health: ProviderHealth::Ok,
             auth_state: AuthState::ActionRequired,
             error: Some("Not refreshed yet".to_string()),
+            rate_limit_until: None,
+            consecutive_rate_limits: 0,
         }
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        self.rate_limit_until
+            .is_some_and(|until| until > Utc::now())
     }
 
     #[must_use]

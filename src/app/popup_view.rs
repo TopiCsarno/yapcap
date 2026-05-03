@@ -14,7 +14,7 @@ use crate::model::{
 };
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
-use crate::providers::cursor::{CursorLoginState, CursorLoginStatus};
+use crate::providers::cursor::CursorScanState;
 use crate::providers::interface::ProviderAccountActionSupport;
 use crate::providers::registry;
 use crate::updates::UpdateStatus;
@@ -46,7 +46,7 @@ const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
 pub struct ProviderLoginStates<'a> {
     pub codex: Option<&'a CodexLoginState>,
     pub claude: Option<&'a ClaudeLoginState>,
-    pub cursor: Option<&'a CursorLoginState>,
+    pub cursor_scan: &'a CursorScanState,
 }
 
 pub fn popup_content<'a>(

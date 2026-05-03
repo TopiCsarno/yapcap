@@ -306,6 +306,11 @@ fn refresh_option_interaction_style(
 
 fn about_section(update_status: &UpdateStatus) -> Element<'_, Message> {
     let current_version = env!("CARGO_PKG_VERSION");
+    let dist = if std::env::var_os("FLATPAK_ID").is_some() {
+        "Flatpak"
+    } else {
+        "Native"
+    };
     let mut title = row![widget::text(fl!("about-section-title")).size(16)]
         .align_y(Alignment::Center)
         .spacing(8);
@@ -336,7 +341,7 @@ fn about_section(update_status: &UpdateStatus) -> Element<'_, Message> {
     };
 
     let inner = cosmic::iced::widget::column![
-        widget::text(fl!("app-version", version = current_version)).size(12),
+        widget::text(fl!("app-version", version = current_version, dist = dist)).size(12),
         update_line,
     ]
     .spacing(6)

@@ -51,8 +51,6 @@ pub(super) fn applet_indicator<'a>(
     let logo_size_px = compact_px.saturating_sub(8).max(11);
     let logo_size = f32::from(logo_size_px);
     let bar_width = applet_bar_width(suggested_w, suggested_h);
-    let percent = selected_provider_percent(state, selected_provider, usage_amount_format);
-
     let account_percents =
         selected_provider_all_percents(state, selected_provider, usage_amount_format);
 
@@ -67,8 +65,12 @@ pub(super) fn applet_indicator<'a>(
             let (p0, p1) = account_percents.get(i).copied().unwrap_or((0.0, 0.0));
             r = r.push(
                 cosmic::iced::widget::column![
-                    progress_bar(0.0..=100.0, p0).girth(Length::Fixed(6.0)),
-                    progress_bar(0.0..=100.0, p1).girth(Length::Fixed(3.0)),
+                    progress_bar(0.0..=100.0, p0)
+                        .girth(Length::Fixed(6.0))
+                        .length(Length::Fixed(bar_width)),
+                    progress_bar(0.0..=100.0, p1)
+                        .girth(Length::Fixed(3.0))
+                        .length(Length::Fixed(bar_width)),
                 ]
                 .spacing(3)
                 .width(Length::Fixed(bar_width)),
@@ -88,12 +90,12 @@ pub(super) fn applet_indicator<'a>(
         PanelIconStyle::BarsOnly => bars_row.into(),
         PanelIconStyle::LogoAndPercent => row![
             provider_logo(selected_provider, logo_size_px, logo_size),
-            widget::text(applet_percent_text(percent)).size(13),
+            account_percents_row(&account_percents),
         ]
         .spacing(6)
         .align_y(Alignment::Center)
         .into(),
-        PanelIconStyle::PercentOnly => widget::text(applet_percent_text(percent)).size(13).into(),
+        PanelIconStyle::PercentOnly => account_percents_row(&account_percents),
     }
 }
 
@@ -115,7 +117,7 @@ pub(super) fn applet_button<'a>(
     n_accounts: usize,
     content: impl Into<Element<'a, Message>>,
 ) -> widget::Button<'a, Message> {
-    let (major_padding, minor_padding) = core.applet.suggested_padding(true);
+    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
     let horizontal_padding = if core.applet.is_horizontal() {
         major_padding
     } else {
@@ -154,8 +156,13 @@ pub(super) fn applet_button_size(
     let content_width = match style {
         PanelIconStyle::LogoAndBars => logo_width + APPLET_ICON_GAP + bars_total,
         PanelIconStyle::BarsOnly => bars_total,
-        PanelIconStyle::LogoAndPercent => logo_width + APPLET_ICON_GAP + APPLET_PERCENT_TEXT_WIDTH,
-        PanelIconStyle::PercentOnly => APPLET_PERCENT_TEXT_WIDTH,
+        PanelIconStyle::LogoAndPercent => {
+            let percents_width = n * APPLET_PERCENT_TEXT_WIDTH + (n - 1.0) * APPLET_ACCOUNT_GAP;
+            logo_width + APPLET_ICON_GAP + percents_width
+        }
+        PanelIconStyle::PercentOnly => {
+            n * APPLET_PERCENT_TEXT_WIDTH + (n - 1.0) * APPLET_ACCOUNT_GAP
+        }
     };
     let width = content_width + f32::from(2 * horizontal_padding);
     let height = f32::from(suggested_h + 2 * vertical_padding);
@@ -171,6 +178,17 @@ pub(super) fn applet_bar_width(suggested_w: u16, suggested_h: u16) -> f32 {
 
 pub(super) fn applet_percent_text(percent: f32) -> String {
     format!("{percent:.1}%")
+}
+
+fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Message> {
+    let mut r = row![].align_y(Alignment::Center);
+    for (i, &(p0, _)) in account_percents.iter().enumerate() {
+        if i > 0 {
+            r = r.push(cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_ACCOUNT_GAP)));
+        }
+        r = r.push(widget::text(applet_percent_text(p0)).size(13));
+    }
+    r.into()
 }
 
 pub(super) fn selected_provider_all_percents(
@@ -209,28 +227,6 @@ pub(super) fn selected_provider_all_percents(
             (p0, p1)
         })
         .collect()
-}
-
-pub(super) fn selected_provider_percent(
-    state: &AppState,
-    selected_provider: ProviderId,
-    usage_amount_format: UsageAmountFormat,
-) -> f32 {
-    let now = chrono::Utc::now();
-    state
-        .providers
-        .iter()
-        .find(|p| p.provider == selected_provider)
-        .and_then(|p| {
-            state
-                .active_account(p.provider)
-                .and_then(|account| account.snapshot.as_ref())
-                .or(p.legacy_display_snapshot.as_ref())
-        })
-        .and_then(|snapshot| snapshot.applet_windows().0)
-        .map_or(0.0, |window| {
-            usage_display::displayed_amount_percent(window, now, usage_amount_format)
-        })
 }
 
 pub(super) fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {

@@ -1,6 +1,6 @@
 use super::super::super::{
-    ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus, CursorLoginState,
-    CursorLoginStatus, Element, Length, Message, fl, row, widget,
+    ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus, CursorScanState,
+    Element, Length, Message, fl, row, widget,
 };
 
 pub(super) fn codex_login_controls(
@@ -69,6 +69,18 @@ pub(super) fn claude_login_controls(
             widget::button::standard(fl!("open-browser"))
                 .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
         );
+        content = content.push(
+            widget::text_input(fl!("claude-login-code-placeholder"), &login.code_input)
+                .on_input(Message::UpdateClaudeLoginCode)
+                .on_submit(|_| Message::SubmitClaudeLoginCode)
+                .width(Length::Fill),
+        );
+        content = content.push(
+            widget::button::standard(fl!("claude-login-submit-code")).on_press_maybe(
+                (enabled && !login.code_input.trim().is_empty())
+                    .then_some(Message::SubmitClaudeLoginCode),
+            ),
+        );
     }
 
     if login.status == ClaudeLoginStatus::Running {
@@ -91,43 +103,78 @@ pub(super) fn claude_login_controls(
     Element::from(content)
 }
 
-pub(super) fn cursor_login_controls(
-    login: Option<&CursorLoginState>,
-    enabled: bool,
-) -> Element<'_, Message> {
-    let Some(login) = login else {
-        return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartCursorLogin))
-            .into();
-    };
-
-    let mut content =
-        cosmic::iced::widget::column![widget::text(cursor_login_status(login)).size(13)]
-            .spacing(10)
-            .width(Length::Fill);
-
-    if login.status == CursorLoginStatus::Running {
-        content = content.push(
-            widget::button::standard(fl!("open-browser"))
-                .on_press_maybe(enabled.then_some(Message::OpenUrl(login.login_url.clone()))),
-        );
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelCursorLogin)),
-        );
-    } else {
-        content = content.push(
-            row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartCursorLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelCursorLogin)),
-            ]
-            .spacing(8),
-        );
+pub(super) fn cursor_scan_controls(scan: &CursorScanState, enabled: bool) -> Element<'_, Message> {
+    match scan {
+        CursorScanState::Idle => {
+            let mut content = cosmic::iced::widget::column![]
+                .spacing(6)
+                .width(Length::Fill);
+            content = content.push(
+                widget::button::standard(fl!("cursor-scan-button"))
+                    .on_press_maybe(enabled.then_some(Message::StartCursorScan)),
+            );
+            content = content.push(
+                widget::text(fl!("cursor-scan-subtitle"))
+                    .size(12)
+                    .width(Length::Fill),
+            );
+            Element::from(content)
+        }
+        CursorScanState::Scanning => Element::from(
+            cosmic::iced::widget::column![widget::text(fl!("cursor-scanning")).size(13)]
+                .spacing(10)
+                .width(Length::Fill),
+        ),
+        CursorScanState::Found { email, plan } => {
+            let status_text = match plan.as_deref() {
+                Some(plan) => fl!(
+                    "cursor-scan-found-plan",
+                    email = email.as_str(),
+                    plan = plan
+                ),
+                None => fl!("cursor-scan-found", email = email.as_str()),
+            };
+            let mut content = cosmic::iced::widget::column![widget::text(status_text).size(13)]
+                .spacing(10)
+                .width(Length::Fill);
+            content = content.push(
+                row![
+                    widget::button::standard(fl!("cursor-scan-connect"))
+                        .on_press_maybe(enabled.then_some(Message::ConfirmCursorScan)),
+                    widget::button::text(fl!("account-cancel"))
+                        .on_press_maybe(enabled.then_some(Message::DismissCursorScan)),
+                ]
+                .spacing(8),
+            );
+            Element::from(content)
+        }
+        CursorScanState::AlreadyConnected { email } => {
+            let status_text = fl!("cursor-scan-already-connected", email = email.as_str());
+            let mut content = cosmic::iced::widget::column![widget::text(status_text).size(13)]
+                .spacing(10)
+                .width(Length::Fill);
+            content = content.push(
+                row![
+                    widget::button::standard(fl!("cursor-scan-reconnect"))
+                        .on_press_maybe(enabled.then_some(Message::ConfirmCursorScan)),
+                    widget::button::text(fl!("account-cancel"))
+                        .on_press_maybe(enabled.then_some(Message::DismissCursorScan)),
+                ]
+                .spacing(8),
+            );
+            Element::from(content)
+        }
+        CursorScanState::Error(message) => {
+            let mut content = cosmic::iced::widget::column![widget::text(message).size(13)]
+                .spacing(10)
+                .width(Length::Fill);
+            content = content.push(
+                widget::button::standard(fl!("cursor-scan-try-again"))
+                    .on_press_maybe(enabled.then_some(Message::DismissCursorScan)),
+            );
+            Element::from(content)
+        }
     }
-
-    Element::from(content)
 }
 
 fn codex_login_status(login: &CodexLoginState) -> String {
@@ -145,22 +192,10 @@ fn claude_login_status(login: &ClaudeLoginState) -> String {
     match login.status {
         ClaudeLoginStatus::Running => fl!("claude-login-running"),
         ClaudeLoginStatus::Succeeded => fl!("claude-login-succeeded"),
-        ClaudeLoginStatus::Failed => login
-            .error
-            .clone()
-            .unwrap_or_else(|| fl!("claude-login-failed")),
-    }
-}
-
-fn cursor_login_status(login: &CursorLoginState) -> String {
-    match login.status {
-        CursorLoginStatus::Running => {
-            fl!("cursor-login-running", browser = login.browser.label())
-        }
-        CursorLoginStatus::Succeeded => fl!("cursor-login-succeeded"),
-        CursorLoginStatus::Failed => login
-            .error
-            .clone()
-            .unwrap_or_else(|| fl!("cursor-login-failed")),
+        ClaudeLoginStatus::Failed => match login.error.as_deref() {
+            Some("invalid-code") => fl!("claude-login-code-invalid"),
+            Some(msg) => msg.to_string(),
+            None => fl!("claude-login-failed"),
+        },
     }
 }

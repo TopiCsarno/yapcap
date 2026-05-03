@@ -1,14 +1,14 @@
 use super::{
     Message, PROVIDER_CARD_SPACING, PROVIDER_HEIGHT_SECTION_SPACING, PROVIDER_SECTION_HEIGHT,
     PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute, account_label_text, badge_destructive,
-    badge_neutral, badge_success, badge_warning, badge_with_tooltip, card,
-    cursor_account_requires_action, info_block, plan_badge, provider_summary,
+    badge_neutral, badge_success, badge_warning, badge_with_tooltip, card, info_block, plan_badge,
+    provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::fl;
 use crate::model::{
-    AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderCost,
-    ProviderHealth, ProviderId, ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot, UsageWindow,
+    AppState, AuthState, ProviderAccountRuntimeState, ProviderCost, ProviderHealth, ProviderId,
+    ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot, UsageWindow,
 };
 use crate::usage_display;
 use cosmic::Element;
@@ -101,7 +101,7 @@ fn account_column_body_items<'a>(
     let snapshot = active_snapshot_for_account(account, provider);
     if let Some(snapshot) = snapshot {
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
-            items.push(provider_status_info(provider, state, account));
+            items.extend(provider_status_info(provider, state, account));
         }
         let mut cost_shown = false;
         for window in &snapshot.windows {
@@ -124,7 +124,7 @@ fn account_column_body_items<'a>(
             items.push(cost_section(provider.provider, cost));
         }
     } else {
-        items.push(provider_status_info(provider, state, account));
+        items.extend(provider_status_info(provider, state, account));
     }
     items
 }
@@ -151,7 +151,11 @@ fn account_column_header<'a>(
 
     let status = account_status_badge(account, provider);
     let mut status_row = row![status].spacing(8).align_y(Alignment::Center);
-    if provider.active_account_id.as_deref() == Some(account.account_id.as_str()) {
+    let active_id = match provider.provider {
+        ProviderId::Claude => provider.active_account_id.as_deref(),
+        _ => provider.system_active_account_id.as_deref(),
+    };
+    if active_id == Some(account.account_id.as_str()) {
         status_row = status_row.push(badge_with_tooltip(
             badge_success(fl!("badge-active")),
             fl!("badge-active-tooltip"),
@@ -226,60 +230,36 @@ fn provider_status_info(
     provider: &ProviderRuntimeState,
     state: &AppState,
     active_account: Option<&ProviderAccountRuntimeState>,
-) -> Element<'static, Message> {
-    info_block(
-        fl!("status-label"),
-        provider_status_message(provider, state, active_account),
-        None,
-    )
+) -> Option<Element<'static, Message>> {
+    let message = provider_status_message(provider, state, active_account);
+    if message.is_empty() {
+        return None;
+    }
+    Some(info_block(fl!("status-label"), message, None))
 }
 
 fn provider_status_message(
     provider: &ProviderRuntimeState,
-    state: &AppState,
+    _state: &AppState,
     active_account: Option<&ProviderAccountRuntimeState>,
 ) -> String {
     let mut messages = Vec::new();
 
-    if provider.provider == ProviderId::Codex
-        && provider.account_status == AccountSelectionStatus::LoginRequired
-    {
-        messages.push(fl!("codex-no-accounts-status"));
-        messages.push(fl!("codex-no-accounts-action"));
-    } else {
-        if provider.provider == ProviderId::Cursor
-            && state
-                .accounts_for(ProviderId::Cursor)
-                .into_iter()
-                .any(cursor_account_requires_action)
-        {
-            messages.push(fl!("cursor-accounts-reauth-summary"));
-            messages.push(fl!("cursor-accounts-reauth-action"));
-        }
+    let cursor_inactive = active_account.is_some_and(|a| {
+        a.provider == ProviderId::Cursor && a.auth_state == AuthState::ActionRequired
+    });
 
+    if !cursor_inactive {
         if let Some(account) = active_account
             && account.health == ProviderHealth::Error
-            && let Some(error) = &account.error
         {
-            if provider.provider != ProviderId::Cursor
-                || !state
-                    .accounts_for(ProviderId::Cursor)
-                    .into_iter()
-                    .any(cursor_account_requires_action)
-            {
+            if account.auth_state == AuthState::ActionRequired {
+                messages.push(fl!("account-reauth-summary"));
+            } else if let Some(error) = &account.error {
                 messages.push(error.clone());
             }
         } else {
-            let status = provider.status_line(active_account);
-            if !(provider.provider == ProviderId::Cursor
-                && status == "Login required"
-                && state
-                    .accounts_for(ProviderId::Cursor)
-                    .into_iter()
-                    .any(cursor_account_requires_action))
-            {
-                messages.push(status);
-            }
+            messages.push(provider.status_line(active_account));
         }
     }
 
@@ -528,6 +508,12 @@ fn account_status_badge(
         );
     }
     if account.auth_state == AuthState::ActionRequired {
+        if account.provider == ProviderId::Cursor {
+            return badge_with_tooltip(
+                badge_neutral(fl!("badge-cursor-inactive")),
+                fl!("badge-cursor-inactive-tooltip"),
+            );
+        }
         return badge_with_tooltip(
             badge_warning(fl!("badge-login-required")),
             fl!("badge-login-required-tooltip"),
@@ -573,5 +559,63 @@ fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> Strin
     } else {
         let date = last_success_at.format("%Y-%m-%d %H:%M").to_string();
         fl!("updated-at", date = date.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{AccountSelectionStatus, AuthState, ProviderHealth};
+
+    #[test]
+    fn action_required_account_reports_reauth_message() {
+        let provider = ProviderRuntimeState {
+            provider: ProviderId::Claude,
+            enabled: true,
+            selected_account_ids: vec!["claude-1".to_string()],
+            active_account_id: Some("claude-1".to_string()),
+            system_active_account_id: None,
+            account_status: AccountSelectionStatus::Ready,
+            is_refreshing: false,
+            legacy_display_snapshot: None,
+            error: None,
+        };
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+        account.error = Some("claude token refresh returned http 400".to_string());
+        let state = AppState::empty();
+
+        let message = provider_status_message(&provider, &state, Some(&account));
+        assert!(
+            !message.contains("http 400"),
+            "status message must not contain raw error: {message}"
+        );
+        assert!(
+            message.contains("Re-authenticate") || message.contains("Settings"),
+            "status message should be action-oriented: {message}"
+        );
+    }
+
+    #[test]
+    fn codex_without_accounts_reports_login_required() {
+        let provider = ProviderRuntimeState {
+            provider: ProviderId::Codex,
+            enabled: true,
+            selected_account_ids: Vec::new(),
+            active_account_id: None,
+            system_active_account_id: None,
+            account_status: AccountSelectionStatus::LoginRequired,
+            is_refreshing: false,
+            legacy_display_snapshot: None,
+            error: Some("Login required".to_string()),
+        };
+        let state = AppState::empty();
+
+        assert_eq!(
+            provider_status_message(&provider, &state, None),
+            "Login required"
+        );
     }
 }

@@ -1,9 +1,9 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, Size, Task, UpdateStatus,
-    UsageAmountFormat, app_popup, applet_button_size, claude, codex, cosmic_config, cursor,
-    demo_env, destroy_popup, format_retry_delay, popup_size_limits_with_max_width,
-    popup_size_tuple, popup_view, refresh_provider_account_statuses_task, refresh_provider_task,
+    UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor, demo_env,
+    destroy_popup, format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple,
+    popup_view, refresh_provider_account_statuses_task, refresh_provider_task,
     refresh_provider_tasks, registry, resize_popup, runtime, select_provider, update_retry_delay,
     update_retry_task,
 };
@@ -164,27 +164,6 @@ impl AppModel {
             let _ = new_config.write_entry(&ctx);
             self.config = new_config;
         }
-    }
-
-    pub(super) fn handle_auth_file_changed(&mut self, provider: ProviderId) -> Task<Message> {
-        tracing::info!(?provider, "auth file changed, syncing");
-        let mut config = self.config.clone();
-        let changed = match provider {
-            ProviderId::Codex => codex::sync_imported_account(&mut config).unwrap_or(false),
-            ProviderId::Claude => claude::sync_imported_account(&mut config).unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "claude sync failed on auth file change");
-                false
-            }),
-            ProviderId::Cursor => false,
-        };
-        tracing::info!(?provider, changed, "auth file sync result");
-        if !changed {
-            return Task::none();
-        }
-        self.write_config(|c| *c = config);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        runtime::persist_state(&self.state);
-        refresh_provider_task(&self.config, &mut self.state, provider)
     }
 
     pub(super) fn set_provider_enabled(
@@ -366,13 +345,11 @@ impl AppModel {
 
     pub(super) fn delete_cursor_account(&mut self, account_id: &str) -> Task<Message> {
         let provider = ProviderId::Cursor;
-        let Some(account) =
-            cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).cloned()
-        else {
+        if cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).is_none()
+        {
             return Task::none();
-        };
+        }
 
-        cursor::remove_managed_profile(&account.account_root);
         self.write_config(|new_config| {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);

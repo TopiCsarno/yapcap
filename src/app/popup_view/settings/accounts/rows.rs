@@ -1,9 +1,10 @@
 use super::super::super::{
     Alignment, Background, Config, Element, Length, Message, ProviderAccountActionSupport,
     ProviderAccountRuntimeState, ProviderId, accent_selection_fill, account_label_text,
-    apply_alpha, badge_success, badge_warning, badge_with_tooltip, container,
-    cursor_account_requires_action, fl, registry, row, widget,
+    apply_alpha, badge_destructive, badge_neutral, badge_success, badge_warning,
+    badge_with_tooltip, container, cursor_account_requires_action, fl, registry, row, widget,
 };
+use crate::model::{AuthState, ProviderHealth, STALE_THRESHOLD};
 
 pub(super) fn cursor_account_settings_row<'a>(
     account: &'a ProviderAccountRuntimeState,
@@ -40,7 +41,7 @@ pub(super) fn cursor_account_settings_row<'a>(
     if requires_action {
         selector_body = selector_body.push(
             row![badge_with_tooltip(
-                badge_warning(fl!("cursor-account-reauth-badge")),
+                badge_neutral(fl!("cursor-account-reauth-badge")),
                 fl!("badge-reauth-tooltip"),
             )]
             .width(Length::Fill)
@@ -99,18 +100,34 @@ pub(super) fn codex_account_settings_row<'a>(
 ) -> Element<'a, Message> {
     let is_selected = selected_ids.contains(&account.account_id.as_str());
     let is_active = active_id == Some(account.account_id.as_str());
+    let requires_action = codex_account_requires_action(account);
     let account_id = account.account_id.clone();
-    let mut label_row = row![account_label_text(&account.label, 14)]
+    let mut title_row = row![account_label_text(&account.label, 14)]
         .spacing(8)
         .align_y(Alignment::Center)
         .width(Length::Fill);
     if is_active {
-        label_row = label_row.push(badge_with_tooltip(
+        title_row = title_row.push(badge_with_tooltip(
             badge_success(fl!("badge-active")),
             fl!("badge-active-tooltip"),
         ));
     }
-    let selector_content = container(label_row).padding([10, 12]).width(Length::Fill);
+    let mut selector_body = cosmic::iced::widget::column![title_row]
+        .spacing(6)
+        .width(Length::Fill);
+    if requires_action {
+        selector_body = selector_body.push(
+            row![badge_with_tooltip(
+                badge_warning(fl!("badge-login-required")),
+                fl!("badge-login-required-tooltip"),
+            )]
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        );
+    }
+    let selector_content = container(selector_body)
+        .padding([10, 12])
+        .width(Length::Fill);
 
     let selector = widget::button::custom(selector_content)
         .class(account_row_button_class(is_selected))
@@ -122,23 +139,32 @@ pub(super) fn codex_account_settings_row<'a>(
 
     let can_delete = account_action_support(config, ProviderId::Codex, account_id.as_str())
         .is_some_and(|support| support.can_delete);
-    let delete_press = (enabled && can_delete).then_some(Message::DeleteCodexAccount(account_id));
-    let actions = row![
-        account_selected_marker(is_selected, enabled),
+    let delete_press =
+        (enabled && can_delete).then_some(Message::DeleteCodexAccount(account_id.clone()));
+    let mut actions = row![account_selected_marker(is_selected, enabled)]
+        .spacing(0)
+        .align_y(Alignment::Center);
+    if enabled && requires_action {
+        actions = actions.push(
+            widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
+                .class(account_row_icon_button_class())
+                .tooltip(fl!("codex-account-reauth-tooltip"))
+                .on_press(Message::ReauthenticateCodexAccount(account_id)),
+        );
+    }
+    actions = actions.push(
         widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
             .class(account_row_icon_button_class())
             .tooltip(fl!("account-delete-tooltip"))
             .on_press_maybe(delete_press),
-    ]
-    .spacing(0)
-    .align_y(Alignment::Center);
+    );
 
     Element::from(account_row_container(
         selector.into(),
         actions.into(),
         is_selected,
         enabled,
-        false,
+        requires_action,
     ))
 }
 
@@ -153,6 +179,15 @@ pub(super) fn claude_account_settings_row<'a>(
     let is_active = active_id == Some(account.account_id.as_str());
     let account_id = account.account_id.clone();
     let row_label = claude_account_row_label(account, config);
+    let row_status = claude_account_row_status(account);
+    let action_support =
+        account_action_support(config, ProviderId::Claude, account.account_id.as_str());
+    let requires_action = row_status == Some(ClaudeAccountRowStatus::ReauthRequired);
+    let can_reauthenticate = enabled
+        && requires_action
+        && action_support
+            .as_ref()
+            .is_some_and(|support| support.can_reauthenticate);
     let mut label_row = row![account_label_text(&row_label, 14)]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -163,7 +198,19 @@ pub(super) fn claude_account_settings_row<'a>(
             fl!("badge-active-tooltip"),
         ));
     }
-    let selector_content = container(label_row).padding([10, 12]).width(Length::Fill);
+    let mut selector_body = cosmic::iced::widget::column![label_row]
+        .spacing(6)
+        .width(Length::Fill);
+    if let Some(status) = row_status {
+        selector_body = selector_body.push(
+            row![claude_account_row_status_badge(status)]
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+        );
+    }
+    let selector_content = container(selector_body)
+        .padding([10, 12])
+        .width(Length::Fill);
 
     let selector = widget::button::custom(selector_content)
         .class(account_row_button_class(is_selected))
@@ -173,25 +220,36 @@ pub(super) fn claude_account_settings_row<'a>(
             account_id.clone(),
         )));
 
-    let can_delete = account_action_support(config, ProviderId::Claude, account_id.as_str())
-        .is_some_and(|support| support.can_delete);
-    let delete_press = (enabled && can_delete).then_some(Message::DeleteClaudeAccount(account_id));
-    let actions = row![
-        account_selected_marker(is_selected, enabled),
+    let can_delete = action_support.is_some_and(|support| support.can_delete);
+    let delete_press =
+        (enabled && can_delete).then_some(Message::DeleteClaudeAccount(account_id.clone()));
+    let mut actions = row![account_selected_marker(is_selected, enabled)]
+        .spacing(0)
+        .align_y(Alignment::Center);
+    if can_reauthenticate {
+        actions = actions.push(
+            widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
+                .class(account_row_icon_button_class())
+                .tooltip(fl!("claude-account-reauth-tooltip"))
+                .on_press(Message::ReauthenticateClaudeAccount(account_id)),
+        );
+    }
+    actions = actions.push(
         widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
             .class(account_row_icon_button_class())
             .tooltip(fl!("account-delete-tooltip"))
             .on_press_maybe(delete_press),
-    ]
-    .spacing(0)
-    .align_y(Alignment::Center);
+    );
 
     Element::from(account_row_container(
         selector.into(),
         actions.into(),
         is_selected,
         enabled,
-        false,
+        matches!(
+            row_status,
+            Some(ClaudeAccountRowStatus::ReauthRequired | ClaudeAccountRowStatus::Error)
+        ),
     ))
 }
 
@@ -261,6 +319,133 @@ fn claude_account_row_label(account: &ProviderAccountRuntimeState, config: &Conf
         .to_string()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudeAccountRowStatus {
+    ReauthRequired,
+    Error,
+    Stale,
+}
+
+fn claude_account_row_status(
+    account: &ProviderAccountRuntimeState,
+) -> Option<ClaudeAccountRowStatus> {
+    if account.auth_state == AuthState::ActionRequired {
+        return Some(ClaudeAccountRowStatus::ReauthRequired);
+    }
+    if account.health == ProviderHealth::Error {
+        if account.snapshot.is_some() {
+            return Some(ClaudeAccountRowStatus::Stale);
+        }
+        return Some(ClaudeAccountRowStatus::Error);
+    }
+    if account.snapshot.is_some()
+        && account
+            .last_success_at
+            .is_none_or(|updated| chrono::Utc::now() - updated >= STALE_THRESHOLD)
+    {
+        return Some(ClaudeAccountRowStatus::Stale);
+    }
+    None
+}
+
+fn claude_account_row_status_badge(status: ClaudeAccountRowStatus) -> Element<'static, Message> {
+    match status {
+        ClaudeAccountRowStatus::ReauthRequired => badge_with_tooltip(
+            badge_warning(fl!("badge-login-required")),
+            fl!("badge-login-required-tooltip"),
+        ),
+        ClaudeAccountRowStatus::Error => badge_with_tooltip(
+            badge_destructive(fl!("badge-error")),
+            fl!("badge-error-tooltip"),
+        ),
+        ClaudeAccountRowStatus::Stale => badge_with_tooltip(
+            badge_warning(fl!("badge-stale")),
+            fl!("badge-stale-tooltip"),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ManagedClaudeAccountConfig;
+    use crate::model::{AuthState, ProviderHealth};
+    use chrono::Utc;
+    use std::path::PathBuf;
+
+    fn claude_config(id: &str, email: Option<&str>) -> Config {
+        Config {
+            claude_managed_accounts: vec![ManagedClaudeAccountConfig {
+                id: id.to_string(),
+                label: "Claude account".to_string(),
+                config_dir: PathBuf::from("/tmp/claude-test"),
+                email: email.map(str::to_string),
+                organization: None,
+                subscription_type: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: Some(Utc::now()),
+            }],
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn claude_row_label_prefers_email_from_config() {
+        let config = claude_config("claude-1", Some("user@example.com"));
+        let account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+
+        assert_eq!(
+            claude_account_row_label(&account, &config),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn claude_row_status_marks_action_required_before_error() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+
+        assert_eq!(
+            claude_account_row_status(&account),
+            Some(ClaudeAccountRowStatus::ReauthRequired)
+        );
+    }
+
+    #[test]
+    fn codex_row_requires_action_when_auth_state_demands_it() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
+        account.auth_state = AuthState::ActionRequired;
+        assert!(codex_account_requires_action(&account));
+    }
+
+    #[test]
+    fn claude_row_status_marks_stale_snapshot() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::Ready;
+        account.snapshot = Some(crate::model::UsageSnapshot {
+            provider: ProviderId::Claude,
+            source: "test".to_string(),
+            updated_at: Utc::now(),
+            headline: crate::model::UsageHeadline(0),
+            windows: Vec::new(),
+            provider_cost: None,
+            identity: crate::model::ProviderIdentity::default(),
+        });
+
+        assert_eq!(
+            claude_account_row_status(&account),
+            Some(ClaudeAccountRowStatus::Stale)
+        );
+    }
+}
+
 fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Message> {
     if !selected {
         return cosmic::iced::widget::Space::new()
@@ -291,6 +476,10 @@ fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Me
         }
     })
     .into()
+}
+
+fn codex_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
+    account.provider == ProviderId::Codex && account.auth_state == AuthState::ActionRequired
 }
 
 fn account_action_support(

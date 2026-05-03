@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, CursorCredentialSource, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
-    ManagedCursorAccountConfig, paths,
+    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
+    paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderCost,
@@ -75,6 +75,7 @@ pub fn apply(config: &Config, state: &mut AppState) {
             enabled: true,
             selected_account_ids: config.selected_account_ids(provider).to_vec(),
             active_account_id: config.selected_account_ids(provider).first().cloned(),
+            system_active_account_id: None,
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
             legacy_display_snapshot: None,
@@ -200,6 +201,8 @@ fn demo_account(provider: ProviderId, account: DemoAccount) -> ProviderAccountRu
         health: account.health,
         auth_state: account.auth_state,
         error: account.error,
+        rate_limit_until: None,
+        consecutive_rate_limits: 0,
     }
 }
 
@@ -479,8 +482,6 @@ fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
             email: "solo@example.com".to_string(),
             label: "solo@example.com".to_string(),
             account_root: demo_root().join("cursor-primary"),
-            credential_source: CursorCredentialSource::ManagedProfile,
-            browser: None,
             display_name: Some("Solo".to_string()),
             plan: Some("pro".to_string()),
             created_at: now,
@@ -492,8 +493,6 @@ fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
             email: "reauth@example.com".to_string(),
             label: "reauth@example.com".to_string(),
             account_root: demo_root().join("cursor-secondary"),
-            credential_source: CursorCredentialSource::ManagedProfile,
-            browser: None,
             display_name: Some("Reauth".to_string()),
             plan: Some("pro".to_string()),
             created_at: now,

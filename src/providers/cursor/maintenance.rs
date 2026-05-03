@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::config::{Config, CursorCredentialSource, ManagedCursorAccountConfig, paths};
+use crate::account_storage::ProviderAccountStorage;
+use crate::config::{Config, ManagedCursorAccountConfig, paths};
 use crate::providers::cursor::identity::{managed_account_id, managed_config_id, normalized_email};
-use crate::providers::cursor::shared::new_account_id;
 use crate::providers::cursor::storage::{
-    account_metadata_path, create_private_dir, imported_cookie_header_path, managed_account_dir,
-    profile_dir, remove_managed_profile, session_dir, stable_storage_id_from_normalized_email,
-    write_account_metadata,
+    managed_account_dir, new_account_id, stable_storage_id_from_normalized_email,
 };
-use std::fs;
 
 pub fn upsert_managed_account(
     config: &mut Config,
@@ -29,9 +26,6 @@ pub fn upsert_managed_account(
             };
         }
         account.account_root = managed_account_dir(&account.id);
-        if prev.account_root != account.account_root {
-            remove_managed_profile(&prev.account_root);
-        }
     } else {
         if account.id.is_empty() {
             account.id = new_account_id();
@@ -61,7 +55,6 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     for mut account in config.cursor_managed_accounts.drain(..) {
         account.email = normalized_email(&account.email);
         if account.email.is_empty() {
-            remove_managed_profile(&account.account_root);
             continue;
         }
         if account.id.is_empty() {
@@ -92,7 +85,6 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
                 }
             }
             merge_metadata(&mut winner, &loser);
-            write_account_metadata(&winner).ok();
             deduped.push(winner);
             continue;
         }
@@ -120,65 +112,26 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     changed
 }
 
-pub fn cleanup_pending_dirs() {
-    let root = paths().cursor_accounts_dir;
-    let Ok(entries) = fs::read_dir(&root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.starts_with("pending-cursor-") {
-            continue;
-        }
-        if let Err(error) = fs::remove_dir_all(&path) {
-            tracing::debug!(path = %path.display(), error = %error, "failed to remove stale pending Cursor account dir");
-        }
-    }
-}
-
 fn normalize_account_layout(
     mut account: ManagedCursorAccountConfig,
 ) -> Option<ManagedCursorAccountConfig> {
     if account.id.is_empty() {
         account.id = stable_storage_id_from_normalized_email(&account.email);
     }
-    let expected_root = managed_account_dir(&account.id);
-    if imported_cookie_header_path(&account.account_root).is_file() {
-        account.credential_source = CursorCredentialSource::ImportedBrowserProfile;
-    }
-    if is_valid_managed_account_dir(&account) {
-        if account.account_root != expected_root {
-            move_account_root(&account.account_root, &expected_root).ok()?;
-            account.account_root = expected_root;
-        }
-        write_account_metadata(&account).ok()?;
-        return Some(account);
-    }
-
-    if account.account_root.join("cursor_token").exists() {
-        remove_managed_profile(&account.account_root);
+    account.account_root = managed_account_dir(&account.id);
+    let storage = ProviderAccountStorage::new(paths().cursor_accounts_dir);
+    let metadata = storage.load_metadata(&account.id).ok()?;
+    if storage.load_tokens(&account.id).is_err() {
         return None;
     }
-
-    let legacy_profile_root = account
-        .account_root
-        .join("Default")
-        .join("Cookies")
-        .exists();
-    if !legacy_profile_root {
-        remove_managed_profile(&account.account_root);
+    let email = normalized_email(&metadata.email);
+    if email.is_empty() {
         return None;
     }
-
-    let browser = account.browser?;
-    migrate_legacy_profile_root(&mut account, browser).ok()?;
-    write_account_metadata(&account).ok()?;
+    account.email.clone_from(&email);
+    account.label = email;
+    account.created_at = metadata.created_at;
+    account.updated_at = metadata.updated_at;
     Some(account)
 }
 
@@ -220,101 +173,17 @@ fn merge_metadata(target: &mut ManagedCursorAccountConfig, source: &ManagedCurso
     if source.last_authenticated_at > target.last_authenticated_at {
         target.last_authenticated_at = source.last_authenticated_at;
     }
-    if target.browser.is_none() {
-        target.browser = source.browser;
-    }
-}
-
-fn is_valid_managed_account_dir(account: &ManagedCursorAccountConfig) -> bool {
-    if !account_metadata_path(&account.account_root).exists()
-        || !session_dir(&account.account_root).is_dir()
-    {
-        return false;
-    }
-    match account.credential_source {
-        CursorCredentialSource::ManagedProfile => {
-            account.browser.is_some()
-                && profile_dir(&account.account_root)
-                    .join("Default")
-                    .join("Cookies")
-                    .exists()
-        }
-        CursorCredentialSource::ImportedBrowserProfile => {
-            imported_cookie_header_path(&account.account_root).is_file()
-        }
-    }
-}
-
-fn move_account_root(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
-    if from == to {
-        return Ok(());
-    }
-    remove_managed_profile(to);
-    if let Some(parent) = to.parent() {
-        create_private_dir(parent)?;
-    }
-    fs::rename(from, to).map_err(|error| {
-        format!(
-            "failed to move {} to {}: {error}",
-            from.display(),
-            to.display()
-        )
-    })
-}
-
-fn migrate_legacy_profile_root(
-    account: &mut ManagedCursorAccountConfig,
-    browser: crate::config::Browser,
-) -> Result<(), String> {
-    if account.id.is_empty() {
-        account.id = stable_storage_id_from_normalized_email(&account.email);
-    }
-    let source_root = account.account_root.clone();
-    let target_root = managed_account_dir(&account.id);
-    let temp_root = target_root.with_extension("migrating");
-
-    if source_root == target_root {
-        remove_managed_profile(&temp_root);
-        fs::rename(&source_root, &temp_root).map_err(|error| {
-            format!(
-                "failed to move {} to {}: {error}",
-                source_root.display(),
-                temp_root.display()
-            )
-        })?;
-        create_private_dir(&target_root)?;
-        create_private_dir(&session_dir(&target_root))?;
-        fs::rename(&temp_root, profile_dir(&target_root)).map_err(|error| {
-            format!(
-                "failed to move {} to {}: {error}",
-                temp_root.display(),
-                profile_dir(&target_root).display()
-            )
-        })?;
-    } else {
-        remove_managed_profile(&target_root);
-        create_private_dir(&target_root)?;
-        create_private_dir(&session_dir(&target_root))?;
-        fs::rename(&source_root, profile_dir(&target_root)).map_err(|error| {
-            format!(
-                "failed to move {} to {}: {error}",
-                source_root.display(),
-                profile_dir(&target_root).display()
-            )
-        })?;
-    }
-
-    account.account_root = target_root;
-    account.browser = Some(browser);
-    account.credential_source = CursorCredentialSource::ManagedProfile;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Browser, Config};
-    use chrono::Utc;
+    use crate::account_storage::{NewProviderAccount, ProviderAccountTokens};
+    use crate::config::Config;
+    use crate::model::ProviderId;
+    use crate::test_support;
+    use chrono::{Duration, Utc};
+    use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -335,8 +204,6 @@ mod tests {
             email: email.clone(),
             label: email,
             account_root: managed_account_dir(&id),
-            credential_source: CursorCredentialSource::ImportedBrowserProfile,
-            browser: Some(Browser::Brave),
             display_name: None,
             plan: None,
             created_at: now,
@@ -345,19 +212,54 @@ mod tests {
         }
     }
 
+    fn store_account(account: &ManagedCursorAccountConfig) {
+        ProviderAccountStorage::new(paths().cursor_accounts_dir)
+            .replace_account(
+                account.id.clone(),
+                NewProviderAccount {
+                    provider: ProviderId::Cursor,
+                    email: account.email.clone(),
+                    provider_account_id: None,
+                    organization_id: None,
+                    organization_name: None,
+                    tokens: ProviderAccountTokens {
+                        access_token: "WorkosCursorSessionToken=test".to_string(),
+                        refresh_token: String::new(),
+                        expires_at: Utc::now() + Duration::days(3650),
+                        scope: Vec::new(),
+                        token_id: None,
+                    },
+                    snapshot: None,
+                },
+            )
+            .unwrap();
+    }
+
     #[test]
     fn upsert_keeps_one_account_per_email() {
+        let _guard = test_support::env_lock();
+        let state_root = test_dir("cursor-upsert");
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", &state_root);
+        }
+
         let mut config = Config::default();
-        config
-            .cursor_managed_accounts
-            .push(account("User@example.com"));
-        upsert_managed_account(&mut config, account("user@example.com"));
+        let first = account("User@example.com");
+        let second = account("user@example.com");
+        store_account(&first);
+        store_account(&second);
+        config.cursor_managed_accounts.push(first);
+        upsert_managed_account(&mut config, second);
         assert_eq!(config.cursor_managed_accounts.len(), 1);
         let expected = stable_storage_id_from_normalized_email("user@example.com");
         assert_eq!(
             config.selected_cursor_account_ids.as_slice(),
             [managed_account_id(&expected).as_str()]
         );
+
+        unsafe {
+            std::env::remove_var("XDG_STATE_HOME");
+        }
     }
 
     #[test]
@@ -369,6 +271,7 @@ mod tests {
 
     #[test]
     fn sync_drops_legacy_token_only_accounts() {
+        let _guard = test_support::env_lock();
         let state_root = test_dir("cursor-legacy-token");
         let legacy_root = state_root.join("yapcap/cursor-accounts/legacy");
         fs::create_dir_all(&legacy_root).unwrap();
@@ -386,8 +289,6 @@ mod tests {
                 email: "user@example.com".to_string(),
                 label: "user@example.com".to_string(),
                 account_root: legacy_root,
-                credential_source: CursorCredentialSource::ImportedBrowserProfile,
-                browser: Some(Browser::Brave),
                 display_name: None,
                 plan: None,
                 created_at: now,
@@ -405,6 +306,7 @@ mod tests {
 
     #[test]
     fn sync_drops_malformed_account_dirs() {
+        let _guard = test_support::env_lock();
         let state_root = test_dir("cursor-malformed");
         unsafe {
             std::env::set_var("XDG_STATE_HOME", &state_root);
@@ -417,6 +319,27 @@ mod tests {
 
         assert!(sync_managed_accounts(&mut config));
         assert!(config.cursor_managed_accounts.is_empty());
+
+        unsafe {
+            std::env::remove_var("XDG_STATE_HOME");
+        }
+    }
+
+    #[test]
+    fn sync_keeps_accounts_with_shared_storage_tokens() {
+        let _guard = test_support::env_lock();
+        let state_root = test_dir("cursor-shared-storage");
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", &state_root);
+        }
+
+        let mut config = Config::default();
+        let entry = account("user@example.com");
+        store_account(&entry);
+        config.cursor_managed_accounts.push(entry);
+
+        sync_managed_accounts(&mut config);
+        assert_eq!(config.cursor_managed_accounts.len(), 1);
 
         unsafe {
             std::env::remove_var("XDG_STATE_HOME");

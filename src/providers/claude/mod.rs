@@ -2,32 +2,26 @@
 
 mod account;
 mod login;
-mod refresh;
+mod oauth;
 
-use crate::auth::{email_from_claude_credentials, load_claude_auth_from_path};
+use crate::account_storage::{ProviderAccountMetadata, ProviderAccountStorage};
+use crate::auth::ClaudeAuth;
 use crate::error::{ClaudeError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::warn;
 
-pub(crate) use account::external_claude_config_dir_candidate;
-pub use account::{
-    ambient_active_account_id, apply_login_account, discover_accounts, remove_managed_config_dir,
-    sync_imported_account, sync_managed_accounts,
+pub use account::{apply_login_account, discover_accounts, remove_managed_config_dir};
+pub use login::{
+    ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus, prepare, prepare_targeted, submit_code,
 };
-pub use login::{ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus, prepare};
-use refresh::load_fresh_auth;
-pub use refresh::refresh_claude_credentials;
 
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
-const OAUTH_ACCOUNT_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/account";
-const OAUTH_PROFILE_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/profile";
-const REQUIRED_SCOPE: &str = "user:profile";
 const FIVE_HOUR_SECONDS: i64 = 5 * 60 * 60;
 const SEVEN_DAY_SECONDS: i64 = 7 * 24 * 60 * 60;
 
@@ -63,226 +57,158 @@ struct ClaudeExtraUsage {
     pub currency: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ClaudeOAuthAccountResponse {
-    #[serde(default)]
-    email_address: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ClaudeOAuthProfileResponse {
-    #[serde(default)]
-    account: Option<ClaudeOAuthProfileAccount>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ClaudeOAuthProfileAccount {
-    #[serde(default)]
-    email: Option<String>,
-}
-
 pub async fn fetch(
     client: &reqwest::Client,
+    account_id: &str,
     config_dir: PathBuf,
 ) -> Result<UsageSnapshot, ClaudeError> {
-    let credentials_path = crate::auth::claude_credentials_path_for_config_dir(&config_dir);
-    let auth = load_fresh_auth(&credentials_path, Utc::now())?;
-    let mut snapshot = match request_oauth(client, &auth).await {
+    fetch_at(
+        client,
+        account_id,
+        config_dir,
+        ENDPOINT,
+        oauth::TOKEN_ENDPOINT,
+    )
+    .await
+}
+
+const REFRESH_BEFORE_EXPIRY: Duration = Duration::minutes(5);
+
+async fn fetch_at(
+    client: &reqwest::Client,
+    account_id: &str,
+    account_dir: PathBuf,
+    usage_endpoint: &str,
+    token_endpoint: &str,
+) -> Result<UsageSnapshot, ClaudeError> {
+    let root = account_dir
+        .parent()
+        .ok_or_else(|| ClaudeError::TokenRefreshParse("invalid account dir path".to_string()))?;
+    let storage = ProviderAccountStorage::new(root);
+
+    let now = Utc::now();
+    let mut tokens = storage
+        .load_tokens(account_id)
+        .map_err(|e| ClaudeError::TokenRefreshParse(e.to_string()))?;
+
+    if tokens.expires_at <= now + REFRESH_BEFORE_EXPIRY {
+        match oauth::refresh_access_token_at(client, token_endpoint, &tokens.refresh_token, now)
+            .await
+        {
+            Ok(refreshed) => {
+                tokens = refreshed_tokens(&refreshed);
+                let _ = storage.save_tokens(account_id, &tokens);
+                if let Some(meta) = refreshed_metadata(account_id, &refreshed, &storage) {
+                    let _ = write_refreshed_metadata(&storage, account_id, &meta);
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "claude token preflight refresh failed");
+                return Err(e);
+            }
+        }
+    }
+
+    let auth = auth_from_tokens(&tokens);
+    let mut snapshot = match request_oauth_at(client, &auth, usage_endpoint).await {
         Err(ClaudeError::Unauthorized) => {
-            warn!("claude usage endpoint returned 401; attempting Claude Code credential refresh");
-            refresh_claude_credentials(&credentials_path)?;
-            let refreshed = load_claude_auth_from_path(&credentials_path)?;
-            request_oauth(client, &refreshed).await?
+            warn!("claude usage endpoint returned 401; refreshing tokens and retrying once");
+            let refreshed = oauth::refresh_access_token_at(
+                client,
+                token_endpoint,
+                &tokens.refresh_token,
+                Utc::now(),
+            )
+            .await?;
+            let new_tokens = refreshed_tokens(&refreshed);
+            let _ = storage.save_tokens(account_id, &new_tokens);
+            if let Some(meta) = refreshed_metadata(account_id, &refreshed, &storage) {
+                let _ = write_refreshed_metadata(&storage, account_id, &meta);
+            }
+            request_oauth_at(client, &auth_from_tokens(&new_tokens), usage_endpoint).await?
         }
         Ok(s) => s,
         Err(e) => return Err(e),
     };
-    hydrate_claude_snapshot_identity_email(client, &config_dir, &mut snapshot).await;
+
+    if snapshot.identity.email.as_deref().is_none_or(str::is_empty)
+        && let Ok(metadata) = storage.load_metadata(account_id)
+    {
+        snapshot.identity.email = Some(metadata.email).filter(|e| !e.is_empty());
+    }
+    let _ = storage.save_snapshot(account_id, &snapshot);
     Ok(snapshot)
 }
 
-async fn hydrate_claude_snapshot_identity_email(
-    client: &reqwest::Client,
-    config_dir: &Path,
-    snapshot: &mut UsageSnapshot,
-) {
-    if snapshot
-        .identity
-        .email
-        .as_deref()
-        .is_some_and(|e| !e.is_empty())
-    {
-        return;
+fn auth_from_tokens(tokens: &crate::account_storage::ProviderAccountTokens) -> ClaudeAuth {
+    ClaudeAuth {
+        access_token: tokens.access_token.clone(),
+        scopes: tokens.scope.clone(),
+        subscription_type: None,
     }
-    let credentials_path = crate::auth::claude_credentials_path_for_config_dir(config_dir);
-    let email = refresh::load_account_status(config_dir)
-        .ok()
-        .and_then(|s| s.email)
-        .filter(|e| !e.is_empty())
-        .or_else(|| {
-            load_claude_auth_from_path(&credentials_path)
-                .ok()
-                .and_then(|a| email_from_claude_credentials(&a))
-        });
-    let email = match email {
-        Some(email) => Some(email),
-        None => fetch_usage_email(client, config_dir).await,
-    };
-    snapshot.identity.email = email.filter(|e| !e.is_empty());
 }
 
-pub(crate) fn blocking_fetch_usage_email(config_dir: &Path) -> Option<String> {
-    let credentials_path = crate::auth::claude_credentials_path_for_config_dir(config_dir);
-    let auth = load_claude_auth_from_path(&credentials_path).ok()?;
-    if !auth.scopes.iter().any(|scope| scope == REQUIRED_SCOPE) {
+fn refreshed_tokens(
+    response: &oauth::ClaudeTokenResponse,
+) -> crate::account_storage::ProviderAccountTokens {
+    use crate::account_storage::ProviderAccountTokens;
+    ProviderAccountTokens {
+        access_token: response.access_token.clone(),
+        refresh_token: response.refresh_token.clone(),
+        expires_at: response.expires_at,
+        scope: response.scope.clone(),
+        token_id: response.token_id.clone(),
+    }
+}
+
+fn refreshed_metadata(
+    account_id: &str,
+    response: &oauth::ClaudeTokenResponse,
+    storage: &ProviderAccountStorage,
+) -> Option<ProviderAccountMetadata> {
+    if response.account_id.is_none()
+        && response.email.is_none()
+        && response.organization_id.is_none()
+    {
         return None;
     }
-    let client = reqwest::blocking::Client::builder()
-        .timeout(crate::runtime::HTTP_TIMEOUT)
-        .connect_timeout(crate::runtime::HTTP_CONNECT_TIMEOUT)
-        .build()
-        .ok()?;
-
-    let send =
-        |path: &Path, url: &str| -> Option<(reqwest::StatusCode, reqwest::blocking::Response)> {
-            let auth = load_claude_auth_from_path(path).ok()?;
-            let bearer = format!("Bearer {}", auth.access_token);
-            let auth_header = HeaderValue::from_str(&bearer).ok()?;
-            let response = client
-                .get(url)
-                .header(AUTHORIZATION, auth_header)
-                .header(
-                    "anthropic-beta",
-                    HeaderValue::from_static("oauth-2025-04-20"),
-                )
-                .send()
-                .ok()?;
-            Some((response.status(), response))
-        };
-
-    let get_json = |url: &str| -> Option<reqwest::blocking::Response> {
-        let response = match send(&credentials_path, url)? {
-            (status, _resp) if status == reqwest::StatusCode::UNAUTHORIZED => {
-                refresh::refresh_claude_credentials(&credentials_path).ok()?;
-                let (status2, resp2) = send(&credentials_path, url)?;
-                if !status2.is_success() {
-                    return None;
-                }
-                resp2
-            }
-            (status, resp) if status.is_success() => resp,
-            _ => return None,
-        };
-        Some(response)
-    };
-
-    if let Some(resp) = get_json(OAUTH_ACCOUNT_ENDPOINT)
-        && let Ok(payload) = resp.json::<ClaudeOAuthAccountResponse>()
-        && let Some(e) = payload.email_address.filter(|e| !e.is_empty())
-    {
-        return Some(e);
+    let mut metadata = storage.load_metadata(account_id).ok()?;
+    if let Some(email) = response.email.as_deref().filter(|e| !e.is_empty()) {
+        metadata.email = email.to_ascii_lowercase();
     }
-
-    if let Some(resp) = get_json(OAUTH_PROFILE_ENDPOINT)
-        && let Ok(payload) = resp.json::<ClaudeOAuthProfileResponse>()
-        && let Some(e) = payload
-            .account
-            .and_then(|a| a.email)
-            .filter(|e| !e.is_empty())
-    {
-        return Some(e);
+    if response.account_id.is_some() {
+        metadata
+            .provider_account_id
+            .clone_from(&response.account_id);
     }
-
-    if let Some(resp) = get_json(ENDPOINT)
-        && let Ok(payload) = resp.json::<ClaudeUsageResponse>()
-        && let Some(e) = payload.email.filter(|e| !e.is_empty())
-    {
-        return Some(e);
+    if response.organization_id.is_some() {
+        metadata
+            .organization_id
+            .clone_from(&response.organization_id);
     }
-
-    None
+    if response.organization_name.is_some() {
+        metadata
+            .organization_name
+            .clone_from(&response.organization_name);
+    }
+    metadata.updated_at = Utc::now();
+    Some(metadata)
 }
 
-async fn fetch_usage_email(client: &reqwest::Client, config_dir: &Path) -> Option<String> {
-    let credentials_path = crate::auth::claude_credentials_path_for_config_dir(config_dir);
-    let auth = load_claude_auth_from_path(&credentials_path).ok()?;
-    if !auth.scopes.iter().any(|scope| scope == REQUIRED_SCOPE) {
-        return None;
-    }
-
-    if let Some(resp) =
-        get_usage_email_json(client, &credentials_path, OAUTH_ACCOUNT_ENDPOINT).await
-        && let Ok(payload) = resp.json::<ClaudeOAuthAccountResponse>().await
-        && let Some(e) = payload.email_address.filter(|e| !e.is_empty())
-    {
-        return Some(e);
-    }
-
-    if let Some(resp) =
-        get_usage_email_json(client, &credentials_path, OAUTH_PROFILE_ENDPOINT).await
-        && let Ok(payload) = resp.json::<ClaudeOAuthProfileResponse>().await
-        && let Some(e) = payload
-            .account
-            .and_then(|a| a.email)
-            .filter(|e| !e.is_empty())
-    {
-        return Some(e);
-    }
-
-    if let Some(resp) = get_usage_email_json(client, &credentials_path, ENDPOINT).await
-        && let Ok(payload) = resp.json::<ClaudeUsageResponse>().await
-        && let Some(e) = payload.email.filter(|e| !e.is_empty())
-    {
-        return Some(e);
-    }
-
-    None
+fn write_refreshed_metadata(
+    storage: &ProviderAccountStorage,
+    account_id: &str,
+    metadata: &ProviderAccountMetadata,
+) -> Result<(), ClaudeError> {
+    storage
+        .save_metadata(account_id, metadata)
+        .map_err(|e| ClaudeError::TokenRefreshParse(e.to_string()))
 }
 
-async fn get_usage_email_json(
-    client: &reqwest::Client,
-    credentials_path: &Path,
-    url: &str,
-) -> Option<reqwest::Response> {
-    let response = match send_usage_email_request(client, credentials_path, url).await? {
-        (status, _) if status == reqwest::StatusCode::UNAUTHORIZED => {
-            refresh::refresh_claude_credentials(credentials_path).ok()?;
-            let (status2, resp2) = send_usage_email_request(client, credentials_path, url).await?;
-            if !status2.is_success() {
-                return None;
-            }
-            resp2
-        }
-        (status, resp) if status.is_success() => resp,
-        _ => return None,
-    };
-    Some(response)
-}
-
-async fn send_usage_email_request(
-    client: &reqwest::Client,
-    credentials_path: &Path,
-    url: &str,
-) -> Option<(reqwest::StatusCode, reqwest::Response)> {
-    let auth = load_claude_auth_from_path(credentials_path).ok()?;
-    let bearer = format!("Bearer {}", auth.access_token);
-    let auth_header = HeaderValue::from_str(&bearer).ok()?;
-    let response = client
-        .get(url)
-        .header(AUTHORIZATION, auth_header)
-        .header(
-            "anthropic-beta",
-            HeaderValue::from_static("oauth-2025-04-20"),
-        )
-        .send()
-        .await
-        .ok()?;
-    Some((response.status(), response))
-}
-
-async fn request_oauth(
+async fn request_oauth_at(
     client: &reqwest::Client,
     auth: &crate::auth::ClaudeAuth,
+    endpoint: &str,
 ) -> Result<UsageSnapshot, ClaudeError> {
     let subscription_type = auth.subscription_type.clone();
     if !auth.scopes.iter().any(|scope| scope == REQUIRED_SCOPE) {
@@ -299,7 +225,7 @@ async fn request_oauth(
         HeaderValue::from_static("oauth-2025-04-20"),
     );
     let response = client
-        .get(ENDPOINT)
+        .get(endpoint)
         .headers(headers)
         .send()
         .await
@@ -310,7 +236,12 @@ async fn request_oauth(
     }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         warn!("claude usage endpoint returned 429; rate limited");
-        return Err(ClaudeError::RateLimited);
+        let retry_after_secs = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        return Err(ClaudeError::RateLimited { retry_after_secs });
     }
     let status = response.status();
     let response = response
@@ -322,6 +253,8 @@ async fn request_oauth(
     let payload: ClaudeUsageResponse = response.json().await.map_err(ClaudeError::DecodeUsage)?;
     normalize(payload, subscription_type)
 }
+
+const REQUIRED_SCOPE: &str = "user:profile";
 
 fn normalize(
     payload: ClaudeUsageResponse,
@@ -427,7 +360,92 @@ fn normalize_window(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::load_claude_auth_from_config_dir;
+    use crate::account_storage::{NewProviderAccount, ProviderAccountTokens};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    struct MockResponse {
+        method: &'static str,
+        path: &'static str,
+        status: u16,
+        body: String,
+    }
+
+    async fn server(
+        responses: Vec<MockResponse>,
+    ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for response in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = vec![0; 8192];
+                let bytes = stream.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+                assert!(request.starts_with(&format!(
+                    "{} {} HTTP/1.1\r\n",
+                    response.method, response.path
+                )));
+                let status_text = if response.status == 200 { "OK" } else { "ERR" };
+                let raw = format!(
+                    "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    response.status,
+                    status_text,
+                    response.body.len(),
+                    response.body
+                );
+                stream.write_all(raw.as_bytes()).await.unwrap();
+                requests.push(request);
+            }
+            requests
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    fn usage_body() -> String {
+        r#"{
+            "email": "user@example.com",
+            "five_hour": {"utilization": 12.0, "resets_at": "2026-04-30T12:00:00+00:00"},
+            "seven_day": {"utilization": 34.0, "resets_at": "2026-05-01T12:00:00+00:00"}
+        }"#
+        .to_string()
+    }
+
+    fn token_body(access_token: &str, refresh_token: &str) -> String {
+        format!(
+            r#"{{
+                "access_token": "{access_token}",
+                "refresh_token": "{refresh_token}",
+                "expires_in": 3600,
+                "scope": "user:profile"
+            }}"#
+        )
+    }
+
+    fn create_account(
+        storage: &ProviderAccountStorage,
+        expires_at: DateTime<Utc>,
+    ) -> (String, PathBuf) {
+        let stored = storage
+            .create_account(NewProviderAccount {
+                provider: ProviderId::Claude,
+                email: "user@example.com".to_string(),
+                provider_account_id: Some("claude-account".to_string()),
+                organization_id: None,
+                organization_name: None,
+                tokens: ProviderAccountTokens {
+                    access_token: "old-access".to_string(),
+                    refresh_token: "old-refresh".to_string(),
+                    expires_at,
+                    scope: vec!["user:profile".to_string()],
+                    token_id: None,
+                },
+                snapshot: None,
+            })
+            .unwrap();
+        (stored.account_ref.account_id, stored.account_dir)
+    }
 
     #[test]
     fn normalizes_fixture() {
@@ -514,27 +532,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_auth_from_managed_config_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(".credentials.json"),
-            r#"{
-  "claudeAiOauth": {
-    "accessToken": "token",
-    "expiresAt": 1776609779660,
-    "scopes": ["user:profile"],
-    "subscriptionType": "pro"
-  }
-}"#,
-        )
-        .unwrap();
-
-        let auth = load_claude_auth_from_config_dir(dir.path()).unwrap();
-
-        assert_eq!(auth.subscription_type.as_deref(), Some("pro"));
-    }
-
-    #[test]
     fn normalizes_usage_response_email_field() {
         let payload: ClaudeUsageResponse = serde_json::from_str(
             r#"{
@@ -549,42 +546,294 @@ mod tests {
     }
 
     #[test]
-    fn hydrates_identity_email_from_jwt_in_credentials() {
-        use base64::Engine;
+    fn auth_from_tokens_sets_access_token_and_scopes() {
+        use crate::account_storage::ProviderAccountTokens;
+        let tokens = ProviderAccountTokens {
+            access_token: "my-token".to_string(),
+            refresh_token: "my-refresh".to_string(),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+            scope: vec!["user:profile".to_string()],
+            token_id: None,
+        };
+        let auth = auth_from_tokens(&tokens);
+        assert_eq!(auth.access_token, "my-token");
+        assert_eq!(auth.scopes, ["user:profile"]);
+    }
 
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("{}");
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(r#"{"email":"hydrate@example.com"}"#);
-        let jwt = format!("{header}.{payload}.sig");
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(".credentials.json"),
-            format!(r#"{{"claudeAiOauth":{{"accessToken":"{jwt}","scopes":["user:profile"]}}}}"#),
+    #[tokio::test]
+    async fn preflight_permanent_refresh_failure_does_not_call_usage() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now());
+        let (base_url, handle) = server(vec![MockResponse {
+            method: "POST",
+            path: "/token",
+            status: 400,
+            body: "{}".to_string(),
+        }])
+        .await;
+
+        let error = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
         )
+        .await
+        .unwrap_err();
+
+        assert!(error.requires_user_action());
+        assert!(!error.is_transient());
+        assert_eq!(handle.await.unwrap().len(), 1);
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "old-access");
+        assert_eq!(tokens.refresh_token, "old-refresh");
+    }
+
+    #[tokio::test]
+    async fn preflight_transient_refresh_failure_does_not_call_usage() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now());
+        let (base_url, handle) = server(vec![MockResponse {
+            method: "POST",
+            path: "/token",
+            status: 500,
+            body: "{}".to_string(),
+        }])
+        .await;
+
+        let error = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClaudeError::TokenRefreshHttp { status: 500 }
+        ));
+        assert!(!error.requires_user_action());
+        assert!(error.is_transient());
+        assert_eq!(handle.await.unwrap().len(), 1);
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "old-access");
+        assert_eq!(tokens.refresh_token, "old-refresh");
+    }
+
+    #[tokio::test]
+    async fn preflight_refresh_success_fetches_usage_with_fresh_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now());
+        let (base_url, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/token",
+                status: 200,
+                body: token_body("new-access", "new-refresh"),
+            },
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 200,
+                body: usage_body(),
+            },
+        ])
+        .await;
+
+        fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
+        )
+        .await
         .unwrap();
 
-        let usage: ClaudeUsageResponse = serde_json::from_str(
-            r#"{
-                "five_hour": {"utilization": 1.0, "resets_at": "2026-04-11T11:00:01+00:00"},
-                "seven_day": {"utilization": 2.0, "resets_at": "2026-04-11T14:00:00+00:00"}
-            }"#,
+        let requests = handle.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].contains("\"refresh_token\":\"old-refresh\""));
+        assert!(requests[1].contains("authorization: Bearer new-access"));
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "new-access");
+        assert_eq!(tokens.refresh_token, "new-refresh");
+    }
+
+    #[tokio::test]
+    async fn reactive_refresh_success_retries_usage_with_fresh_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base_url, handle) = server(vec![
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 401,
+                body: "{}".to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/token",
+                status: 200,
+                body: token_body("new-access", "new-refresh"),
+            },
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 200,
+                body: usage_body(),
+            },
+        ])
+        .await;
+
+        let snapshot = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
         )
+        .await
         .unwrap();
-        let mut snapshot = normalize(usage, None).unwrap();
-        assert!(snapshot.identity.email.is_none());
-        let client = reqwest::Client::new();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(hydrate_claude_snapshot_identity_email(
-                &client,
-                dir.path(),
-                &mut snapshot,
-            ));
-        assert_eq!(
-            snapshot.identity.email.as_deref(),
-            Some("hydrate@example.com")
-        );
+
+        assert_eq!(snapshot.identity.email.as_deref(), Some("user@example.com"));
+        let requests = handle.await.unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].contains("authorization: Bearer old-access"));
+        assert!(requests[1].contains("\"refresh_token\":\"old-refresh\""));
+        assert!(requests[2].contains("authorization: Bearer new-access"));
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "new-access");
+        assert_eq!(tokens.refresh_token, "new-refresh");
+    }
+
+    #[tokio::test]
+    async fn reactive_refresh_retries_usage_only_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base_url, handle) = server(vec![
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 401,
+                body: "{}".to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/token",
+                status: 200,
+                body: token_body("new-access", "new-refresh"),
+            },
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 401,
+                body: "{}".to_string(),
+            },
+        ])
+        .await;
+
+        let error = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, ClaudeError::Unauthorized));
+        let requests = handle.await.unwrap();
+        assert_eq!(requests.len(), 3);
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "new-access");
+        assert_eq!(tokens.refresh_token, "new-refresh");
+    }
+
+    #[tokio::test]
+    async fn reactive_permanent_refresh_failure_requires_user_action() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base_url, handle) = server(vec![
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 401,
+                body: "{}".to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/token",
+                status: 400,
+                body: "{}".to_string(),
+            },
+        ])
+        .await;
+
+        let error = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.requires_user_action());
+        assert!(!error.is_transient());
+        assert_eq!(handle.await.unwrap().len(), 2);
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "old-access");
+        assert_eq!(tokens.refresh_token, "old-refresh");
+    }
+
+    #[tokio::test]
+    async fn reactive_transient_refresh_failure_preserves_stale_behavior() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base_url, handle) = server(vec![
+            MockResponse {
+                method: "GET",
+                path: "/usage",
+                status: 401,
+                body: "{}".to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/token",
+                status: 500,
+                body: "{}".to_string(),
+            },
+        ])
+        .await;
+
+        let error = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            &format!("{base_url}/usage"),
+            &format!("{base_url}/token"),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(!error.requires_user_action());
+        assert!(error.is_transient());
+        assert_eq!(handle.await.unwrap().len(), 2);
+        let tokens = storage.load_tokens(&account_id).unwrap();
+        assert_eq!(tokens.access_token, "old-access");
+        assert_eq!(tokens.refresh_token, "old-refresh");
     }
 }

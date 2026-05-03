@@ -1,14 +1,14 @@
 mod login_controls;
 mod rows;
 
-use self::login_controls::{claude_login_controls, codex_login_controls, cursor_login_controls};
+use self::login_controls::{claude_login_controls, codex_login_controls, cursor_scan_controls};
 use self::rows::{
     account_selector_list, claude_account_settings_row, codex_account_settings_row,
     cursor_account_settings_row, show_all_accounts_row,
 };
 use super::super::{
-    AppState, ClaudeLoginState, CodexLoginState, Config, CursorLoginState, Element, Length,
-    Message, ProviderId, ProviderLoginStates, fl, settings_block, settings_block_enabled, widget,
+    AppState, ClaudeLoginState, CodexLoginState, Config, CursorScanState, Element, Length, Message,
+    ProviderId, ProviderLoginStates, fl, settings_block, settings_block_enabled, widget,
 };
 
 pub(super) fn provider_settings_view<'a>(
@@ -31,7 +31,7 @@ pub(super) fn provider_settings_view<'a>(
     let accounts_section = match provider_id {
         ProviderId::Codex => codex_accounts_section(state, config, logins.codex, enabled),
         ProviderId::Claude => claude_accounts_section(state, config, logins.claude, enabled),
-        ProviderId::Cursor => cursor_accounts_section(state, config, logins.cursor, enabled),
+        ProviderId::Cursor => cursor_accounts_section(state, config, logins.cursor_scan, enabled),
     };
 
     Element::from(
@@ -58,7 +58,7 @@ fn codex_accounts_section<'a>(
         })
         .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Codex);
-    let active_id = codex.and_then(|provider| provider.active_account_id.as_deref());
+    let active_id = codex.and_then(|provider| provider.system_active_account_id.as_deref());
     let mut rows = cosmic::iced::widget::column![]
         .spacing(8)
         .width(Length::Fill);
@@ -166,7 +166,7 @@ fn claude_accounts_section<'a>(
 fn cursor_accounts_section<'a>(
     state: &'a AppState,
     config: &'a Config,
-    cursor_login: Option<&'a CursorLoginState>,
+    cursor_scan: &'a CursorScanState,
     enabled: bool,
 ) -> Element<'a, Message> {
     let selected_ids: Vec<&str> = state
@@ -182,7 +182,7 @@ fn cursor_accounts_section<'a>(
     let accounts = state.accounts_for(ProviderId::Cursor);
     let active_id = state
         .provider(ProviderId::Cursor)
-        .and_then(|provider| provider.active_account_id.as_deref());
+        .and_then(|provider| provider.system_active_account_id.as_deref());
     let mut rows = cosmic::iced::widget::column![]
         .spacing(8)
         .width(Length::Fill);
@@ -213,7 +213,7 @@ fn cursor_accounts_section<'a>(
         ));
     }
 
-    rows = rows.push(cursor_login_controls(cursor_login, enabled));
+    rows = rows.push(cursor_scan_controls(cursor_scan, enabled));
 
     settings_block_enabled(
         widget::text(fl!("cursor-accounts-title")).size(16).into(),

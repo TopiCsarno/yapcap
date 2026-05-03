@@ -32,8 +32,7 @@ use crate::model::{
 };
 use crate::providers::claude::{self, ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLoginStatus};
-use crate::providers::cursor::{self, CursorLoginEvent, CursorLoginState, CursorLoginStatus};
-use crate::providers::interface::ProviderDiscoveredAccount;
+use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::registry;
 use crate::runtime;
 use crate::runtime::ProviderRefreshResult;
@@ -77,8 +76,8 @@ pub struct AppModel {
     codex_login_handle: Option<Handle>,
     claude_login: Option<ClaudeLoginState>,
     claude_login_handle: Option<Handle>,
-    cursor_login: Option<CursorLoginState>,
-    cursor_login_handle: Option<Handle>,
+    cursor_scan: CursorScanState,
+    cursor_scan_result: Option<CursorScanResult>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,26 +105,29 @@ pub enum Message {
     UpdateConfig(Box<Config>),
     Tick,
     RefreshNow,
-    AuthFileChanged(ProviderId),
     ProviderRefreshed(Box<ProviderRefreshResult>),
     SelectProvider(ProviderId),
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
     ToggleAccountSelection(ProviderId, String),
     DeleteCodexAccount(String),
+    ReauthenticateCodexAccount(String),
     StartCodexLogin,
     CancelCodexLogin,
     CodexLoginEvent(Box<CodexLoginEvent>),
     DeleteClaudeAccount(String),
+    ReauthenticateClaudeAccount(String),
     StartClaudeLogin,
+    UpdateClaudeLoginCode(String),
+    SubmitClaudeLoginCode,
     CancelClaudeLogin,
     ClaudeLoginEvent(Box<ClaudeLoginEvent>),
     DeleteCursorAccount(String),
     ReauthenticateCursorAccount(String),
-    StartCursorLogin,
-    CancelCursorLogin,
-    CursorLoginEvent(Box<CursorLoginEvent>),
-    ProviderAccountsDiscovered(ProviderId, Vec<ProviderDiscoveredAccount>),
+    StartCursorScan,
+    ConfirmCursorScan,
+    DismissCursorScan,
+    CursorScanComplete(CursorScanState, Option<CursorScanResult>),
     ProviderAccountStatusesRefreshed(ProviderId, Vec<ProviderAccountRuntimeState>),
     SetRefreshInterval(u64),
     SetResetTimeFormat(ResetTimeFormat),
@@ -160,21 +162,19 @@ impl cosmic::Application for AppModel {
         core.window.show_maximize = false;
         core.window.show_minimize = false;
         core.window.use_template = false;
-        registry::startup_cleanup();
 
         let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
             .map(|ctx| {
                 let mut config = match Config::get_entry(&ctx) {
-                    Ok(cfg) => cfg.with_env_overrides(),
-                    Err((_errors, cfg)) => cfg.with_env_overrides(),
+                    Ok(cfg) => cfg,
+                    Err((_errors, cfg)) => cfg,
                 };
                 let mut changed = registry::startup_sync(&mut config);
                 changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
+                changed |= registry::finalize_provider_visibility_initialization(&mut config);
                 if changed {
                     let _ = config.write_entry(&ctx);
                 }
-                #[cfg(debug_assertions)]
-                registry::startup_debug_apply(&config);
                 demo_env::apply_config(&mut config);
                 config
             })
@@ -207,29 +207,15 @@ impl cosmic::Application for AppModel {
             codex_login_handle: None,
             claude_login: None,
             claude_login_handle: None,
-            cursor_login: None,
-            cursor_login_handle: None,
+            cursor_scan: CursorScanState::Idle,
+            cursor_scan_result: None,
         };
 
         let update_task = update_check_task(0);
-        let discover_task = {
-            let config = initial_config.clone();
-            let client = crate::runtime::http_client();
-            Task::perform(
-                async move { registry::browser_account_discovery(config, client).await },
-                |accounts| {
-                    cosmic::Action::App(Message::ProviderAccountsDiscovered(
-                        ProviderId::Cursor,
-                        accounts,
-                    ))
-                },
-            )
-        };
-
         let startup = if demo_env::is_active() {
             Task::none()
         } else {
-            Task::batch([refresh_task, update_task, discover_task, cursor_status_task])
+            Task::batch([refresh_task, update_task, cursor_status_task])
         };
 
         (app, startup)
@@ -278,7 +264,7 @@ impl cosmic::Application for AppModel {
             ProviderLoginStates {
                 codex: self.codex_login.as_ref(),
                 claude: self.claude_login.as_ref(),
-                cursor: self.cursor_login.as_ref(),
+                cursor_scan: &self.cursor_scan,
             },
             self.selected_provider,
             &self.popup_route,
@@ -315,13 +301,8 @@ impl cosmic::Application for AppModel {
         Subscription::batch(vec![
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
-                .map(|update| Message::UpdateConfig(Box::new(update.config.with_env_overrides()))),
+                .map(|update| Message::UpdateConfig(Box::new(update.config))),
             time::every(Duration::from_secs(interval_secs)).map(|_| Message::Tick),
-            crate::file_watcher::subscription().map(|ev| match ev {
-                crate::file_watcher::WatcherEvent::AuthFileChanged(p) => {
-                    Message::AuthFileChanged(p)
-                }
-            }),
         ])
     }
 
@@ -366,16 +347,8 @@ impl AppModel {
                 return Some(refresh_provider_tasks(&self.config, &mut self.state));
             }
 
-            Message::AuthFileChanged(provider) => {
-                return Some(self.handle_auth_file_changed(provider));
-            }
-
             Message::ProviderRefreshed(refresh_result) => {
                 return Some(self.handle_provider_refreshed(*refresh_result));
-            }
-
-            Message::ProviderAccountsDiscovered(provider, accounts) => {
-                return Some(self.handle_provider_accounts_discovered(provider, &accounts));
             }
 
             Message::ProviderAccountStatusesRefreshed(provider, accounts) => {
@@ -441,6 +414,14 @@ impl AppModel {
                 return Some(self.delete_claude_account(&account_id));
             }
 
+            Message::ReauthenticateClaudeAccount(account_id) => {
+                return Some(self.reauthenticate_claude_account(&account_id));
+            }
+
+            Message::ReauthenticateCodexAccount(account_id) => {
+                return Some(self.reauthenticate_codex_account(&account_id));
+            }
+
             Message::StartCodexLogin => return Some(self.start_codex_login()),
 
             Message::CancelCodexLogin => self.cancel_codex_login(),
@@ -449,9 +430,11 @@ impl AppModel {
                 return Some(self.handle_codex_login_event(*event));
             }
 
-            Message::StartClaudeLogin => {
-                return Some(self.start_claude_login());
-            }
+            Message::StartClaudeLogin => return Some(self.start_claude_login()),
+
+            Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
+
+            Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
 
             Message::CancelClaudeLogin => self.cancel_claude_login(),
 
@@ -461,9 +444,10 @@ impl AppModel {
 
             Message::DeleteCursorAccount(_)
             | Message::ReauthenticateCursorAccount(_)
-            | Message::StartCursorLogin
-            | Message::CancelCursorLogin
-            | Message::CursorLoginEvent(_) => unreachable!(),
+            | Message::StartCursorScan
+            | Message::ConfirmCursorScan
+            | Message::DismissCursorScan
+            | Message::CursorScanComplete(_, _) => unreachable!(),
         }
         None
     }
@@ -476,63 +460,21 @@ impl AppModel {
             Message::ReauthenticateCursorAccount(account_id) => {
                 CursorMessageResult::handled(Some(self.reauthenticate_cursor_account(account_id)))
             }
-            Message::StartCursorLogin => {
-                CursorMessageResult::handled(Some(self.start_cursor_login()))
+            Message::StartCursorScan => {
+                CursorMessageResult::handled(Some(self.start_cursor_scan()))
             }
-            Message::CancelCursorLogin => {
-                self.cancel_cursor_login();
+            Message::ConfirmCursorScan => {
+                CursorMessageResult::handled(Some(self.confirm_cursor_scan()))
+            }
+            Message::DismissCursorScan => {
+                self.dismiss_cursor_scan();
                 CursorMessageResult::handled(None)
             }
-            Message::CursorLoginEvent(event) => CursorMessageResult::handled(Some(
-                self.handle_cursor_login_event((**event).clone()),
-            )),
+            Message::CursorScanComplete(state, result) => {
+                self.handle_cursor_scan_complete(state.clone(), result.clone());
+                CursorMessageResult::handled(None)
+            }
             _ => CursorMessageResult::Unhandled,
-        }
-    }
-
-    fn handle_provider_accounts_discovered(
-        &mut self,
-        provider: ProviderId,
-        new_accounts: &[ProviderDiscoveredAccount],
-    ) -> Task<Message> {
-        let should_finalize_provider_visibility = provider == ProviderId::Cursor
-            && self.config.provider_visibility_mode
-                == crate::config::ProviderVisibilityMode::AutoInitPending;
-        self.write_config(|config| {
-            if !new_accounts.is_empty() {
-                registry::upsert_discovered_accounts(config, new_accounts);
-            }
-            if should_finalize_provider_visibility {
-                registry::initialize_provider_visibility(config, &[ProviderId::Cursor]);
-                registry::finalize_provider_visibility_initialization(config);
-            }
-        });
-        #[cfg(debug_assertions)]
-        registry::startup_debug_apply_for_accounts(
-            &new_accounts
-                .iter()
-                .filter_map(|account| match &account.handle {
-                    crate::providers::interface::ProviderAccountHandle::Cursor(account) => {
-                        Some(account.clone())
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-        );
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.selected_provider = select_provider(self.selected_provider, &self.state);
-        let refresh_task = self
-            .config
-            .provider_enabled(provider)
-            .then(|| refresh_provider_task(&self.config, &mut self.state, provider));
-        let status_task =
-            refresh_provider_account_statuses_task(&self.config, &self.state, provider);
-        match refresh_task {
-            Some(refresh_task) if status_task.units() > 0 => {
-                Task::batch([refresh_task, status_task])
-            }
-            Some(refresh_task) => refresh_task,
-            None => status_task,
         }
     }
 

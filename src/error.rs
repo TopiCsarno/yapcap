@@ -2,23 +2,16 @@
 
 use std::num::ParseFloatError;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use thiserror::Error;
 
-pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
+pub type Result<T, E = AppError> = std::result::Result<T, E>;
 pub const OFFLINE_MESSAGE: &str = "No internet connection. Information is not up to date.";
 
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error(transparent)]
-    Auth(#[from] AuthError),
-    #[error(transparent)]
-    Browser(#[from] BrowserError),
-    #[error(transparent)]
     Cache(#[from] CacheError),
-    #[error(transparent)]
-    Config(#[from] ConfigError),
     #[error(transparent)]
     Logging(#[from] LoggingError),
     #[error(transparent)]
@@ -57,21 +50,15 @@ impl AppError {
     pub fn is_network_unavailable(&self) -> bool {
         match self {
             Self::Provider(error) => error.is_network_unavailable(),
-            Self::Auth(_)
-            | Self::Browser(_)
-            | Self::Cache(_)
-            | Self::Config(_)
-            | Self::Logging(_) => false,
+            Self::Cache(_) | Self::Logging(_) => false,
         }
     }
 
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
         match self {
-            Self::Auth(_) => true,
-            Self::Browser(error) => error.requires_user_action(),
             Self::Provider(error) => error.requires_user_action(),
-            Self::Cache(_) | Self::Config(_) | Self::Logging(_) => false,
+            Self::Cache(_) | Self::Logging(_) => false,
         }
     }
 
@@ -82,93 +69,18 @@ impl AppError {
             _ => false,
         }
     }
-}
 
-#[derive(Debug, Error)]
-pub enum AuthError {
-    #[error("could not resolve CODEX_HOME or ~/.codex")]
-    ResolveCodexHome,
-    #[error("failed to read codex auth file {path}")]
-    ReadCodexAuthFile {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse codex auth.json")]
-    ParseCodexAuthJson(#[source] serde_json::Error),
-    #[error("codex auth.json is missing required fields")]
-    InvalidCodexAuthShape,
-    #[error("failed to read claude credentials {path}")]
-    ReadClaudeCredentials {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse claude credentials")]
-    ParseClaudeCredentials(#[source] serde_json::Error),
-}
-
-#[derive(Debug, Error)]
-pub enum BrowserError {
-    #[error("failed to connect to secret service")]
-    ConnectSecretService(#[source] secret_service::Error),
-    #[error("failed to search secret service")]
-    SearchSecretService(#[source] secret_service::Error),
-    #[error("no matching keyring item found for browser safe storage")]
-    MissingKeyringItem,
-    #[error("failed to read browser safe storage secret")]
-    ReadBrowserSecret(#[source] secret_service::Error),
-    #[error("browser safe storage secret is not valid UTF-8")]
-    BrowserSecretNotUtf8(#[source] std::string::FromUtf8Error),
-    #[error("cookie database not found at {path}")]
-    CookieDatabaseNotFound { path: PathBuf },
-    #[error("failed to create temp cookie db")]
-    CreateTempCookieDb(#[source] std::io::Error),
-    #[error("failed to copy {path}")]
-    CopyCookieDb {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to open copied cookie db")]
-    OpenCookieDb(#[source] rusqlite::Error),
-    #[error("failed to prepare cookie lookup")]
-    PrepareCookieLookup(#[source] rusqlite::Error),
-    #[error("cookie not found in browser db")]
-    CookieNotFound(#[source] rusqlite::Error),
-    #[error("encrypted cookie blob is empty")]
-    EmptyCookieBlob,
-    #[error("cookie blob not recognized")]
-    CookieBlobNotRecognized(#[source] std::string::FromUtf8Error),
-    #[error("failed to initialize AES-CBC decryptor: {0}")]
-    InitAesCbc(String),
-    #[error("failed to decrypt chromium cookie: {0}")]
-    DecryptCookieCbc(String),
-    #[error("failed to initialize AES-GCM decryptor: {0}")]
-    InitAesGcm(String),
-    #[error("failed to decrypt chromium cookie with AES-GCM: {0}")]
-    DecryptCookieGcm(String),
-    #[error("decrypted cookie is not valid UTF-8, even after stripping domain hash")]
-    CookieNotUtf8AfterPrefix(#[source] std::string::FromUtf8Error),
-    #[error("decrypted cookie is not valid UTF-8 ({len} bytes — likely wrong decryption key)")]
-    CookieNotUtf8 {
-        len: usize,
-        #[source]
-        source: std::string::FromUtf8Error,
-    },
-    #[error("failed to decrypt chromium cookie: {0}")]
-    CookieDecryptFailed(String),
-}
-
-impl BrowserError {
     #[must_use]
-    pub fn requires_user_action(&self) -> bool {
-        matches!(
-            self,
-            Self::MissingKeyringItem
-                | Self::CookieDatabaseNotFound { .. }
-                | Self::CookieNotFound(_)
-        )
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::Provider(ProviderError::Claude(e)) if e.is_rate_limited())
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
+            _ => None,
+        }
     }
 }
 
@@ -196,20 +108,6 @@ pub enum CacheError {
         #[source]
         source: std::io::Error,
     },
-}
-
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    #[error("failed to read config file {path}")]
-    ReadConfigFile {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("missing home directory")]
-    MissingHomeDir,
-    #[error("could not find Firefox profile with cookies.sqlite")]
-    FirefoxProfileNotFound,
 }
 
 #[derive(Debug, Error)]
@@ -257,7 +155,8 @@ impl ProviderError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Claude(error) => error.is_transient(),
-            Self::Codex(_) | Self::Cursor(_) => false,
+            Self::Codex(error) => error.is_transient(),
+            Self::Cursor(_) => false,
         }
     }
 }
@@ -266,10 +165,20 @@ fn request_could_not_reach_network(error: &reqwest::Error) -> bool {
     error.is_connect() || (!error.is_status() && error.is_timeout())
 }
 
+fn format_retry_secs(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("{}h", secs / 3600)
+    } else if secs >= 60 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CodexError {
-    #[error(transparent)]
-    Auth(#[from] AuthError),
+    #[error("failed to read Codex account storage: {0}")]
+    AccountStorage(String),
     #[error("invalid codex bearer header")]
     InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
     #[error("invalid codex account id header")]
@@ -282,7 +191,7 @@ pub enum CodexError {
     UsageHttp { status: u16, details: String },
     #[error("failed to decode codex usage response")]
     DecodeUsageJson(#[source] serde_json::Error),
-    #[error("codex token refresh not available (missing refresh_token in auth.json)")]
+    #[error("codex token refresh not available")]
     RefreshUnavailable,
     #[error("codex token refresh request failed")]
     RefreshRequest(#[source] reqwest::Error),
@@ -315,15 +224,29 @@ impl CodexError {
     pub fn requires_user_action(&self) -> bool {
         matches!(
             self,
-            Self::Auth(_) | Self::Unauthorized | Self::RefreshUnavailable
+            Self::Unauthorized
+                | Self::RefreshUnavailable
+                | Self::RefreshHttp {
+                    status: 400 | 401 | 403,
+                    ..
+                }
         )
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) | Self::RefreshRequest(source) => {
+                request_could_not_reach_network(source)
+            }
+            Self::RefreshHttp { status, .. } => *status == 429 || *status >= 500,
+            _ => false,
+        }
     }
 }
 
 #[derive(Debug, Error)]
 pub enum ClaudeError {
-    #[error(transparent)]
-    Auth(#[from] AuthError),
     #[error("Claude token missing user:profile scope")]
     MissingProfileScope,
     #[error("invalid claude bearer header")]
@@ -332,20 +255,17 @@ pub enum ClaudeError {
     UsageRequest(#[source] reqwest::Error),
     #[error("Claude token unauthorized or expired")]
     Unauthorized,
-    #[error("claude CLI binary not found")]
-    CliUnavailable,
-    #[error("failed to spawn claude CLI")]
-    CliCommand(#[source] std::io::Error),
-    #[error("failed to communicate with claude CLI")]
-    CliIo(#[source] std::io::Error),
-    #[error("claude CLI timed out after {timeout:?}")]
-    CliTimeout { timeout: Duration },
-    #[error("claude auth status failed with exit status {status}")]
-    CliStatusFailed { status: String },
-    #[error("failed to decode claude auth status JSON")]
-    DecodeCliStatus(#[source] serde_json::Error),
-    #[error("Rate limited by Claude — consider increasing the Auto refresh interval in Settings")]
-    RateLimited,
+    #[error("Rate limited by Claude{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("claude token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("claude token refresh returned HTTP {status}")]
+    TokenRefreshHttp { status: u16 },
+    #[error("failed to decode claude token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("failed to parse claude token refresh response: {0}")]
+    TokenRefreshParse(String),
     #[error("claude usage endpoint returned HTTP {status}")]
     UsageEndpoint {
         status: u16,
@@ -368,37 +288,47 @@ impl ClaudeError {
     #[must_use]
     pub fn is_network_unavailable(&self) -> bool {
         match self {
-            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            Self::UsageRequest(source) | Self::TokenRefreshRequest(source) => {
+                request_could_not_reach_network(source)
+            }
             _ => false,
         }
     }
 
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
-        matches!(
-            self,
-            Self::Auth(_)
-                | Self::MissingProfileScope
-                | Self::Unauthorized
-                | Self::CliUnavailable
-                | Self::CliCommand(_)
-                | Self::CliIo(_)
-                | Self::CliTimeout { .. }
-                | Self::CliStatusFailed { .. }
-                | Self::DecodeCliStatus(_)
-        )
+        if let Self::TokenRefreshHttp { status } = self {
+            return (400..500).contains(status) && *status != 429;
+        }
+        matches!(self, Self::MissingProfileScope | Self::Unauthorized)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
     }
 
     #[must_use]
     pub fn is_transient(&self) -> bool {
-        matches!(self, Self::RateLimited)
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::TokenRefreshRequest(source) => request_could_not_reach_network(source),
+            Self::TokenRefreshHttp { status } => *status == 429 || *status >= 500,
+            _ => false,
+        }
     }
 }
 
 #[derive(Debug, Error)]
 pub enum CursorError {
-    #[error(transparent)]
-    Browser(#[from] BrowserError),
     #[error("invalid cursor cookie header")]
     InvalidCookieHeader(#[source] reqwest::header::InvalidHeaderValue),
     #[error("cursor usage request failed")]
@@ -419,36 +349,56 @@ pub enum CursorError {
         #[source]
         source: chrono::ParseError,
     },
+    #[error("Cursor state database not found at {path}")]
+    StateDbNotFound { path: PathBuf },
+    #[error("failed to open Cursor state database")]
+    StateDbOpen(#[source] rusqlite::Error),
+    #[error("failed to query Cursor state database")]
+    StateDbQuery(#[source] rusqlite::Error),
+    #[error("Cursor state database is missing key: {0}")]
+    StateDbMissingKey(String),
+    #[error("JWT has {count} segments, expected 3")]
+    JwtWrongSegments { count: usize },
+    #[error("failed to base64-decode JWT payload")]
+    JwtBase64(#[source] base64::DecodeError),
+    #[error("JWT payload is not valid JSON")]
+    JwtNotJson(#[source] serde_json::Error),
+    #[error("JWT is missing 'sub' claim")]
+    JwtMissingSub,
+    #[error("JWT is missing valid 'exp' claim")]
+    JwtMissingExp,
+    #[error("Cursor token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("Cursor session requires re-authentication")]
+    TokenRefreshLogout,
+    #[error("Cursor token refresh failed with status {status}")]
+    TokenRefreshFailed { status: u16 },
+    #[error("failed to decode Cursor token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("Cursor account email not available")]
+    ScanMissingEmail,
 }
 
 impl CursorError {
     #[must_use]
     pub fn is_network_unavailable(&self) -> bool {
         match self {
-            Self::UsageRequest(source) | Self::IdentityRequest(source) => {
-                request_could_not_reach_network(source)
-            }
+            Self::UsageRequest(source)
+            | Self::IdentityRequest(source)
+            | Self::TokenRefreshRequest(source) => request_could_not_reach_network(source),
             _ => false,
         }
     }
 
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
-        matches!(self, Self::Browser(error) if error.requires_user_action())
-            || matches!(self, Self::Unauthorized)
+        matches!(self, Self::Unauthorized | Self::TokenRefreshLogout)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn auth_error_requires_user_action() {
-        let err = AppError::Auth(AuthError::ResolveCodexHome);
-        assert!(err.requires_user_action());
-        assert!(!err.is_transient());
-    }
 
     #[test]
     fn cache_error_does_not_require_user_action() {
@@ -461,9 +411,33 @@ mod tests {
 
     #[test]
     fn claude_rate_limit_is_transient() {
-        let err = AppError::Provider(ProviderError::Claude(ClaudeError::RateLimited));
+        let err = AppError::Provider(ProviderError::Claude(ClaudeError::RateLimited {
+            retry_after_secs: None,
+        }));
         assert!(!err.requires_user_action());
         assert!(err.is_transient());
+    }
+
+    #[test]
+    fn claude_refresh_auth_failures_require_user_action() {
+        for status in [400, 401, 403] {
+            let err = AppError::Provider(ProviderError::Claude(ClaudeError::TokenRefreshHttp {
+                status,
+            }));
+            assert!(err.requires_user_action());
+            assert!(!err.is_transient());
+        }
+    }
+
+    #[test]
+    fn claude_refresh_rate_limit_and_server_errors_are_transient() {
+        for status in [429, 500, 503] {
+            let err = AppError::Provider(ProviderError::Claude(ClaudeError::TokenRefreshHttp {
+                status,
+            }));
+            assert!(!err.requires_user_action());
+            assert!(err.is_transient());
+        }
     }
 
     #[test]
@@ -474,47 +448,38 @@ mod tests {
     }
 
     #[test]
+    fn codex_refresh_auth_failures_require_user_action() {
+        for status in [400, 401, 403] {
+            let err = AppError::Provider(ProviderError::Codex(CodexError::RefreshHttp {
+                status,
+                details: String::new(),
+            }));
+            assert!(err.requires_user_action());
+            assert!(!err.is_transient());
+        }
+    }
+
+    #[test]
+    fn codex_refresh_rate_limit_and_server_errors_are_transient() {
+        for status in [429, 500, 503] {
+            let err = AppError::Provider(ProviderError::Codex(CodexError::RefreshHttp {
+                status,
+                details: String::new(),
+            }));
+            assert!(!err.requires_user_action());
+            assert!(err.is_transient());
+        }
+    }
+
+    #[test]
     fn cursor_unauthorized_requires_user_action() {
         let err = AppError::Provider(ProviderError::Cursor(CursorError::Unauthorized));
         assert!(err.requires_user_action());
     }
 
     #[test]
-    fn browser_missing_keyring_requires_user_action() {
-        let err = BrowserError::MissingKeyringItem;
-        assert!(err.requires_user_action());
-    }
-
-    #[test]
-    fn browser_decrypt_error_does_not_require_user_action() {
-        let err = BrowserError::InitAesCbc("bad key".into());
-        assert!(!err.requires_user_action());
-    }
-
-    #[test]
-    fn cursor_browser_auth_error_propagates_requires_user_action() {
-        let err = CursorError::Browser(BrowserError::CookieDatabaseNotFound {
-            path: PathBuf::from("/no/such/path"),
-        });
-        assert!(err.requires_user_action());
-    }
-
-    #[test]
-    fn cursor_browser_decrypt_error_does_not_require_user_action() {
-        let err = CursorError::Browser(BrowserError::DecryptCookieCbc("fail".into()));
-        assert!(!err.requires_user_action());
-    }
-
-    #[test]
     fn codex_cli_errors_do_not_require_user_action_by_default() {
         let err = CodexError::NoUsageData;
         assert!(!err.requires_user_action());
-    }
-
-    #[test]
-    fn claude_cli_unavailable_requires_user_action() {
-        let err = ClaudeError::CliUnavailable;
-        assert!(err.requires_user_action());
-        assert!(!err.is_transient());
     }
 }

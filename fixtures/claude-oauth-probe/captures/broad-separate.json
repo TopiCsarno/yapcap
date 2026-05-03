@@ -1,0 +1,52 @@
+{
+  "variant": "broad-separate",
+  "captured_at": "2026-04-30T06:59:10+0200",
+  "authorize_url_shape": {
+    "host": "claude.ai",
+    "redirect_uri": "https://console.anthropic.com/oauth/code/callback",
+    "scope": "org:create_api_key user:profile user:inference",
+    "code_true": true,
+    "state_strategy": "separate",
+    "state_matches_returned": true
+  },
+  "exchange_request_shape": {
+    "endpoint": "https://console.anthropic.com/v1/oauth/token",
+    "grant_type": "authorization_code",
+    "redirect_uri": "https://console.anthropic.com/oauth/code/callback",
+    "has_code": true,
+    "code_length": 48,
+    "has_state": true,
+    "state_length": 43,
+    "has_code_verifier": true,
+    "code_verifier_length": 43
+  },
+  "response": {
+    "status": 200,
+    "keys": [
+      "access_token",
+      "account",
+      "expires_in",
+      "organization",
+      "refresh_token",
+      "scope",
+      "token_type",
+      "token_uuid"
+    ],
+    "redacted_body": {
+      "token_type": "<redacted>",
+      "access_token": "<redacted>",
+      "expires_in": 28800,
+      "refresh_token": "<redacted>",
+      "scope": "user:inference user:profile",
+      "token_uuid": "<redacted>",
+      "organization": {
+        "uuid": "<redacted-id>",
+        "name": "<redacted-name>"
+      },
+      "account": {
+        "uuid": "<redacted-id>",
+        "email_address": "user@example.com"
+      }
+    }
+  }
+}

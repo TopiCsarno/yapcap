@@ -1,0 +1,50 @@
+{
+  "app-id": "com.topi.YapCap",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
+  "command": "yapcap",
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=session-bus",
+    "--device=dri",
+    "--filesystem=xdg-config/cosmic:rw",
+    "--filesystem=~/.config/Cursor:ro",
+    "--filesystem=~/.codex/auth.json:ro"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "build-args": [
+      "--share=network"
+    ],
+    "env": {
+      "CARGO_HOME": "/run/build/yapcap/cargo",
+      "RUST_BACKTRACE": "1"
+    }
+  },
+  "modules": [
+    {
+      "name": "yapcap",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo build --release --locked",
+        "install -Dm0755 target/release/yapcap /app/bin/yapcap",
+        "install -Dm0644 resources/app.desktop /app/share/applications/com.topi.YapCap.desktop",
+        "install -Dm0644 resources/app.metainfo.xml /app/share/metainfo/com.topi.YapCap.metainfo.xml",
+        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "."
+        }
+      ]
+    }
+  ]
+}

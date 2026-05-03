@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 
+pub mod account_storage;
 mod app;
 mod auth;
-mod browser;
 mod cache;
 mod config;
 #[cfg(debug_assertions)]
 mod debug_env;
 mod demo_env;
 mod error;
-mod file_watcher;
 mod i18n;
 mod logging;
 mod model;

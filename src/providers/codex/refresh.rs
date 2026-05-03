@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::auth::jwt_expiration;
 use crate::error::{CodexError, Result};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-const TOKEN_ENDPOINT: &str = "https://auth.openai.com/oauth/token";
+pub(crate) const TOKEN_ENDPOINT: &str = "https://auth.openai.com/oauth/token";
 
 #[derive(Debug, Clone)]
 pub struct RefreshedCodexTokens {
     pub access_token: String,
     pub refresh_token: Option<String>,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,16 +20,11 @@ struct RefreshResponse {
     access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
+    #[serde(default)]
+    expires_in: Option<i64>,
 }
 
-pub async fn refresh_access_token(
-    client: &reqwest::Client,
-    refresh_token: &str,
-) -> Result<RefreshedCodexTokens, CodexError> {
-    refresh_access_token_at(client, TOKEN_ENDPOINT, refresh_token).await
-}
-
-async fn refresh_access_token_at(
+pub(crate) async fn refresh_access_token_at(
     client: &reqwest::Client,
     endpoint: &str,
     refresh_token: &str,
@@ -63,7 +61,15 @@ async fn refresh_access_token_at(
     }
 
     let decoded: RefreshResponse = response.json().await.map_err(CodexError::RefreshDecode)?;
+    let now = Utc::now();
     Ok(RefreshedCodexTokens {
+        expires_at: jwt_expiration(&decoded.access_token)
+            .or_else(|| {
+                decoded
+                    .expires_in
+                    .map(|seconds| now + Duration::seconds(seconds))
+            })
+            .unwrap_or(now + Duration::hours(1)),
         access_token: decoded.access_token,
         refresh_token: decoded.refresh_token,
     })
@@ -97,7 +103,8 @@ mod tests {
             assert!(req.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
             assert!(req.contains("refresh_token=test-refresh-token"));
 
-            let body = r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#;
+            let body =
+                r#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}"#;
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(),
@@ -118,6 +125,7 @@ mod tests {
 
         assert_eq!(tokens.access_token, "new-access");
         assert_eq!(tokens.refresh_token.as_deref(), Some("new-refresh"));
+        assert!(tokens.expires_at > chrono::Utc::now());
 
         server.await.unwrap();
     }

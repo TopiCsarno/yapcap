@@ -1,12 +1,24 @@
 use super::{
-    AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus,
-    CodexLoginEvent, CodexLoginState, CodexLoginStatus, CursorLoginEvent, CursorLoginState,
-    CursorLoginStatus, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
-    ManagedCursorAccountConfig, Message, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
-    Task, claude, codex, cursor, refresh_provider_task, refresh_provider_tasks, registry, runtime,
+    AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent,
+    CodexLoginState, CodexLoginStatus, CursorScanResult, CursorScanState,
+    ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
+    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, cursor,
+    refresh_provider_task, refresh_provider_tasks, runtime,
 };
 
 impl AppModel {
+    pub(super) fn reauthenticate_codex_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .codex_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        self.start_codex_login()
+    }
+
     pub(super) fn start_codex_login(&mut self) -> Task<Message> {
         if self
             .codex_login
@@ -237,9 +249,8 @@ impl AppModel {
     }
 
     pub(super) fn update_cursor_active_account(&mut self) {
-        let active = registry::ambient_active_account_id(ProviderId::Cursor, &self.config);
         if let Some(provider_state) = self.state.provider_mut(ProviderId::Cursor) {
-            provider_state.active_account_id = active;
+            provider_state.active_account_id = provider_state.selected_account_ids.first().cloned();
         }
     }
 
@@ -252,20 +263,54 @@ impl AppModel {
             return Task::none();
         }
         self.claude_login = None;
-        let (state, task) = match claude::prepare(self.config.clone()) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.claude_login = Some(ClaudeLoginState {
-                    flow_id: "failed".to_string(),
-                    status: ClaudeLoginStatus::Failed,
-                    login_url: None,
-                    output: Vec::new(),
-                    error: Some(error),
-                });
-                return Task::none();
-            }
-        };
+        let state = claude::prepare();
         self.claude_login = Some(state);
+        Task::none()
+    }
+
+    pub(super) fn reauthenticate_claude_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .claude_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        if self
+            .claude_login
+            .as_ref()
+            .is_some_and(|login| login.status == ClaudeLoginStatus::Running)
+        {
+            return Task::none();
+        }
+        self.claude_login = None;
+        let state = claude::prepare_targeted(account_id.to_string());
+        self.claude_login = Some(state);
+        Task::none()
+    }
+
+    pub(super) fn update_claude_login_code(&mut self, code: String) {
+        if let Some(login) = self.claude_login.as_mut()
+            && login.status == ClaudeLoginStatus::Running
+        {
+            login.code_input = code;
+        }
+    }
+
+    pub(super) fn submit_claude_login_code(&mut self) -> Task<Message> {
+        let Some(login) = self.claude_login.as_mut() else {
+            return Task::none();
+        };
+        if login.status != ClaudeLoginStatus::Running || login.code_input.trim().is_empty() {
+            return Task::none();
+        }
+        login.error = None;
+        login.output.push("Completing Claude sign-in".to_string());
+        if login.output.len() > 8 {
+            login.output.remove(0);
+        }
+        let task = claude::submit_code(login, self.config.clone());
         let task =
             task.map(|event| cosmic::Action::App(Message::ClaudeLoginEvent(Box::new(event))));
         let (task, handle) = task.abortable();
@@ -282,26 +327,6 @@ impl AppModel {
 
     pub(super) fn handle_claude_login_event(&mut self, event: ClaudeLoginEvent) -> Task<Message> {
         match event {
-            ClaudeLoginEvent::Output {
-                flow_id,
-                line,
-                login_url,
-            } => {
-                let Some(login) = self.claude_login.as_mut() else {
-                    return Task::none();
-                };
-                if login.flow_id != flow_id {
-                    return Task::none();
-                }
-                if let Some(url) = login_url {
-                    login.login_url = Some(url);
-                }
-                login.output.push(line);
-                if login.output.len() > 8 {
-                    login.output.remove(0);
-                }
-                Task::none()
-            }
             ClaudeLoginEvent::Finished { flow_id, result } => {
                 let Some(login) = self.claude_login.as_mut() else {
                     return Task::none();
@@ -363,112 +388,82 @@ impl AppModel {
         }
     }
 
-    pub(super) fn start_cursor_login(&mut self) -> Task<Message> {
-        if self
-            .cursor_login
-            .as_ref()
-            .is_some_and(|login| login.status == CursorLoginStatus::Running)
-        {
-            return Task::none();
-        }
-        cursor::cleanup_pending_dirs();
-        self.cursor_login = None;
-        let (state, task) = match cursor::prepare(self.config.cursor_browser) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.cursor_login = Some(CursorLoginState {
-                    flow_id: "failed".to_string(),
-                    status: CursorLoginStatus::Failed,
-                    browser: self.config.cursor_browser,
-                    login_url: cursor::LOGIN_URL.to_string(),
-                    error: Some(error),
-                });
-                return Task::none();
-            }
-        };
-        self.cursor_login = Some(state);
-        let task =
-            task.map(|event| cosmic::Action::App(Message::CursorLoginEvent(Box::new(event))));
-        let (task, handle) = task.abortable();
-        self.cursor_login_handle = Some(handle);
-        task
-    }
-
     pub(super) fn reauthenticate_cursor_account(&mut self, account_id: &str) -> Task<Message> {
         if cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).is_none()
         {
             return Task::none();
         }
-        self.start_cursor_login()
+        self.start_cursor_scan()
     }
 
-    pub(super) fn cancel_cursor_login(&mut self) {
-        if let Some(handle) = self.cursor_login_handle.take() {
-            handle.abort();
+    pub(super) fn start_cursor_scan(&mut self) -> Task<Message> {
+        if matches!(self.cursor_scan, CursorScanState::Scanning) {
+            return Task::none();
         }
-        cursor::cleanup_pending_dirs();
-        self.cursor_login = None;
+        self.cursor_scan = CursorScanState::Scanning;
+        self.cursor_scan_result = None;
+        let existing = self.config.cursor_managed_accounts.clone();
+        Task::perform(
+            async move {
+                let client = runtime::http_client();
+                cursor::scan(&client, &existing).await
+            },
+            |(state, result)| cosmic::Action::App(Message::CursorScanComplete(state, result)),
+        )
     }
 
-    pub(super) fn handle_cursor_login_event(&mut self, event: CursorLoginEvent) -> Task<Message> {
-        match event {
-            CursorLoginEvent::Finished { flow_id, result } => {
-                let Some(login) = self.cursor_login.as_mut() else {
-                    return Task::none();
-                };
-                if login.flow_id != flow_id {
-                    return Task::none();
-                }
-                self.cursor_login_handle = None;
-                cursor::cleanup_pending_dirs();
-                match *result {
-                    Ok(success) => {
-                        login.status = CursorLoginStatus::Succeeded;
-                        login.error = None;
-                        let mut applied_account = success.account.clone();
-                        self.write_config(|new_config| {
-                            applied_account =
-                                cursor::upsert_managed_account(new_config, success.account.clone());
-                        });
-                        runtime::reconcile_provider(
-                            &self.config,
-                            &mut self.state,
-                            ProviderId::Cursor,
-                        );
-                        let account_id = cursor::managed_account_id(&applied_account.id);
-                        let account_label = applied_account.email.clone();
-                        let mut account = ProviderAccountRuntimeState::empty(
-                            ProviderId::Cursor,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        if let Some(snapshot) = success.snapshot {
-                            account.source_label = Some(snapshot.source.clone());
-                            account.last_success_at = Some(chrono::Utc::now());
-                            account.health = crate::model::ProviderHealth::Ok;
-                            account.snapshot = Some(snapshot);
-                        }
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
-                            if !provider.selected_account_ids.contains(&account_id) {
-                                provider.selected_account_ids.push(account_id);
-                            }
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Cursor)
+    pub(super) fn handle_cursor_scan_complete(
+        &mut self,
+        state: CursorScanState,
+        result: Option<CursorScanResult>,
+    ) {
+        self.cursor_scan = state;
+        self.cursor_scan_result = result;
+    }
+
+    pub(super) fn confirm_cursor_scan(&mut self) -> Task<Message> {
+        let Some(result) = self.cursor_scan_result.take() else {
+            self.cursor_scan = CursorScanState::Idle;
+            return Task::none();
+        };
+        match cursor::confirm_scan(&self.config.cursor_managed_accounts, &result) {
+            Ok(new_account) => {
+                let mut applied_account = new_account.clone();
+                self.write_config(|new_config| {
+                    applied_account = cursor::upsert_managed_account(new_config, new_account);
+                });
+                runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Cursor);
+                let account_id = cursor::managed_account_id(&applied_account.id);
+                let account_label = applied_account.email.clone();
+                let mut account = ProviderAccountRuntimeState::empty(
+                    ProviderId::Cursor,
+                    account_id.clone(),
+                    account_label,
+                );
+                account.auth_state = crate::model::AuthState::Ready;
+                account.error = None;
+                self.state.upsert_account(account);
+                if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
+                    if !provider.selected_account_ids.contains(&account_id) {
+                        provider.selected_account_ids.push(account_id);
                     }
-                    Err(error) => {
-                        login.status = CursorLoginStatus::Failed;
-                        login.error = Some(error);
-                        Task::none()
-                    }
+                    provider.account_status = AccountSelectionStatus::Ready;
+                    provider.error = None;
                 }
+                runtime::persist_state(&self.state);
+                self.cursor_scan = CursorScanState::Idle;
+                refresh_provider_task(&self.config, &mut self.state, ProviderId::Cursor)
+            }
+            Err(error) => {
+                self.cursor_scan = CursorScanState::Error(error);
+                Task::none()
             }
         }
+    }
+
+    pub(super) fn dismiss_cursor_scan(&mut self) {
+        self.cursor_scan = CursorScanState::Idle;
+        self.cursor_scan_result = None;
     }
 }
 

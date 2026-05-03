@@ -2,67 +2,152 @@
 
 mod account;
 mod login;
+mod oauth;
 mod refresh;
+#[cfg(test)]
+mod tests;
 
-use crate::auth::{CodexAuth, load_codex_auth_from_home, update_codex_auth_tokens};
+use crate::account_storage::{
+    ProviderAccountMetadata, ProviderAccountStorage, ProviderAccountTokens,
+};
+use crate::auth::{CodexAuth, user_id_from_token};
 use crate::error::{CodexError, Result};
 use crate::model::{
     ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-pub use account::{
-    ambient_active_account_id, apply_login_account, discover_accounts, sync_imported_account,
-};
+pub use account::{apply_login_account, discover_accounts, sync_managed_accounts};
 pub use login::{CodexLoginEvent, CodexLoginState, CodexLoginStatus, prepare};
 
+use crate::config::ManagedCodexAccountConfig;
+
+pub(crate) fn system_active_account_id(
+    managed_accounts: &[ManagedCodexAccountConfig],
+    auth_path: &Path,
+) -> Option<String> {
+    let content = std::fs::read_to_string(auth_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let tokens = &json["tokens"];
+    let active_user_id = tokens["id_token"]
+        .as_str()
+        .and_then(user_id_from_token)
+        .or_else(|| tokens["access_token"].as_str().and_then(user_id_from_token))?;
+    managed_accounts.iter().find_map(|account| {
+        if account.provider_account_id.as_deref() == Some(active_user_id.as_str()) {
+            Some(account.id.clone())
+        } else {
+            None
+        }
+    })
+}
+
 const ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
+const REFRESH_BEFORE_EXPIRY: Duration = Duration::minutes(5);
 
 pub async fn fetch(
     client: &reqwest::Client,
-    codex_home: PathBuf,
+    account_id: &str,
+    account_dir: PathBuf,
 ) -> Result<UsageSnapshot, CodexError> {
-    let auth = load_codex_auth_from_home(&codex_home)?;
-    match fetch_oauth(client, &auth).await {
-        Ok(snapshot) => Ok(snapshot),
+    fetch_at(
+        client,
+        account_id,
+        account_dir,
+        ENDPOINT,
+        refresh::TOKEN_ENDPOINT,
+    )
+    .await
+}
+
+async fn fetch_at(
+    client: &reqwest::Client,
+    account_id: &str,
+    account_dir: PathBuf,
+    usage_endpoint: &str,
+    token_endpoint: &str,
+) -> Result<UsageSnapshot, CodexError> {
+    let root = account_dir
+        .parent()
+        .ok_or_else(|| CodexError::AccountStorage("invalid account directory".to_string()))?;
+    let storage = ProviderAccountStorage::new(root);
+    let metadata = storage
+        .load_metadata(account_id)
+        .map_err(|error| CodexError::AccountStorage(error.to_string()))?;
+    let mut tokens = storage
+        .load_tokens(account_id)
+        .map_err(|error| CodexError::AccountStorage(error.to_string()))?;
+
+    if tokens.expires_at <= Utc::now() + REFRESH_BEFORE_EXPIRY {
+        tokens = refresh_tokens(client, &storage, account_id, &tokens, token_endpoint).await?;
+    }
+
+    let auth = auth_from_storage(&metadata, &tokens);
+    match fetch_oauth_at(client, &auth, usage_endpoint).await {
+        Ok(snapshot) => {
+            let _ = storage.save_snapshot(account_id, &snapshot);
+            if let Some(metadata) = refreshed_metadata(account_id, &snapshot, &storage) {
+                let _ = storage.save_metadata(account_id, &metadata);
+            }
+            Ok(snapshot)
+        }
         Err(error) => {
             if should_refresh_on(&error) {
-                let refresh_token = auth
-                    .refresh_token
-                    .as_deref()
-                    .ok_or(CodexError::RefreshUnavailable)?;
-                let refreshed = refresh::refresh_access_token(client, refresh_token).await?;
-                let path = codex_home.join("auth.json");
-                let now_iso = Utc::now().to_rfc3339();
-                let refresh_token = refreshed
-                    .refresh_token
-                    .as_deref()
-                    .or(auth.refresh_token.as_deref());
-                update_codex_auth_tokens(
-                    &path,
-                    &refreshed.access_token,
-                    refresh_token,
-                    Some(&now_iso),
-                )?;
-                let refreshed_auth = CodexAuth {
-                    access_token: refreshed.access_token,
-                    account_id: auth.account_id.clone(),
-                    refresh_token: refresh_token.map(str::to_string),
-                    id_token: auth.id_token.clone(),
-                };
-                return fetch_oauth(client, &refreshed_auth).await;
+                tokens =
+                    refresh_tokens(client, &storage, account_id, &tokens, token_endpoint).await?;
+                let refreshed_auth = auth_from_storage(&metadata, &tokens);
+                let snapshot = fetch_oauth_at(client, &refreshed_auth, usage_endpoint).await?;
+                let _ = storage.save_snapshot(account_id, &snapshot);
+                if let Some(metadata) = refreshed_metadata(account_id, &snapshot, &storage) {
+                    let _ = storage.save_metadata(account_id, &metadata);
+                }
+                return Ok(snapshot);
             }
             Err(error)
         }
     }
 }
 
-async fn fetch_oauth(
+async fn refresh_tokens(
+    client: &reqwest::Client,
+    storage: &ProviderAccountStorage,
+    account_id: &str,
+    current: &ProviderAccountTokens,
+    token_endpoint: &str,
+) -> Result<ProviderAccountTokens, CodexError> {
+    let refresh_token = (!current.refresh_token.is_empty())
+        .then_some(current.refresh_token.as_str())
+        .ok_or(CodexError::RefreshUnavailable)?;
+    let refreshed = refresh::refresh_access_token_at(client, token_endpoint, refresh_token).await?;
+    let tokens = ProviderAccountTokens {
+        access_token: refreshed.access_token,
+        refresh_token: refreshed
+            .refresh_token
+            .unwrap_or_else(|| current.refresh_token.clone()),
+        expires_at: refreshed.expires_at,
+        scope: current.scope.clone(),
+        token_id: current.token_id.clone(),
+    };
+    storage
+        .save_tokens(account_id, &tokens)
+        .map_err(|error| CodexError::AccountStorage(error.to_string()))?;
+    Ok(tokens)
+}
+
+pub(crate) async fn fetch_oauth(
     client: &reqwest::Client,
     auth: &CodexAuth,
+) -> Result<UsageSnapshot, CodexError> {
+    fetch_oauth_at(client, auth, ENDPOINT).await
+}
+
+async fn fetch_oauth_at(
+    client: &reqwest::Client,
+    auth: &CodexAuth,
+    endpoint: &str,
 ) -> Result<UsageSnapshot, CodexError> {
     let mut headers = HeaderMap::new();
     let bearer = format!("Bearer {}", auth.access_token);
@@ -77,7 +162,7 @@ async fn fetch_oauth(
         );
     }
     let response = client
-        .get(ENDPOINT)
+        .get(endpoint)
         .headers(headers)
         .send()
         .await
@@ -107,6 +192,45 @@ async fn fetch_oauth(
         CodexError::DecodeUsageJson(e)
     })?;
     normalize_oauth(payload)
+}
+
+fn auth_from_storage(
+    metadata: &ProviderAccountMetadata,
+    tokens: &ProviderAccountTokens,
+) -> CodexAuth {
+    CodexAuth {
+        access_token: tokens.access_token.clone(),
+        account_id: metadata.provider_account_id.clone(),
+        refresh_token: Some(tokens.refresh_token.clone()).filter(|token| !token.is_empty()),
+        id_token: None,
+        expires_at: Some(tokens.expires_at),
+    }
+}
+
+fn refreshed_metadata(
+    account_id: &str,
+    snapshot: &UsageSnapshot,
+    storage: &ProviderAccountStorage,
+) -> Option<ProviderAccountMetadata> {
+    if snapshot.identity.email.is_none() && snapshot.identity.account_id.is_none() {
+        return None;
+    }
+    let mut metadata = storage.load_metadata(account_id).ok()?;
+    if let Some(email) = snapshot
+        .identity
+        .email
+        .as_deref()
+        .filter(|email| !email.is_empty())
+    {
+        metadata.email = email.to_ascii_lowercase();
+    }
+    if snapshot.identity.account_id.is_some() {
+        metadata
+            .provider_account_id
+            .clone_from(&snapshot.identity.account_id);
+    }
+    metadata.updated_at = Utc::now();
+    Some(metadata)
 }
 
 fn should_refresh_on(error: &CodexError) -> bool {

@@ -1,0 +1,16 @@
+{
+  "token_type": "Bearer",
+  "access_token": "claude-access-token",
+  "expires_in": 28800,
+  "refresh_token": "claude-refresh-token",
+  "scope": "user:file_upload user:inference user:mcp_servers user:profile user:sessions:claude_code",
+  "token_uuid": "00000000-0000-0000-0000-000000000000",
+  "organization": {
+    "uuid": "11111111-1111-1111-1111-111111111111",
+    "name": "Example Organization"
+  },
+  "account": {
+    "uuid": "22222222-2222-2222-2222-222222222222",
+    "email_address": "user@example.com"
+  }
+}

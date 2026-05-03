@@ -52,8 +52,6 @@ impl ProviderAccountDescriptor {
     }
 }
 
-pub type ProviderDiscoveredAccount = ProviderAccountDescriptor;
-
 #[derive(Debug, Clone)]
 pub enum ProviderAccountHandle {
     Codex(ManagedCodexAccountConfig),
@@ -66,16 +64,7 @@ pub trait ProviderAdapter: Send + Sync {
 
     fn capabilities(&self) -> ProviderCapabilities;
 
-    fn ambient_active_account_id(&self, config: &Config) -> Option<String>;
-
     fn discover_accounts(&self, config: &Config) -> Vec<ProviderAccountDescriptor>;
-
-    fn upsert_discovered_accounts(
-        &self,
-        _config: &mut Config,
-        _accounts: &[ProviderAccountDescriptor],
-    ) {
-    }
 
     fn delete_account(&self, account_id: &str, config: &mut Config) -> bool;
 

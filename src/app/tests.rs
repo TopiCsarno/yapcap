@@ -1,6 +1,6 @@
 use super::applet::{
     applet_bar_width, applet_button_size, applet_percent_text, select_provider,
-    selected_provider_percent,
+    selected_provider_all_percents,
 };
 use super::{
     APPLET_ACCOUNT_GAP, APPLET_ICON_GAP, APPLET_PERCENT_TEXT_WIDTH, AppState, PanelIconStyle,
@@ -127,7 +127,7 @@ fn applet_percent_text_uses_one_decimal_digit() {
 }
 
 #[test]
-fn selected_provider_percent_uses_first_panel_window() {
+fn selected_provider_all_percents_uses_first_panel_window() {
     let mut state = AppState::empty();
     let mut account = ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex");
     account.snapshot = Some(UsageSnapshot {
@@ -161,12 +161,11 @@ fn selected_provider_percent_uses_first_panel_window() {
         .selected_account_ids = vec!["codex-1".to_string()];
     state.upsert_account(account);
 
-    assert_eq!(
-        selected_provider_percent(&state, ProviderId::Codex, UsageAmountFormat::Used),
-        86.5
-    );
-    assert_eq!(
-        selected_provider_percent(&state, ProviderId::Codex, UsageAmountFormat::Left),
-        13.5
-    );
+    let percents_used =
+        selected_provider_all_percents(&state, ProviderId::Codex, UsageAmountFormat::Used);
+    assert_eq!(percents_used.first().map(|&(p0, _)| p0), Some(86.5));
+
+    let percents_left =
+        selected_provider_all_percents(&state, ProviderId::Codex, UsageAmountFormat::Left);
+    assert_eq!(percents_left.first().map(|&(p0, _)| p0), Some(13.5));
 }

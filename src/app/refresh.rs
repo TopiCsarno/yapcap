@@ -3,7 +3,7 @@
 use crate::app::Message;
 use crate::config::Config;
 use crate::demo_env;
-use crate::model::{AppState, ProviderId};
+use crate::model::{AppState, AuthState, ProviderId};
 use crate::providers::registry;
 use crate::runtime;
 use cosmic::app::Task;
@@ -54,7 +54,18 @@ pub fn refresh_provider_task(
         .cloned()
         .collect::<Vec<_>>();
 
-    let account_ids = account_ids_to_refresh(&config, provider, previous.as_ref());
+    for account in &previous_accounts {
+        if account.auth_state == AuthState::ActionRequired {
+            tracing::info!(
+                provider = provider.label(),
+                account_id = %account.account_id,
+                "skipping refresh for inactive account"
+            );
+        }
+    }
+
+    let account_ids =
+        account_ids_to_refresh(&config, provider, previous.as_ref(), &previous_accounts);
     if account_ids.is_empty() {
         return Task::none();
     }
@@ -116,19 +127,30 @@ fn account_ids_to_refresh(
     config: &Config,
     provider: ProviderId,
     previous: Option<&crate::model::ProviderRuntimeState>,
+    previous_accounts: &[crate::model::ProviderAccountRuntimeState],
 ) -> Vec<String> {
     let config_ids = config.selected_account_ids(provider);
-    if !config_ids.is_empty() {
-        return config_ids.to_vec();
-    }
-    if let Some(prev_id) = previous.and_then(|p| p.selected_account_ids.first()) {
-        return vec![prev_id.clone()];
-    }
-    registry::discover_accounts(provider, config)
+    let candidate_ids = if !config_ids.is_empty() {
+        config_ids.to_vec()
+    } else if let Some(prev_id) = previous.and_then(|p| p.selected_account_ids.first()) {
+        vec![prev_id.clone()]
+    } else {
+        registry::discover_accounts(provider, config)
+            .into_iter()
+            .next()
+            .map(|a| vec![a.account_id])
+            .unwrap_or_default()
+    };
+
+    candidate_ids
         .into_iter()
-        .next()
-        .map(|a| vec![a.account_id])
-        .unwrap_or_default()
+        .filter(|id| {
+            !previous_accounts.iter().any(|a| {
+                &a.account_id == id
+                    && (a.is_rate_limited() || a.auth_state == AuthState::ActionRequired)
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@
 
 ## What it does
 
-YapCap lives in your COSMIC panel and shows how much of your AI coding quota you've used — without sending anything to a third party. All data is fetched directly from provider APIs using credentials already on your machine. No telemetry, no cloud sync, no separate account needed.
+YapCap lives in your COSMIC panel and shows how much of your AI coding quota you've used — without sending anything to a third party. All data is fetched directly from provider APIs using accounts you add in YapCap. No telemetry, no cloud sync, no separate account needed.
 
 ## Highlights
 
@@ -28,7 +28,7 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Cursor** — plan usage + billing cycle end
 - **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
 - **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
-- **Auto-discovery** — on first launch, imports existing Codex and Claude CLI credentials and Cursor browser sessions automatically
+- **Explicit accounts** — credentials are added through YapCap and stored under YapCap-owned account directories
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
 
 ## Screenshots
@@ -80,6 +80,16 @@ YapCap follows your COSMIC system theme—the popup and panel pick up light or d
 
 ## Install
 
+### Flatpak
+
+YapCap includes a baseline Flatpak manifest for COSMIC Store packaging:
+
+```bash
+flatpak-builder --user --install --force-clean build-dir com.topi.YapCap.json
+```
+
+See `docs/flatpak.md` for packaging notes and current permission rationale.
+
 ### apt (Debian/Ubuntu/Pop!\_OS)
 
 ```bash
@@ -108,7 +118,7 @@ just install
 
 1. After installing, restart your COSMIC session (log out and back in).
 2. Add **YapCap** from the panel applet picker.
-3. On first launch, YapCap auto-imports accounts it can find — Codex from `~/.codex`, Claude from `~/.claude`, and Cursor from any supported browser (Brave, Chrome, Edge, Firefox).
+3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex uses a managed CLI browser login, Claude uses native browser OAuth, and Cursor uses a managed browser profile.
 4. Click the panel button to open the popup.
 5. To add more accounts or switch between them, open the popup → **Settings → [Provider]**.
 
@@ -118,9 +128,9 @@ just install
 
 Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-- **Add account** — triggers the provider's own login flow (Codex CLI browser login, `claude auth login`, or an isolated managed browser profile for Cursor) without leaving YapCap.
+- **Add account** — triggers the provider's own login flow: Codex CLI browser login (`codex login`), native Claude OAuth in the browser, or an isolated managed browser profile for Cursor, without leaving YapCap.
 - **Switch account** — tap any account row to make it active; the panel and popup update immediately.
-- **Remove account** — deletes only YapCap's copy of the credentials. Your original browser profiles and CLI configs are never touched.
+- **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 
 Each provider keeps at most one account per email address.
 
@@ -151,14 +161,14 @@ YapCap checks GitHub for a new release on startup. If one is available, a red do
 
 ## Privacy
 
-YapCap reads local credential files and calls provider APIs directly over HTTPS. For Claude Code it may run `claude auth status --json` to trigger a credential refresh; Claude Code manages its own OAuth flow. Logs never contain credentials, bearer tokens, or cookie values — if you find one leaking, please file a bug.
+YapCap stores provider credentials under YapCap-owned account storage and calls provider APIs directly over HTTPS. Claude OAuth refresh uses Anthropic’s token endpoint, not the Claude CLI. Codex login runs inside a temporary YapCap-owned CLI home and is converted into YapCap account storage. Logs never contain credentials, bearer tokens, or cookie values — if you find one leaking, please file a bug.
 
 ## Troubleshooting
 
 - **Applet doesn't appear after install** — restart the COSMIC session (log out and back in).
-- **Auth error on Codex** — open **Settings → Codex** and use the re-authenticate action, or run `codex login` in a terminal.
-- **Auth error on Claude** — open **Settings → Claude** and add or re-authenticate the account. YapCap will run `claude auth login` for you.
-- **Cursor shows no data** — quit your browser first (its cookie database is locked while running), then click **Refresh now**. If the session has expired, use **Settings → Cursor → Re-auth**.
+- **Auth error on Codex** — open **Settings → Codex**, remove the account if needed, and add it again to complete the managed login flow.
+- **Auth error on Claude** — open **Settings → Claude**, remove the account if needed, and add it again to complete the browser OAuth flow.
+- **Cursor shows no data** — open **Settings → Cursor** and add or re-authenticate the account with the managed browser flow.
 - **Stale data** — a transient failure keeps the last good snapshot visible and marks it stale. Click **Refresh now** once the network or provider is back.
 
 Logs at `~/.local/state/yapcap/logs/yapcap.log` are the fastest way to diagnose issues.

@@ -5,10 +5,11 @@ use super::{
     provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
+use crate::currency_format;
 use crate::fl;
 use crate::model::{
-    AppState, AuthState, ProviderAccountRuntimeState, ProviderCost, ProviderHealth, ProviderId,
-    ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot, UsageWindow,
+    AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState, ProviderCost,
+    ProviderHealth, ProviderId, ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot, UsageWindow,
 };
 use crate::usage_display;
 use cosmic::Element;
@@ -103,25 +104,29 @@ fn account_column_body_items<'a>(
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
             items.extend(provider_status_info(provider, state, account));
         }
-        let mut cost_shown = false;
         for window in &snapshot.windows {
-            if window.label == "Extra" && snapshot.provider_cost.is_some() {
-                items.push(extra_section(
-                    window,
-                    snapshot.provider_cost.as_ref(),
-                    config.usage_amount_format,
-                ));
-                cost_shown = true;
-            } else {
-                items.push(usage_section(
-                    window,
-                    config.reset_time_format,
-                    config.usage_amount_format,
-                ));
-            }
+            items.push(usage_section(
+                window,
+                config.reset_time_format,
+                config.usage_amount_format,
+            ));
         }
-        if !cost_shown && let Some(cost) = &snapshot.provider_cost {
-            items.push(cost_section(provider.provider, cost));
+        match snapshot.provider {
+            ProviderId::Claude => {
+                if let Some(extra) = snapshot.extra_usage.as_ref() {
+                    items.push(extra_usage_detail_section(
+                        extra,
+                        config.usage_amount_format,
+                    ));
+                } else if let Some(cost) = snapshot.provider_cost.as_ref() {
+                    items.push(extra_usage_cost_bar(cost, None, config.usage_amount_format));
+                }
+            }
+            _ => {
+                if let Some(cost) = snapshot.provider_cost.as_ref() {
+                    items.push(cost_section(snapshot.provider, cost));
+                }
+            }
         }
     } else {
         items.extend(provider_status_info(provider, state, account));
@@ -287,16 +292,18 @@ fn provider_body_height_for_account(
             sections += 1;
         }
 
-        let mut cost_shown = false;
-        for window in &snapshot.windows {
-            sections += 1;
-            if window.label == "Extra" && snapshot.provider_cost.is_some() {
-                cost_shown = true;
+        sections += snapshot.windows.len();
+        match snapshot.provider {
+            ProviderId::Claude => {
+                if snapshot.extra_usage.is_some() || snapshot.provider_cost.as_ref().is_some() {
+                    sections += 1;
+                }
             }
-        }
-
-        if !cost_shown && snapshot.provider_cost.is_some() {
-            sections += 1;
+            _ => {
+                if snapshot.provider_cost.as_ref().is_some() {
+                    sections += 1;
+                }
+            }
         }
         if snapshot.identity.email.is_some() || account.is_some() {
             sections += 1;
@@ -331,25 +338,57 @@ fn usage_section(
         usage_display::displayed_amount_percent(window, now, usage_amount_format),
         usage_display::usage_amount_label(window, now, usage_amount_format),
         usage_display::reset_label(window, now, reset_time_format),
+        None,
         pace,
         pace_marker_percent(pace, usage_amount_format),
     )
 }
 
-fn extra_section(
-    window: &UsageWindow,
-    cost: Option<&ProviderCost>,
+fn extra_usage_detail_section(
+    state: &ExtraUsageState,
+    usage_amount_format: UsageAmountFormat,
+) -> Element<'static, Message> {
+    match state {
+        ExtraUsageState::Disabled => {
+            info_block(fl!("extra-usage-label"), fl!("extra-usage-disabled"), None)
+        }
+        ExtraUsageState::Active { used_percent, cost } => {
+            extra_usage_cost_bar(cost, Some(*used_percent), usage_amount_format)
+        }
+    }
+}
+
+fn extra_usage_pct_from_cost(cost: &ProviderCost) -> f32 {
+    cost.limit
+        .filter(|l| *l > f64::EPSILON)
+        .map_or(0.0_f32, |l| usage_display::portion_percent(cost.used, l))
+}
+
+fn extra_usage_cost_bar(
+    cost: &ProviderCost,
+    used_percent: Option<f32>,
     usage_amount_format: UsageAmountFormat,
 ) -> Element<'static, Message> {
     let now = chrono::Utc::now();
-    let pace = usage_display::pace(window, now);
+    let used_percent = used_percent
+        .unwrap_or_else(|| extra_usage_pct_from_cost(cost))
+        .clamp(0.0, 100.0);
+    let window = UsageWindow {
+        label: String::new(),
+        used_percent,
+        reset_at: None,
+        window_seconds: None,
+        reset_description: None,
+    };
+    let (cost_line, cost_tip) = currency_format::format_provider_cost(cost);
     usage_block(
-        window.label.clone(),
-        usage_display::displayed_amount_percent(window, now, usage_amount_format),
-        usage_display::usage_amount_label(window, now, usage_amount_format),
-        cost.map(format_cost),
-        pace,
-        pace_marker_percent(pace, usage_amount_format),
+        fl!("extra-usage-label"),
+        usage_display::displayed_amount_percent(&window, now, usage_amount_format),
+        usage_display::usage_amount_label(&window, now, usage_amount_format),
+        Some(cost_line),
+        Some(cost_tip),
+        None,
+        None,
     )
 }
 
@@ -357,17 +396,13 @@ fn cost_section(provider: ProviderId, cost: &ProviderCost) -> Element<'static, M
     if provider == ProviderId::Codex {
         return credit_section(cost);
     }
-    info_block(fl!("extra-label"), format_cost(cost), None)
-}
-
-fn format_cost(cost: &ProviderCost) -> String {
-    match cost.limit {
-        Some(limit) => format!(
-            "{}{:.2} / {}{:.2}",
-            cost.units, cost.used, cost.units, limit
-        ),
-        None => format!("{}{:.2} spent", cost.units, cost.used),
-    }
+    let (primary, iso_tip) = currency_format::format_provider_cost(cost);
+    let body = widget::tooltip::tooltip(
+        widget::text(primary).size(14),
+        widget::text(iso_tip).size(12),
+        widget::tooltip::Position::Top,
+    );
+    card(column![widget::text(fl!("extra-usage-label")).size(18), body,].spacing(6))
 }
 
 fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
@@ -391,13 +426,14 @@ fn usage_block(
     percent: f32,
     primary: String,
     secondary: Option<String>,
+    secondary_tooltip: Option<String>,
     pace: Option<usage_display::UsagePace>,
     pace_marker_percent: Option<f32>,
 ) -> Element<'static, Message> {
     let pct_row = row![
         widget::text(primary).size(14),
         cosmic::iced::widget::Space::new().width(Length::Fill),
-        widget::text(secondary.unwrap_or_default()).size(13),
+        secondary_cost_text(secondary.unwrap_or_default(), secondary_tooltip),
     ]
     .align_y(Alignment::Center);
 
@@ -413,6 +449,23 @@ fn usage_block(
         ]
         .spacing(6),
     )
+}
+
+fn secondary_cost_text(text: String, tooltip: Option<String>) -> Element<'static, Message> {
+    if text.is_empty() {
+        cosmic::iced::widget::Space::new()
+            .width(Length::Shrink)
+            .into()
+    } else if let Some(tip) = tooltip {
+        widget::tooltip::tooltip(
+            widget::text(text).size(13),
+            widget::text(tip).size(12),
+            widget::tooltip::Position::Top,
+        )
+        .into()
+    } else {
+        widget::text(text).size(13).into()
+    }
 }
 
 fn paced_progress_bar(

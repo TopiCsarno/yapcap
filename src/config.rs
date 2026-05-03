@@ -211,10 +211,52 @@ pub struct AppPaths {
     pub log_dir: PathBuf,
 }
 
+fn flatpak_var_app_subdir(segments: &[&str]) -> Option<PathBuf> {
+    let app_id = std::env::var_os("FLATPAK_ID")?;
+    let mut path = dirs::home_dir()?;
+    path.push(".var");
+    path.push("app");
+    path.push(app_id);
+    for seg in segments {
+        path.push(seg);
+    }
+    Some(path)
+}
+
+fn cache_root_dir() -> PathBuf {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        flatpak_var_app_subdir(&["cache"])
+            .or_else(cache_dir)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        cache_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+fn state_parent_dir() -> PathBuf {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        flatpak_var_app_subdir(&["data"])
+            .or_else(state_dir)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        state_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+#[must_use]
+pub fn managed_codex_account_dir(account_id: &str) -> PathBuf {
+    paths().codex_accounts_dir.join(account_id)
+}
+
+#[must_use]
+pub fn managed_claude_account_dir(account_id: &str) -> PathBuf {
+    paths().claude_accounts_dir.join(account_id)
+}
+
 #[must_use]
 pub fn paths() -> AppPaths {
-    let cache_root = cache_dir().unwrap_or_else(|| PathBuf::from("."));
-    let state_root = state_dir().unwrap_or_else(|| PathBuf::from("."));
+    let cache_root = cache_root_dir();
+    let state_root = state_parent_dir();
     let cache_dir = cache_root.join("yapcap");
     let state_dir = state_root.join("yapcap");
     let codex_accounts_dir = state_dir.join("codex-accounts");
@@ -234,6 +276,7 @@ pub fn paths() -> AppPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn default_config_enables_all_providers() {
@@ -352,5 +395,51 @@ mod tests {
             serde_json::from_str::<UsageAmountFormat>("\"left\"").unwrap(),
             UsageAmountFormat::Left
         );
+    }
+
+    #[test]
+    fn flatpak_paths_use_dot_var_layout() {
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        let _guard = ENV_LOCK.lock().expect("flatpak path test env lock");
+
+        let prev_id = std::env::var_os("FLATPAK_ID");
+        let prev_home = std::env::var_os("HOME");
+        let prev_state = std::env::var_os("XDG_STATE_HOME");
+
+        let p = unsafe {
+            std::env::set_var("FLATPAK_ID", "com.example.YapCapTest");
+            std::env::set_var("HOME", "/tmp/yapcap-flatpak-paths-home");
+            std::env::set_var(
+                "XDG_STATE_HOME",
+                "/tmp/yapcap-flatpak-paths-home/wrong-state",
+            );
+            let p = paths();
+            std::env::remove_var("FLATPAK_ID");
+            if let Some(ref v) = prev_id {
+                std::env::set_var("FLATPAK_ID", v);
+            }
+            if let Some(ref v) = prev_home {
+                std::env::set_var("HOME", v);
+            } else {
+                std::env::remove_var("HOME");
+            }
+            if let Some(ref v) = prev_state {
+                std::env::set_var("XDG_STATE_HOME", v);
+            } else {
+                std::env::remove_var("XDG_STATE_HOME");
+            }
+            p
+        };
+
+        let base = PathBuf::from("/tmp/yapcap-flatpak-paths-home/.var/app/com.example.YapCapTest");
+        assert_eq!(p.cache_dir, base.join("cache/yapcap"));
+        assert_eq!(
+            p.claude_accounts_dir,
+            base.join("data/yapcap/claude-accounts")
+        );
+        assert_eq!(p.log_dir, base.join("data/yapcap/logs"));
     }
 }

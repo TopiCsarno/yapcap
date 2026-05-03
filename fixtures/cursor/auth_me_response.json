@@ -1,0 +1,40 @@
+{
+  "body_json": {
+    "created_at": "2026-01-01T00:00:00.000Z",
+    "email": "user@example.com",
+    "email_verified": true,
+    "id": 100000001,
+    "name": "Example User",
+    "picture": null,
+    "sub": "user_example_redacted",
+    "updated_at": "2026-05-01T00:00:00.000Z"
+  },
+  "body_text": "{\"created_at\":\"2026-01-01T00:00:00.000Z\",\"email\":\"user@example.com\",\"email_verified\":true,\"id\":100000001,\"name\":\"Example User\",\"picture\":null,\"sub\":\"user_example_redacted\",\"updated_at\":\"2026-05-01T00:00:00.000Z\"}",
+  "endpoint": "auth_me",
+  "method": "GET",
+  "requested_at": "2026-05-04T14:09:00.165303+00:00",
+  "response_headers": {
+    "Accept-Ch": "Sec-CH-UA-Arch, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version, Sec-CH-UA-Bitness",
+    "Age": "0",
+    "Cache-Control": "no-store",
+    "Connection": "close",
+    "Content-Length": "212",
+    "Content-Security-Policy": "redacted",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Mon, 04 May 2026 14:09:00 GMT",
+    "Etag": "\"redacted\"",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Server": "Vercel",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Vary": "Origin",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Matched-Path": "/api/auth/me",
+    "X-Permitted-Cross-Domain-Policies": "none",
+    "X-Vercel-Cache": "MISS",
+    "X-Vercel-Id": "redacted",
+    "X-Xss-Protection": "1; mode=block"
+  },
+  "status_code": 200,
+  "url": "https://cursor.com/api/auth/me"
+}

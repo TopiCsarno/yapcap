@@ -1,0 +1,43 @@
+{
+  "body_json": {
+    "access_token": "sk-ant-oat01-redacted-access-token-for-fixtures",
+    "account": {
+      "email_address": "user@example.com",
+      "uuid": "22222222-2222-2222-2222-222222222222"
+    },
+    "expires_in": 28800,
+    "organization": {
+      "name": "Example Organization",
+      "uuid": "11111111-1111-1111-1111-111111111111"
+    },
+    "refresh_token": "sk-ant-ort01-redacted-refresh-token-for-fixtures",
+    "scope": "user:profile",
+    "token_type": "Bearer",
+    "token_uuid": "33333333-3333-3333-3333-333333333333"
+  },
+  "body_text": "{\"access_token\": \"sk-ant-oat01-redacted-access-token-for-fixtures\", \"account\": {\"email_address\": \"user@example.com\", \"uuid\": \"22222222-2222-2222-2222-222222222222\"}, \"expires_in\": 28800, \"organization\": {\"name\": \"Example Organization\", \"uuid\": \"11111111-1111-1111-1111-111111111111\"}, \"refresh_token\": \"sk-ant-ort01-redacted-refresh-token-for-fixtures\", \"scope\": \"user:profile\", \"token_type\": \"Bearer\", \"token_uuid\": \"33333333-3333-3333-3333-333333333333\"}",
+  "endpoint": "oauth_token",
+  "method": "POST",
+  "requested_at": "2026-05-04T13:59:00.942377+00:00",
+  "response_headers": {
+    "CF-RAY": "redacted-ray-id",
+    "Cache-Control": "no-store",
+    "Connection": "close",
+    "Content-Type": "application/json",
+    "Date": "Mon, 04 May 2026 13:59:00 GMT",
+    "Server": "cloudflare",
+    "Transfer-Encoding": "chunked",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "pragma": "no-cache",
+    "request-id": "req_011RedactedExampleTokenRefresh",
+    "server-timing": "x-originResponse;dur=0",
+    "set-cookie": "_cfuvid=REDACTED; HttpOnly; SameSite=None; Secure; Path=/; Domain=console.anthropic.com",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "via": "1.1 google",
+    "x-envoy-upstream-service-time": "0"
+  },
+  "status_code": 200,
+  "url": "https://console.anthropic.com/v1/oauth/token"
+}

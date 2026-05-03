@@ -314,18 +314,16 @@ impl AppModel {
 
     pub(super) fn delete_claude_account(&mut self, account_id: &str) -> Task<Message> {
         let provider = ProviderId::Claude;
-        let managed_account = self
+        if !self
             .config
             .claude_managed_accounts
             .iter()
-            .find(|account| account.id == account_id)
-            .cloned();
-
-        let Some(account) = managed_account else {
+            .any(|account| account.id == account_id)
+        {
             return Task::none();
-        };
+        }
 
-        claude::remove_managed_config_dir(&account.config_dir);
+        claude::remove_managed_config_dir(&crate::config::managed_claude_account_dir(account_id));
         self.write_config(|new_config| {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);

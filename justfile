@@ -93,6 +93,19 @@ uninstall-demo:
 uninstall: uninstall-demo
     rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
+# Builds the Flatpak (incremental; reuses .flatpak-builder cache)
+flatpak-build:
+    flatpak-builder --keep-build-dirs --force-clean build-dir {{ appid }}.json
+
+# Builds and installs the Flatpak for the current user
+flatpak-install: flatpak-build
+    flatpak build-export repo build-dir
+    flatpak --user install --reinstall "$(pwd)/repo" {{ appid }}
+
+# Runs the installed Flatpak
+flatpak-run:
+    flatpak run {{ appid }}
+
 # Vendor dependencies locally
 vendor:
     mkdir -p .cargo

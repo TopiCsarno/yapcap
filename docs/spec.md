@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.2 · **Last updated:** 2026-04-28 (per-provider show-all toggle, single-account active-follow mode, import selection fixes, conditional toggle visibility)
+**Status:** As-built v0.3.1 · **Last updated:** 2026-05-02
 
 ## Document Metadata
 
@@ -27,12 +27,13 @@ read_when:
 | 1. Product Definition | 1.1 Scope and Non-Goals<br>1.2 Supported Sources |
 | 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow |
 | 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor |
-| 4. Auth, Browser Cookies, and Config | 4.1 OAuth Credential Files<br>4.2 Browser Cookie Import<br>4.3 Configuration |
+| 4. Auth and Config | 4.1 OAuth Credential Files<br>4.2 Cursor Token Source<br>4.3 Configuration |
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
 | 7. User Interface | 7.1 Panel<br>7.2 Popup |
-| 8. Localization | |
-| 9. Testing | |
+| 8. Packaging | |
+| 9. Localization | |
+| 10. Testing | |
 
 ## 1. Product Definition
 
@@ -47,9 +48,9 @@ read_when:
 
 | Provider | Primary | Fallback |
 | --- | --- | --- |
-| Codex | Active Codex account resolved from YapCap-managed `auth.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` (one retry on 401/403 when `refresh_token` exists) |
-| Claude | Active Claude account resolved from YapCap-managed `.credentials.json` | Claude Code credential refresh via `claude auth status --json` |
-| Cursor | `WorkosCursorSessionToken` cookie from a local browser | — |
+| Codex | Active Codex account resolved from YapCap-owned `metadata.json`/`tokens.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` before expiry or once after 401/403 |
+| Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://console.anthropic.com/v1/oauth/token` (`grant_type=refresh_token`) |
+| Cursor | Active Cursor account resolved from YapCap-owned `cursor-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | — |
 
 Claude, Codex, and Cursor all use YapCap-managed account storage. There is no
 web-cookie path for Claude and no forced-source environment variable.
@@ -90,12 +91,13 @@ Library modules (`src/`, also usable from tests):
 | Module | Purpose |
 | --- | --- |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
-| `providers::codex` | Codex account import/discovery, managed login/reauth, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
-| `providers::claude` | Managed account discovery/login under `src/providers/claude/`, OAuth usage fetch, and credential refresh via `claude auth status`. |
-| `providers::cursor` | Cursor web API via imported browser cookie. |
-| `auth` | Parses `~/.codex/auth.json` and Claude Code `.credentials.json`. |
+| `providers::codex` | Codex managed login, YapCap-owned account listing, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
+| `providers::claude` | Managed native OAuth login and YapCap-owned account listing under `src/providers/claude/`, OAuth usage fetch, and token refresh against Anthropic’s OAuth token endpoint (no Claude CLI). |
+| `providers::cursor` | Cursor web API via YapCap-owned stored session cookies captured during explicit login. |
+| `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. |
+| `auth` | Parses JWT identity claims used by Codex OAuth compatibility paths. |
 | `browser` | Chromium AES-GCM/CBC cookie decrypt; Firefox cookies.sqlite read. |
-| `config` | COSMIC config entry, provider toggles, browser choice, browser profile discovery. |
+| `config` | COSMIC config entry, provider toggles, Cursor login browser choice, and provider account preferences. |
 | `cache` | Load/save `snapshots.json`. |
 | `model` | `UsageSnapshot`, `ProviderRuntimeState`, `ProviderHealth`, `AuthState`, `AppState`. |
 | `updates` | GitHub release check; `UpdateStatus` and debug-only update simulation. |
@@ -131,10 +133,9 @@ sequenceDiagram
 
 - On startup, `Message::Refreshed` loads cached state and immediately dispatches a refresh for enabled providers.
 - On a brand-new config, YapCap does one provider-visibility initialization pass:
-  it imports or discovers any locally available accounts, enables providers
-  that have at least one usable account, and disables providers that do not.
-  After Cursor browser discovery finishes, that auto-init mode is marked
-  complete so later launches preserve the user’s explicit provider toggles.
+  all providers stay enabled so providers without accounts surface `Login required`
+  instead of disappearing. The auto-init mode is then marked complete so later
+  launches preserve the user’s explicit provider toggles.
 - `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
 - `Message::RefreshNow` is the popup’s "Refresh now" button and uses the same dispatcher.
 - Account switching marks and refreshes only the selected provider instead of dispatching a global refresh.
@@ -142,27 +143,27 @@ sequenceDiagram
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.
 - When multiple accounts are selected for a provider, `app::refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
-- `runtime::refresh_account` takes an explicit `account_id` and resolves which discovered account to fetch. If the requested account is not found it falls back to the first available account; if no accounts exist it returns a `LoginRequired` state.
+- `runtime::refresh_account` takes an explicit `account_id` and resolves which YapCap-owned account to fetch. If the requested account is not found it falls back to the first available account; if no accounts exist it returns a `LoginRequired` state.
 - `runtime::refresh_provider_account` keeps the previous account snapshot on error so the UI never drops data on a transient failure. It instead flips the account’s `ProviderHealth::Error`.
 
 ## 3. Providers
 
 ### 3.1 Codex
 
-Codex account import and discovery:
+Codex account model:
 
-- On startup, if `CODEX_HOME` or `~/.codex` contains a usable `auth.json`,
-  YapCap imports that Codex home into YapCap-managed storage unless a managed
-  account with the same normalized email already exists.
-- An inotify watcher on the Codex and Claude auth directories (`~/.codex/` and
-  `~/.claude/`) automatically imports new accounts when a login is detected at
-  runtime, without requiring a restart.
-- Managed accounts are read from `Config.codex_managed_accounts`; each entry
-  points at an isolated Codex home and is valid only when that home's
-  `auth.json` parses.
-- Codex account identity is the normalized email from `id_token`
-  (`trim + ASCII lowercase`). `provider_account_id` is stored only as
-  non-identity metadata for display, diagnostics, and compatibility.
+- Managed accounts are explicit entries in `Config.codex_managed_accounts`.
+  Each entry points at a YapCap-owned account directory under
+  `~/.local/state/yapcap/codex-accounts/<id>/` with `metadata.json`,
+  `tokens.json`, and optional per-account cached snapshots.
+- YapCap does not import ambient `CODEX_HOME`/`~/.codex` accounts at startup.
+  Legacy `system` selections are dropped during startup sync.
+- `discover_accounts` builds the account list from YapCap-owned metadata and
+  requires matching stored tokens. Config metadata is not treated as proof that
+  credentials exist.
+- Codex account identity is the normalized stored account email (`trim + ASCII
+  lowercase`). `provider_account_id` is stored only as non-identity metadata for
+  API headers, display, diagnostics, and compatibility.
 - If multiple managed Codex entries share the same normalized email, YapCap
   auto-merges them down to one surviving config entry, preferring the active
   account when one is active and otherwise preferring the most recently
@@ -170,52 +171,45 @@ Codex account import and discovery:
 - The active resolver uses the persisted id when it resolves to a valid source,
   otherwise auto-selects exactly one valid source, otherwise reports
   `SelectionRequired` or `LoginRequired`.
-- Account display labels are derived from the `email` claim in each account's
-  `id_token` at discovery time; stored config labels are not used for display.
-- After import, YapCap uses only the copied managed Codex home under
-  `~/.local/state/yapcap/codex-accounts/<id>/`. Import copies only the auth
-  material YapCap needs (`auth.json`), not an entire ambient Codex home.
-  `CODEX_HOME`/`~/.codex` is not treated as a live account source. Ambient
-  `CODEX_HOME` is import-only.
-- If a managed Codex entry matches the ambient Codex email but its managed home
-  has been deleted or is no longer readable, startup import repairs that
-  managed entry by repopulating its managed home from the ambient Codex home
-  instead of treating the stale config entry as already imported.
-- Startup import and add-account flows select the imported Codex account
-  immediately in single-account mode. In show-all mode they preserve existing
-  selections and append the imported account when appropriate.
+- Account display labels are derived from stored account email; stored config
+  labels are not used for display when metadata is available.
+- Add-account flows select the new Codex account immediately in single-account
+  mode. In show-all mode they preserve existing selections and append the new
+  account when appropriate.
 
 Managed Codex add-account flow:
 
 - Settings exposes `Add account` under the Codex accounts card.
-- YapCap creates a private pending Codex home under
-  `~/.local/state/yapcap/codex-accounts/pending-<id>/`.
-- The pending home gets a `config.toml` containing
-  `cli_auth_credentials_store = "file"` so Codex writes `auth.json` locally.
-- YapCap runs `codex login` with `CODEX_HOME` set to that pending home,
-  captures stdout/stderr, and streams any detected login URL into the popup.
-  The browser is opened automatically by the Codex CLI; YapCap offers
-  `Open Browser` as a fallback if a URL is detected in the output.
+- YapCap starts a localhost callback listener on the official Codex redirect
+  port, generates PKCE verifier/challenge and state, opens the Codex
+  authorization URL, and streams that URL into the popup as an `Open Browser`
+  fallback.
+- The authorization URL uses the official public Codex OAuth client id
+  `app_EMoamEEZ73f0CkXaXp7hrann`, issuer `https://auth.openai.com`, scope
+  `openid profile email offline_access api.connectors.read
+  api.connectors.invoke`, `id_token_add_organizations=true`,
+  `codex_cli_simplified_flow=true`, and originator `codex_cli_rs`, matching the
+  upstream `openai/codex` PKCE login flow.
 - The UI shows `Cancel` while login is running. Cancel aborts the login task and
   immediately returns the account controls to the normal add-account state.
-- On successful CLI exit, YapCap validates `auth.json`, attempts one Codex usage
-  request (non-fatal if it fails), then either commits the pending home into a
-  new stable managed account directory or reuses the existing managed account
-  id/home when the normalized email already exists.
+- On successful callback, YapCap validates the OAuth state, exchanges the code
+  at `https://auth.openai.com/oauth/token` with `grant_type=authorization_code`,
+  parses the returned access token, refresh token, `id_token`, expiry, email,
+  and ChatGPT account id, attempts one Codex usage request (non-fatal if it
+  fails), then stores the account in YapCap-owned account storage. Duplicate
+  login by normalized email updates the existing account directory instead of
+  creating a duplicate.
 - Successful managed Codex refreshes hydrate non-secret config metadata such as
   email and provider account id, and clear the old provider-level legacy
   snapshot once an account-scoped snapshot exists.
-- Managed Codex accounts show a re-authenticate action only when the active
-  stored credentials require user action. Re-auth runs the same pending-home
-  login flow and then swaps the pending home into the existing managed account
-  directory while keeping the same account id.
-- On cancel, failure, or task abort, the pending directory is removed.
+- On cancel, failure, or task abort, no account is committed and existing
+  account storage is left unchanged.
 - Rename is still future work.
 
 Usage request: `GET https://chatgpt.com/backend-api/wham/usage` with:
 
 - `Authorization: Bearer <tokens.access_token>`
-- `ChatGPT-Account-Id: <tokens.account_id>` (when present)
+- `ChatGPT-Account-Id: <metadata.provider_account_id>` (when present)
 
 Response shape (subset consumed):
 
@@ -223,90 +217,78 @@ Response shape (subset consumed):
 - `rate_limit.secondary_window.used_percent` / `reset_at` → 7d window.
 - `credits.balance` (string or number, nullable) → parsed into a `ProviderCost { units: "credits" }`; null or absent balance is silently ignored.
 
-OAuth refresh (one retry):
+OAuth refresh:
 
-- If the usage endpoint returns HTTP 401 or 403 and `tokens.refresh_token` exists in the active account's `auth.json`, YapCap calls `POST https://auth.openai.com/oauth/token` with `grant_type=refresh_token` and the Codex client id, updates that same `auth.json`, and retries the usage request once.
-- If no refresh token is available, YapCap reports an actionable error prompting the user to run `codex login`.
+- If `tokens.expires_at` is within five minutes, YapCap calls `POST
+  https://auth.openai.com/oauth/token` with `grant_type=refresh_token` and the
+  Codex client id, writes the rotated access token, refresh token, and expiry to
+  `tokens.json`, then performs the usage request with the fresh access token.
+- If the usage endpoint returns HTTP 401 or 403 and `tokens.json` contains a
+  refresh token, YapCap performs the same refresh, persists the rotated tokens,
+  and retries the usage request once.
+- Refresh HTTP 400, 401, and 403 are permanent re-auth failures
+  (`requires_user_action = true`). Refresh HTTP 429, HTTP 5xx, network errors,
+  and timeouts are transient and preserve any stale snapshot on the account.
+- If no refresh token is available, YapCap reports an actionable login-required
+  error.
 
 ### 3.2 Claude
 
-Claude account discovery:
+Claude account model:
 
-- Managed accounts are read from `Config.claude_managed_accounts`; each entry
-  points at an isolated Claude config directory and is valid only when that
-  directory's `.credentials.json` parses.
-- The active resolver uses the persisted id when it resolves to a valid source,
-  otherwise auto-selects exactly one valid source, otherwise reports
-  `SelectionRequired` or `LoginRequired`.
-- Startup account sync reattaches YapCap-managed `claude-accounts/<id>/`
-  directories that contain valid `.credentials.json` but are missing from
-  `claude_managed_accounts`, and imports a non-managed Claude config directory
-  (same resolution as the CLI: `CLAUDE_CONFIG_DIR` when set and non-empty,
-  otherwise `~/.claude`) into managed storage when that directory is outside
-  YapCap’s state tree and carries the `user:profile` OAuth scope—mirroring
-  Codex’s external-home import.
-  YapCap-managed Claude storage is minimal: it keeps `.credentials.json` and
-  prunes unrelated files or directories from managed account dirs.
-  That import skips adding a managed copy when a managed account already has
-  the same OAuth access token, or the same normalized email (from CLI status
-  or, when needed, from a JWT-shaped access token payload).
-- After that, startup runs `claude auth status --json` for managed accounts to
-  hydrate local organization / subscription metadata and email when the CLI
-  returns it. If email is still missing (CLI unavailable, timeout, or JSON
-  without `email`), YapCap reads `.credentials.json` and derives email from a
-  JWT-shaped access token when present (including two-part header.payload
-  tokens, nested JSON string values with `@`, the `sub` claim when it is an
-  email, and optional `idToken` / `id_token`). If it is still missing, YapCap
-  performs blocking OAuth profile requests with the stored token (and on HTTP
-  401 runs `claude auth status` once to refresh credentials, then retries):
-  `GET /api/oauth/account` (`email_address`), then `GET /api/oauth/profile`
-  (`account.email`), then `GET /api/oauth/usage` (`email`).
-  It then dedupes to at most one managed account per normalized email.
-- Managed Claude add-account uses `claude auth login --claudeai` with
-  `CLAUDE_CONFIG_DIR` set to a pending YapCap-owned config directory. On
-  successful credential validation, YapCap reads `claude auth status --json`,
-  prunes the managed directory down to `.credentials.json`, commits that
-  directory into `~/.local/state/yapcap/claude-accounts/<id>/`, and stores
-  only non-secret account metadata in config.
-- Accounts without a resolved email are excluded from `discover_accounts` and never appear in the UI. They remain in `claude_managed_accounts` and become visible once background sync successfully populates their email.
-- On startup, orphaned `.lock` directories left in `claude-accounts/` by a killed `claude auth status` process are deleted. A `.lock` directory is considered orphaned when no sibling directory with the same base name exists.
-- Startup import and add-account flows select the imported Claude account
-  immediately in single-account mode. In show-all mode they preserve existing
-  selections and append the imported account only when needed.
-- Managed Claude account labels follow the account email address when available.
-- After a successful Claude usage fetch, `UsageSnapshot.identity.email` is filled
-  from the usage JSON `email` field when present, else `claude auth status --json`,
-  else a JWT-shaped access token’s email claim; the main provider panel and account
-  runtime label use that email for display. Settings account rows also prefer
-  snapshot or config email over the generic managed label.
-- Successful Claude refreshes hydrate managed-account subscription metadata when
-  available and clear any legacy provider-level Claude snapshot once an
-  account-scoped snapshot succeeds.
+- Accounts are explicit entries in `Config.claude_managed_accounts`. Each entry’s
+  `config_dir` points at a YapCap-owned directory under
+  `~/.local/state/yapcap/claude-accounts/<id>/` with `metadata.json`,
+  `tokens.json`, and optional per-account cached snapshots.
+- `discover_accounts` builds the in-app account list from those entries. Email
+  and organization prefer values from account `metadata.json` when loadable;
+  otherwise config fields apply. When email is present, entries dedupe by
+  normalized email.
+- YapCap does not read `~/.claude`, host Claude Code credential files, import
+  external config trees, or run the `claude` CLI for login, refresh, or
+  discovery.
+- Add-account uses a native OAuth PKCE flow: browser authorization, token
+  exchange against Anthropic’s token endpoint, and commit only after the
+  response includes required access and refresh tokens, expiry, scope, and
+  account email.
+- Duplicate login by normalized email updates the existing account’s tokens and
+  metadata instead of adding a second account.
+- Add-account and single-account selection behavior match other providers:
+  new accounts are selected immediately in single-account mode; show-all mode
+  preserves existing selections when possible.
+- Account labels follow the account email when available.
+- After a successful usage fetch, `UsageSnapshot.identity.email` uses the usage
+  JSON `email` field when present; otherwise stored account metadata’s email
+  when non-empty.
 
 Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 
-- `Authorization: Bearer <claudeAiOauth.accessToken>`
+- `Authorization: Bearer <access_token>` (current access token from account `tokens.json`)
 - `anthropic-beta: oauth-2025-04-20`
 - Token must carry scope `user:profile`; otherwise `MissingProfileScope` is returned before the request.
-- Before the request, YapCap checks `claudeAiOauth.expiresAt`. If the access token expires within 5 minutes, it runs `claude auth status --json` with `CLAUDE_CONFIG_DIR` set to the active account config directory, reloads `.credentials.json`, and returns `ClaudeError::CredentialsRefreshed` (transient) without making the usage request. The next scheduled refresh cycle will use the fresh token.
-- If the usage endpoint returns HTTP 401, YapCap runs `claude auth status --json` once for the active account and returns `ClaudeError::CredentialsRefreshed` (transient) without retrying the usage request. The next scheduled refresh cycle retries with the updated token. This single-request-per-cycle rule prevents back-to-back requests that trigger Claude's rate limiter.
+- Before the request, YapCap preflights token expiry. If `expires_at` is within five minutes, YapCap calls `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token`, writes updated tokens to account storage (and updates metadata when the response includes identity fields), then continues with the fresh access token and performs exactly one usage request in that cycle.
+- If the usage endpoint returns HTTP 401, YapCap attempts one token refresh via the same OAuth token endpoint, persists new tokens when that succeeds, and retries the usage request once immediately with the fresh access token. If the retry also returns 401, the cycle ends as unauthorized without another refresh attempt.
 
 Response shape:
 
 - `five_hour.utilization` / `resets_at` → Session window (utilization is 0..100).
 - `seven_day.utilization` / `resets_at` → Weekly window.
 - `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` → model-specific weekly windows (Max plan only; null on Pro).
-- `extra_usage.utilization` → Extra window.
-- `extra_usage.used_credits` / `monthly_limit` → `ProviderCost` (both fields divided by 100).
-- `extra_usage.currency` → cost display units (e.g. `"EUR"`); defaults to `"$"` if absent.
+- When present, Claude maps `extra_usage` to `UsageSnapshot.extra_usage`:
+  - `is_enabled: false` → `ExtraUsageState::Disabled` (popup: **Extra usage** with **Disabled** subtitle, no progress bar).
+  - otherwise → `ExtraUsageState::Active` with bar fill from `utilization`, or from `(used_credits / monthly_limit) * 100` when utilization is omitted; amounts come from `used_credits` / `monthly_limit` / `currency` (credits scaled by dividing by 100; currency defaults to `"$"` if absent). In the popup, formatted amounts separate the number from the rendered symbol with a space (symbols follow common ISO‑4217 mappings such as `$` for USD, `€` for EUR); hovering the amount line shows the three-letter ISO code in a tooltip.
+
+Claude does not populate `UsageSnapshot.provider_cost` (Codex retains `provider_cost` for credits-only display).
 
 Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. For the `five_hour` session window, `utilization = 0` with `resets_at = null` is treated in display code as a reset/inactive session and labeled `Reset`. If both primary windows are absent after normalization, the provider returns `NoUsageData`.
 
-Usage fallback: none. Claude usage is OAuth-only because the CLI does not expose reliable machine-readable usage data.
+Usage fallback: none. Claude usage is fetched only through the OAuth usage endpoint.
 
-Credential refresh is delegated to Claude Code. YapCap shells out directly to the `claude` binary, without a shell, and lets Claude Code manage its own OAuth refresh flow and credential file. YapCap does not call Claude's private token endpoint directly.
+All routine access-token refresh uses `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token` and the stored refresh token. The Claude CLI is not involved.
 
-HTTP 401 surfaces as `ClaudeError::Unauthorized` only when it occurs before a credential refresh attempt is possible (e.g. `claude` binary not found); the post-refresh cycle is handled by `CredentialsRefreshed` (user action not required). HTTP 429 surfaces as `ClaudeError::RateLimited`, is marked transient, and displays the message "Rate limited by Claude — consider increasing the Auto refresh interval in Settings".
+HTTP 429 surfaces as `ClaudeError::RateLimited { retry_after_secs: Option<u64> }`, is marked transient, and displays the message "Rate limited by Claude — will retry automatically", optionally appended with "(retry in Xm)" when a `Retry-After` header is present. Token refresh HTTP 4xx errors other than 429 are permanent re-auth failures (`requires_user_action = true`).
+
+**Rate limit backoff:** When a refresh cycle encounters a 429, YapCap records `rate_limit_until` on the per-account state. The value is taken from the `Retry-After` response header when present; otherwise it uses exponential backoff: `300s * 2^(consecutive-1)`, capped at 3600s. Subsequent refresh cycles skip any account where `rate_limit_until > now`. On the next successful refresh, `rate_limit_until` and `consecutive_rate_limits` are cleared. Network/transient failures (connection errors, timeouts) do not update `rate_limit_until` and do not increment the consecutive counter — they leave the stale snapshot visible with an error status without deleting tokens.
 
 ### 3.3 Cursor
 
@@ -314,65 +296,69 @@ Account model:
 
 - All Cursor accounts are managed by YapCap and stored under
   `~/.local/state/yapcap/cursor-accounts/<storage-id>/`, where `storage-id` is an
-  opaque string (`cursor-<millis>-<pid>` for manual login commits, `cursor-<16
-  hex>` derived deterministically from normalized email when migrating configs
-  that predate stored ids, or another `cursor-…` id for browser-imported
-  accounts). Directory names do not embed the email address.
+  opaque string (`cursor-<millis>-<pid>` for scan-flow commits, or
+  `cursor-<16 hex>` derived deterministically from normalized email when
+  normalizing older config rows that predate stored ids). Directory names do not
+  embed the email address.
 - Email is the canonical identity for deduplication and UI. Accounts without a
   confirmed email are never persisted.
 - At most one managed account exists per normalized email
   (`trim + ASCII lowercase`).
-- Each managed account directory uses one layout regardless of whether it came
-  from startup discovery or manual add:
-  - `account.json` stores non-secret metadata.
-  - `session/` stores persisted auth material owned by YapCap.
+- Each managed account directory uses the shared account-storage layout:
+  - `metadata.json` stores non-secret account identity.
+  - `tokens.json` stores the YapCap-owned token material:
+    - `access_token` — raw JWT copied from `cursorAuth/accessToken` in Cursor's
+      `state.vscdb` at scan time.
+    - `token_id` — the `user_id` portion of the JWT `sub` claim (everything
+      after the last `|`, e.g. `auth0|user_abc` → `user_abc`).
+    - `expires_at` — decoded from the JWT `exp` claim.
+    - `refresh_token` — raw JWT from `cursorAuth/refreshToken`.
+  - `snapshot.json` stores the optional per-account cached usage snapshot.
 - Runtime account ids use the prefix `cursor-managed:` plus the same opaque
   `storage-id` as the on-disk directory name (not the email).
-- On startup sync, legacy `active_cursor_account_id` values that still used
-  `cursor-managed:<email>` are rewritten to the opaque id for the matching
-  account. Legacy email-shaped account directories are moved onto the opaque
-  path for that email’s stable migration id.
-
-Browser auto-import (runs asynchronously on startup):
-
-- YapCap scans every profile directory for all supported browsers.
-- For each profile whose cookie database is readable, YapCap extracts the
-  Cursor session cookie and calls `GET https://cursor.com/api/auth/me`.
-- If a valid email is returned, YapCap imports that session into the managed
-  account directory for the normalized email and marks the credential source
-  as `imported_browser_profile`.
-- Discovery updates the existing managed account for the same email instead of
-  creating a sibling account.
-- Imported accounts use YapCap-owned session state under `session/`; YapCap
-  does not keep the original browser profile as the long-term source of truth.
-  Discovery also rewrites any existing manual-login account for that email onto
-  the same canonical stored-cookie layout.
-- Startup cleanup removes malformed Cursor account directories from config, and
-  unsupported legacy token-only Cursor accounts are dropped instead of being
-  migrated.
+- On startup sync, legacy `cursor-managed:<email>` selections are rewritten to
+  the opaque id for the matching valid shared-storage account.
+- YapCap does not scan user browser profiles or auto-import Cursor browser
+  sessions. Malformed Cursor account rows and unsupported legacy token-only
+  Cursor accounts are dropped instead of being migrated.
 
 Managed login flow (add account):
 
 - Settings exposes `Add account` under the Cursor accounts card.
-- Launches the browser chosen by `config.cursor_browser` with
-  `--user-data-dir=<pending-profile-root>/profile` and opens the Cursor usage
-  page.
-- Waits for a valid Cursor session cookie to appear in the pending profile.
-- On success, Cursor identity must include an email. YapCap renames the pending
-  directory into the managed account root named after the login flow’s opaque
-  id, writes `account.json`, persists the cookie header under `session/`, and
-  stores non-secret metadata in config (including that id and normalized email)
-  with the same `imported_browser_profile` layout used by discovery.
+- YapCap reads `~/.config/Cursor/User/globalStorage/state.vscdb` (read-only),
+  extracts `cursorAuth/accessToken` and `cursorAuth/refreshToken` from
+  `ItemTable`, and decodes the JWT to determine `user_id` and `expires_at`.
+- Identity (email, display name, plan) is fetched from
+  `GET https://cursor.com/api/auth/me` using the session cookie built from
+  the scanned tokens.
+- On success, Cursor identity must include an email. YapCap writes the tokens
+  and first usage snapshot into the shared account-storage layout and stores
+  non-secret metadata in config (including the opaque id and normalized email).
 - Manual add for an existing email replaces or updates the same managed
   account directory instead of creating a second account.
-- On cancel, failure, or task abort, the pending directory is removed.
+
+Token storage layout in `tokens.json`:
+
+- `access_token` — the raw Cursor JWT access token.
+- `token_id` — the `user_id` extracted from the JWT `sub` claim.
+- `expires_at` — UTC expiry decoded from the JWT `exp` claim.
+- `refresh_token` — the raw Cursor refresh token.
+
+Token refresh:
+
+- Before each usage fetch, YapCap checks whether `expires_at ≤ now + 5 min`.
+- If so, it calls `POST https://www.cursor.com/api/auth/refresh` with the
+  refresh token, writes the rotated tokens to `tokens.json`, and proceeds with
+  the fresh access token.
+- HTTP 4xx responses other than 429 to the refresh endpoint are permanent
+  failures (`TokenRefreshLogout`); the provider reports `LoginRequired`. HTTP
+  429 and network errors are transient; YapCap proceeds with the stale token
+  and reports the error without clearing the account.
 
 Usage fetch:
 
-- Both imported and manual accounts go through the same refresh pipeline.
-- YapCap reads the cached cookie header from `session/`.
-- Legacy `managed_profile` accounts remain readable during lazy migration by
-  falling back to `profile/Default/Cookies` when no stored cookie header exists.
+- YapCap builds the `WorkosCursorSessionToken` cookie header as
+  `WorkosCursorSessionToken=<token_id>%3A%3A<access_token>`.
 - Sends the session cookie in one `Cookie` header to:
   - `GET https://cursor.com/api/usage-summary`
   - `GET https://cursor.com/api/auth/me`
@@ -381,63 +367,39 @@ Usage fetch:
   - `autoPercentUsed` → secondary dimension.
   - `billingCycleEnd` → `reset_at`.
   - `membershipType` → `identity.plan`.
-- No OAuth fallback; if the managed session is missing or unauthorized, the
-  provider reports `LoginRequired` and does not try to re-import from the
-  original browser.
+- HTTP 401 from the usage endpoint marks the account `LoginRequired`.
 
-Account removal: deletes the managed directory. User-owned browser profiles
-are never touched.
+Account removal: deletes the managed directory. Cursor's own config files are
+never modified.
 
-## 4. Auth, Browser Cookies, and Config
+## 4. Auth and Config
 
 ### 4.1 OAuth Credential Files
 
-`auth::load_codex_auth`:
+Codex native login:
 
-- Respects `CODEX_HOME`, otherwise `~/.codex`.
-- Reads `auth.json` and extracts `tokens.access_token` and `tokens.account_id`.
+- Runs the OAuth authorization-code with PKCE flow directly from YapCap, using
+  the upstream `openai/codex` public client id, callback shape, scope, and token
+  endpoint.
+- Extracts email, ChatGPT account id, and expiry metadata from returned JWT
+  claims where available, then stores access and refresh tokens in
+  YapCap-owned `tokens.json`.
 
-`auth::load_claude_auth`:
+Claude OAuth material lives only under YapCap-owned account directories as
+`tokens.json` (see §3.2). YapCap does not read Claude Code `.credentials.json`.
 
-- Reads `.credentials.json` and extracts `claudeAiOauth.{accessToken, scopes, subscriptionType, expiresAt}`.
+Codex and Claude OAuth material used by normal refresh lives under YapCap-owned
+account directories as `tokens.json`. Provider errors bubble up as
+`requires_user_action = true` when user login is needed.
 
-YapCap can write managed Codex `auth.json` files when refreshing OAuth tokens,
-and it can run `codex login` or `claude auth status --json`, which may cause
-those CLIs to update their own credential files. Errors are typed (`AuthError`
-/ provider errors) and bubble up as `requires_user_action = true` when user
-login or local CLI repair is needed.
+### 4.2 Cursor Token Source
 
-### 4.2 Browser Cookie Import
-
-Chromium family (Brave / Chrome / Edge):
-
-- Copy `Cookies` SQLite file to a tempfile (the live DB is locked by the running browser).
-- Look up Cursor session cookies for `cursor.com`, `www.cursor.com`,
-  `cursor.sh`, and `authenticator.cursor.sh`, accepting exact, leading-dot,
-  and subdomain host matches.
-- Candidate cookie names are `WorkosCursorSessionToken`,
-  `__Secure-next-auth.session-token`, and `next-auth.session-token`.
-- If the stored `value` column is non-empty, use it as plaintext (older blobs).
-- Otherwise decrypt `encrypted_value`:
-  - `v10` / `v11` prefix → AES-CBC with a PBKDF2(secret, salt="saltysalt", iters=1, 16B key) key derived from the browser's Safe Storage secret. The single iteration is mandated by OSCrypt compatibility, not a mistake.
-  - Alternative GCM blobs are decrypted with AES-GCM.
-- Safe Storage secret is retrieved via `secret-service` using the per-browser application name (`brave`, `chrome`, `Microsoft Edge`). Some secret-service implementations (KWallet, COSMIC) append trailing terminators; those are stripped before key derivation.
-
-Firefox:
-
-- Locates `cookies.sqlite` via `profiles.ini`. The `[Install<hash>]` section's `Default=` path takes precedence over any legacy `Default=1` profile entry.
-- Accepts both `~/.mozilla/firefox` and `~/.config/mozilla/firefox` (XDG/Flatpak layouts).
-- Reads the cookie value directly; Firefox does not encrypt cookies at rest.
-
-Browser profile discovery:
-
-- Chromium-family browsers discover every profile directory under the browser root that contains a `Cookies` database, with `Default` tried first and other profiles tried in sorted order.
-- Firefox discovers profiles from `profiles.ini` in priority order: install default, profile default, then remaining profile paths.
-- YapCap auto-imports all profiles where the Cursor session cookie is present
-  and the identity API returns an email. Chromium and Firefox discovery both
-  import into the same managed account layout; the on-disk directory is keyed by
-  an opaque id while normalized email selects the single managed account row.
-- Browser cookie tests should use synthetic SQLite fixtures under `fixtures/browser` instead of real browser databases.
+Cursor tokens are read directly from Cursor's own SQLite state database at
+`~/.config/Cursor/User/globalStorage/state.vscdb` (read-only). YapCap does not
+read browser cookie databases, use the OS keyring, or launch a browser
+subprocess to acquire Cursor credentials. The browser cookie infrastructure
+(browser.rs, fixtures/browser/) has been removed; this section is retained as a
+tombstone to explain the removal.
 
 ### 4.3 Configuration
 
@@ -452,10 +414,10 @@ files manually if you need to salvage values after a version bump.
 The template rebuild intentionally expands
 the existing `Config` entry instead of carrying over the old standalone TOML
 config file. The settings keep the same user-facing function as before:
-refresh interval, provider enable toggles, Cursor browser selection, and log
-level. The reset time format controls whether usage windows show relative reset
-durations or absolute local reset times. The usage amount format controls
-whether usage windows are presented as percent used or percent left.
+refresh interval, provider enable toggles, and log level. The reset time
+format controls whether usage windows show relative reset durations or absolute
+local reset times. The usage amount format controls whether usage windows are
+presented as percent used or percent left.
 
 ```toml
 refresh_interval_seconds = 300
@@ -472,30 +434,24 @@ selected_claude_account_ids = []
 claude_managed_accounts = []
 selected_cursor_account_ids = []
 cursor_managed_accounts = []
-cursor_browser = "brave"
-cursor_profile_id = null
 log_level = "info"
 ```
 
 - `reset_time_format` ∈ `relative | absolute`. `relative` shows reset durations such as `Resets in 2d 2h`; `absolute` shows local reset labels such as `Resets tomorrow at 8:25 AM` or `Resets Wednesday at 12:00 PM`.
 - `usage_amount_format` ∈ `used | left`. `used` shows labels and usage bars as consumed quota; `left` flips them to remaining quota.
 - `panel_icon_style` ∈ `logo_and_bars | bars_only | logo_and_percent | percent_only`. The default shows the selected provider logo and two compact usage bars, `bars_only` hides the logo, `logo_and_percent` shows the selected provider logo with the first applet usage window as a one-decimal percentage, and `percent_only` shows only that percentage with enough width for `100.0%`. In settings, the percent-only preview shows a sample percentage with a tooltip explaining that it shows the first usage percentage in the panel.
-- `provider_visibility_mode` ∈ `auto_init_pending | user_managed`. New installs begin in `auto_init_pending` until the first startup discovery pass finishes; existing installs and later runs use `user_managed`.
-- `cursor_browser` ∈ `brave | chrome | chromium | edge | firefox` (also accepts `microsoft-edge`).
-- `cursor_profile_id = null` means automatic profile discovery.
-- If `cursor_profile_id` is set, Cursor cookie import uses only that discovered profile.
-- `YAPCAP_CURSOR_BROWSER` overrides `cursor_browser` at runtime.
+- `provider_visibility_mode` ∈ `auto_init_pending | user_managed`. New installs begin in `auto_init_pending` until the first startup discovery pass finishes; existing installs and later runs use `user_managed`. During `auto_init_pending`, all providers are enabled regardless of whether accounts exist — providers without accounts show a `Login required` state rather than being hidden.
 - The refresh interval is clamped to a 10-second floor at subscription time.
 - `selected_codex_account_ids` is a preference list, not proof that credentials exist.
   Each id resolves to `Ready` only when a matching managed account source is valid.
-  When empty, YapCap auto-selects the first discovered account. Multiple ids
+  When empty, YapCap auto-selects the first valid account. Multiple ids
   cause concurrent refresh and a multi-column popup view.
 - `codex_managed_accounts` stores non-secret metadata only: id, label,
-  managed Codex home path, optional email/provider account id, and timestamps.
-  There is at most one managed account per normalized email.
+  YapCap-owned account directory path, optional email/provider account id, and
+  timestamps. There is at most one managed account per normalized email.
 - `selected_claude_account_ids` is a preference list, not proof that credentials exist.
   Each id resolves to `Ready` only when a matching managed Claude account source is
-  valid. When empty, YapCap auto-selects the first discovered account. Multiple ids
+  valid. When empty, YapCap auto-selects the first valid account. Multiple ids
   cause concurrent refresh and a multi-column popup view.
 - `claude_managed_accounts` stores non-secret metadata only: id, label, Claude
   config directory path, optional identity metadata, subscription type, and
@@ -507,10 +463,8 @@ log_level = "info"
   and the Cursor API responds successfully. Multiple ids cause concurrent refresh
   and a multi-column popup view.
 - `cursor_managed_accounts` stores non-secret metadata only: opaque `id`,
-  canonical email, label, managed account root path, credential source, optional
-  browser metadata, optional identity metadata, plan, and timestamps. There is
-  at most one managed account per normalized email.
-- `cursor_profile_id` is a legacy field, currently unused.
+  canonical email, label, managed account root path, optional identity metadata,
+  plan, and timestamps. There is at most one managed account per normalized email.
 - Account add/remove, login that adds a managed account, active-account
   selection, and COSMIC `watch_config` updates all re-run the same merge from
   config into in-memory `AppState` and rewrite the snapshot cache, so the
@@ -556,7 +510,8 @@ AppState
                     |
                     +-- index into windows
                   windows: Vec<UsageWindow>
-                  provider_cost: Option<ProviderCost>
+                  provider_cost: Option<ProviderCost>   // Codex credits; Claude leaves none (see extra_usage)
+                  extra_usage: Option<ExtraUsageState>  // Claude only; omit when API omits extra_usage
                   identity: ProviderIdentity
 
 UsageWindow
@@ -564,6 +519,10 @@ UsageWindow
   used_percent
   reset_at
   reset_description
+
+ExtraUsageState
+  Disabled
+  Active { used_percent, cost: ProviderCost }
 ```
 
 `ProviderRuntimeState` describes provider enablement, active-account selection,
@@ -582,12 +541,15 @@ struct UsageSnapshot {
     updated_at: DateTime<Utc>,
     headline: UsageHeadline,       // index into windows for the panel badge
     windows: Vec<UsageWindow>,     // variable-length; providers push what they have
-    provider_cost: Option<ProviderCost>,
+    provider_cost: Option<ProviderCost>, // Codex credit balance display
+    extra_usage: Option<ExtraUsageState>, // Claude extra spend (disabled vs active bar); defaults absent in serde
     identity: ProviderIdentity,    // email, account_id, plan, display_name
 }
 
+enum ExtraUsageState { Disabled, Active { used_percent: f32, cost: ProviderCost } }
+
 struct UsageWindow {
-    label: String,                 // "Session" | "Weekly" | "Sonnet" | "Extra"
+    label: String,                 // "Session" | "Weekly" | "Sonnet" | …
     used_percent: f64,
     reset_at: Option<DateTime<Utc>>,
     window_seconds: Option<i64>,
@@ -659,6 +621,17 @@ All paths come from `config::paths()`:
 - Snapshot cache: `~/.cache/yapcap/snapshots.json`
 - Logs: `~/.local/state/yapcap/logs/yapcap.log`
 
+When `FLATPAK_ID` is set (Flatpak sandbox), YapCap ignores host-inherited
+`XDG_STATE_HOME` / `XDG_CACHE_HOME` for these locations and instead uses
+`~/.var/app/<app-id>/data/yapcap/` for managed accounts and logs and
+`~/.var/app/<app-id>/cache/yapcap/` for the snapshot cache, matching the usual
+Flatpak per-app layout.
+
+Managed Claude and Codex accounts store `config_dir` / `codex_home` in COSMIC
+config; on startup those paths are rewritten to the current canonical
+`<state-root>/yapcap/.../<account-id>/` trees so installs that share COSMIC config
+(native vs Flatpak) do not continue using another build's absolute directories.
+
 Snapshot cache serializes `AppState` (providers + account states +
 `updated_at`) via `serde_json`. It is rewritten whenever any provider or
 account state changes and loaded on startup so the popup has something to show
@@ -701,7 +674,7 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
   - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) now seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled, each gets managed demo accounts, Codex defaults to two selected accounts with `Show all accounts` on, Cursor includes a re-auth-needed account in Settings, the default startup `Task` batch is skipped, provider-refresh becomes a no-op, snapshot-cache writes are skipped, and the demo data is re-applied after config reconciliation.
-  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow, and Codex re-authentication appears only after an auth failure that requires user action. Claude add-account runs the Claude Code auth flow from Settings. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label; browser-auto-imported accounts and login-created accounts appear the same in the UI. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
+  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code or full callback URL (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
@@ -709,7 +682,23 @@ The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands 
 
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
-## 8. Localization
+## 8. Packaging
+
+- YapCap ships a baseline Flatpak manifest at `packaging/com.topi.YapCap.json` for
+  COSMIC Store-oriented packaging.
+- The manifest installs the applet binary, desktop entry, AppStream metainfo,
+  and scalable app icon under the `com.topi.YapCap` app id.
+- Runtime permissions avoid host filesystem access and host CLI requirements.
+  They are limited to network access, shared IPC (host IPC namespace for X11
+  shared memory and typical clipboard interop with XWayland), Wayland display,
+  fallback X11, session bus access for COSMIC/libcosmic and portal calls, and
+  DRI rendering.
+- Build-time network access remains an interim packaging constraint because the
+  project still resolves crates.io packages and a git `libcosmic` dependency
+  during the Flatpak build. Store submission should replace this with generated
+  offline cargo sources or a vendored source archive.
+
+## 9. Localization
 
 Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail.rs`, and the `src/app/popup_view/settings/` submodules use the `fl!()` macro backed by `i18n_embed` + `i18n_embed_fl` + Mozilla Fluent. (Some provider-facing status strings are still produced in the model layer.)
 
@@ -720,10 +709,10 @@ Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail
 - Missing Fluent messages are typically caught during development (e.g. by tooling/editor diagnostics), but the safest way to validate coverage is to build and run the app while exercising the UI paths.
 - UI helper functions that build elements (`info_block`, `usage_block`, `credit_section`, etc.) take `String` for their title parameter and return `Element<'static, Message>`. This avoids tying the element lifetime to a temporary `fl!()` result.
 
-## 9. Testing
+## 10. Testing
 
-- `cargo test` runs unit and integration tests covering: config defaults, browser profile discovery, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude account discovery, Claude credential refresh with fake CLI binaries, runtime refresh state machine, error classification, update check version parsing, debug update simulation, and app-level state transitions.
-- No tests hit real provider APIs. Provider response fixtures under `fixtures/{codex,claude,cursor}/*.json` cover the OAuth response shapes and edge cases.
+- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, runtime refresh state machine, error classification, update check version parsing, debug update simulation, and app-level state transitions.
+- No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,cursor}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures.
 - Browser cookie fixtures under `fixtures/browser/*.sql` are synthetic and sanitized. Real browser databases must not be committed.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.
 - Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.

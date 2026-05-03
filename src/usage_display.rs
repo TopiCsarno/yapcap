@@ -151,6 +151,15 @@ fn format_absolute_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> S
     }
 }
 
+#[must_use]
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) fn portion_percent(used: f64, scale: f64) -> f32 {
+    if scale <= f64::EPSILON {
+        return 0.0;
+    }
+    ((used / scale) * 100.0_f64).clamp(0.0, 100.0) as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

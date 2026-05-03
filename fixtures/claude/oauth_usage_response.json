@@ -1,0 +1,54 @@
+{
+  "body_json": {
+    "extra_usage": {
+      "currency": "EUR",
+      "is_enabled": true,
+      "monthly_limit": 2000,
+      "used_credits": 0.0,
+      "utilization": null
+    },
+    "five_hour": {
+      "resets_at": null,
+      "utilization": 0.0
+    },
+    "iguana_necktie": null,
+    "omelette_promotional": null,
+    "seven_day": {
+      "resets_at": "2026-05-07T04:00:00.000000+00:00",
+      "utilization": 100.0
+    },
+    "seven_day_cowork": null,
+    "seven_day_oauth_apps": null,
+    "seven_day_omelette": {
+      "resets_at": null,
+      "utilization": 0.0
+    },
+    "seven_day_opus": null,
+    "seven_day_sonnet": null,
+    "tangelo": null
+  },
+  "body_text": "{\"extra_usage\": {\"currency\": \"EUR\", \"is_enabled\": true, \"monthly_limit\": 2000, \"used_credits\": 0.0, \"utilization\": null}, \"five_hour\": {\"resets_at\": null, \"utilization\": 0.0}, \"iguana_necktie\": null, \"omelette_promotional\": null, \"seven_day\": {\"resets_at\": \"2026-05-07T04:00:00.000000+00:00\", \"utilization\": 100.0}, \"seven_day_cowork\": null, \"seven_day_oauth_apps\": null, \"seven_day_omelette\": {\"resets_at\": null, \"utilization\": 0.0}, \"seven_day_opus\": null, \"seven_day_sonnet\": null, \"tangelo\": null}",
+  "endpoint": "oauth_usage",
+  "method": "GET",
+  "requested_at": "2026-05-04T13:59:01.378237+00:00",
+  "response_headers": {
+    "CF-RAY": "redacted-ray-id",
+    "Connection": "close",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "Content-Type": "application/json",
+    "Date": "Mon, 04 May 2026 13:59:01 GMT",
+    "Server": "cloudflare",
+    "Transfer-Encoding": "chunked",
+    "X-Robots-Tag": "none",
+    "anthropic-organization-id": "11111111-1111-1111-1111-111111111111",
+    "cf-cache-status": "DYNAMIC",
+    "request-id": "req_011RedactedExampleUsage",
+    "server-timing": "x-originResponse;dur=0",
+    "set-cookie": "_cfuvid=REDACTED; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-envoy-upstream-service-time": "0"
+  },
+  "status_code": 200,
+  "url": "https://api.anthropic.com/api/oauth/usage"
+}

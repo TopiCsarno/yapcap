@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::account_storage::ProviderAccountStorage;
-use crate::config::{Config, ManagedClaudeAccountConfig, paths};
+use crate::config::{Config, ManagedClaudeAccountConfig, managed_claude_account_dir, paths};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ pub fn discover_accounts(config: &Config) -> Vec<ClaudeAccount> {
             email,
             organization,
             subscription_type: managed.subscription_type.clone(),
-            config_dir: managed.config_dir.clone(),
+            config_dir: managed_claude_account_dir(&managed.id),
         };
         if let Some(email_key) = discovered.email.as_deref().map(normalized_email) {
             if let Some(index) = accounts.iter().position(|existing: &ClaudeAccount| {
@@ -69,6 +69,18 @@ pub fn apply_login_account(config: &mut Config, account: ManagedClaudeAccountCon
         .retain(|existing| existing.id != account_id);
     config.claude_managed_accounts.push(account);
     dedupe_managed_accounts(config);
+}
+
+pub fn sync_managed_account_dirs(config: &mut Config) -> bool {
+    let mut changed = false;
+    for account in &mut config.claude_managed_accounts {
+        let canonical = managed_claude_account_dir(&account.id);
+        if account.config_dir != canonical {
+            account.config_dir = canonical;
+            changed = true;
+        }
+    }
+    changed
 }
 
 pub fn remove_managed_config_dir(config_dir: &Path) {

@@ -116,3 +116,34 @@ fn discover_accounts_includes_accounts_with_email() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].email.as_deref(), Some("user@example.com"));
 }
+
+#[test]
+fn sync_managed_account_dirs_matches_current_paths() {
+    let _guard = test_support::env_lock();
+    let state_root = temp_dir("claude-sync-dirs-state");
+    unsafe {
+        std::env::set_var("XDG_STATE_HOME", &state_root);
+    }
+    let expected = crate::config::managed_claude_account_dir("acct-1");
+    let wrong = PathBuf::from("/totally/wrong/path");
+    let mut config = Config {
+        claude_managed_accounts: vec![ManagedClaudeAccountConfig {
+            id: "acct-1".to_string(),
+            label: "a".to_string(),
+            config_dir: wrong,
+            email: None,
+            organization: None,
+            subscription_type: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_authenticated_at: None,
+        }],
+        ..Config::default()
+    };
+    assert!(sync_managed_account_dirs(&mut config));
+    assert_eq!(config.claude_managed_accounts[0].config_dir, expected);
+    assert!(!sync_managed_account_dirs(&mut config));
+    unsafe {
+        std::env::remove_var("XDG_STATE_HOME");
+    }
+}

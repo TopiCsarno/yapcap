@@ -152,6 +152,7 @@ fn selected_provider_all_percents_uses_first_panel_window() {
             },
         ],
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity::default(),
     });
 

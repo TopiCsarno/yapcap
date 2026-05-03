@@ -54,6 +54,16 @@ pub struct ProviderCost {
     pub units: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtraUsageState {
+    Disabled,
+    Active {
+        used_percent: f32,
+        cost: ProviderCost,
+    },
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ProviderIdentity {
     pub email: Option<String>,
@@ -72,6 +82,8 @@ pub struct UsageSnapshot {
     #[serde(default)]
     pub windows: Vec<UsageWindow>,
     pub provider_cost: Option<ProviderCost>,
+    #[serde(default)]
+    pub extra_usage: Option<ExtraUsageState>,
     pub identity: ProviderIdentity,
 }
 
@@ -306,6 +318,7 @@ mod tests {
             headline: UsageHeadline(0),
             windows: vec![window("first"), window("second"), window("third")],
             provider_cost: None,
+            extra_usage: None,
             identity: ProviderIdentity::default(),
         }
     }

@@ -1,5 +1,9 @@
 .cargo/
 .codex
+.flatpak-builder/
+.scratch/
+build-dir/
+repo/
 dist/
 docs/todo.md
 *.pdb
@@ -9,6 +13,8 @@ target/
 vendor/
 vendor.tar
 make_screenshot.py
+fixtures/**/__pycache__/
+
 debian/*
 !debian/changelog
 !debian/control
@@ -16,3 +22,4 @@ debian/*
 !debian/install
 !debian/rules
 !debian/source
+

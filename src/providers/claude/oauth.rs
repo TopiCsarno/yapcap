@@ -209,22 +209,28 @@ mod tests {
     }
 
     #[test]
-    fn parses_token_response_with_identity() {
-        let parsed = parse_token_response(
-            include_str!("../../../fixtures/claude/oauth_token_refresh_with_identity.json"),
-            now(),
-        )
+    fn parses_oauth_token_probe_fixture() {
+        let envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/claude/oauth_token_response.json"
+        ))
         .unwrap();
+        let body = envelope["body_json"].clone();
+        let raw = serde_json::to_string(&body).unwrap();
+        let n = now();
+        let parsed = parse_token_response(&raw, n).unwrap();
 
-        assert_eq!(parsed.access_token, "claude-access-token");
-        assert_eq!(parsed.refresh_token, "claude-refresh-token");
         assert_eq!(
-            parsed.expires_at,
-            Utc.with_ymd_and_hms(2026, 4, 30, 18, 0, 0).unwrap()
+            parsed.access_token,
+            "sk-ant-oat01-redacted-access-token-for-fixtures"
         );
         assert_eq!(
+            parsed.refresh_token,
+            "sk-ant-ort01-redacted-refresh-token-for-fixtures"
+        );
+        assert_eq!(parsed.expires_at, n + chrono::Duration::seconds(28800));
+        assert_eq!(
             parsed.token_id.as_deref(),
-            Some("00000000-0000-0000-0000-000000000000")
+            Some("33333333-3333-3333-3333-333333333333")
         );
         assert_eq!(
             parsed.account_id.as_deref(),
@@ -239,16 +245,7 @@ mod tests {
             parsed.organization_name.as_deref(),
             Some("Example Organization")
         );
-        assert_eq!(
-            parsed.scope,
-            [
-                "user:file_upload",
-                "user:inference",
-                "user:mcp_servers",
-                "user:profile",
-                "user:sessions:claude_code"
-            ]
-        );
+        assert_eq!(parsed.scope, ["user:profile"]);
     }
 
     #[test]

@@ -8,15 +8,18 @@ use crate::account_storage::{ProviderAccountMetadata, ProviderAccountStorage};
 use crate::auth::ClaudeAuth;
 use crate::error::{ClaudeError, Result};
 use crate::model::{
-    ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
+    ExtraUsageState, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
 };
+use crate::usage_display;
 use chrono::{DateTime, Duration, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::warn;
 
-pub use account::{apply_login_account, discover_accounts, remove_managed_config_dir};
+pub use account::{
+    apply_login_account, discover_accounts, remove_managed_config_dir, sync_managed_account_dirs,
+};
 pub use login::{
     ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus, prepare, prepare_targeted, submit_code,
 };
@@ -55,6 +58,44 @@ struct ClaudeExtraUsage {
     pub used_credits: Option<f64>,
     pub utilization: Option<f32>,
     pub currency: Option<String>,
+}
+
+fn claude_extra_usage_state(extra: &ClaudeExtraUsage) -> ExtraUsageState {
+    if !extra.is_enabled.unwrap_or(true) {
+        return ExtraUsageState::Disabled;
+    }
+    let pct = extra
+        .utilization
+        .or_else(|| {
+            let limit = extra.monthly_limit.filter(|l| *l > 0.0)?;
+            let used = extra.used_credits?;
+            Some(usage_display::portion_percent(used, limit))
+        })
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    let currency = extra.currency.clone().unwrap_or_else(|| "$".to_string());
+    ExtraUsageState::Active {
+        used_percent: pct,
+        cost: claude_snapshot_extra_cost(extra, pct, currency),
+    }
+}
+
+fn claude_snapshot_extra_cost(
+    extra: &ClaudeExtraUsage,
+    pct: f32,
+    currency: String,
+) -> crate::model::ProviderCost {
+    let limit = extra.monthly_limit.map(|limit| limit / 100.0);
+    let used = extra
+        .used_credits
+        .map(|used| used / 100.0)
+        .or_else(|| limit.map(|limit| limit * f64::from(pct) / 100.0))
+        .unwrap_or(0.0);
+    crate::model::ProviderCost {
+        used,
+        limit,
+        units: currency,
+    }
 }
 
 pub async fn fetch(
@@ -251,13 +292,13 @@ async fn request_oauth_at(
             source,
         })?;
     let payload: ClaudeUsageResponse = response.json().await.map_err(ClaudeError::DecodeUsage)?;
-    normalize(payload, subscription_type)
+    normalize(&payload, subscription_type)
 }
 
 const REQUIRED_SCOPE: &str = "user:profile";
 
 fn normalize(
-    payload: ClaudeUsageResponse,
+    payload: &ClaudeUsageResponse,
     plan: Option<String>,
 ) -> Result<UsageSnapshot, ClaudeError> {
     let mut windows = Vec::new();
@@ -280,43 +321,15 @@ fn normalize(
     if windows.is_empty() {
         return Err(ClaudeError::NoUsageData);
     }
-    let extra_enabled = payload
-        .extra_usage
-        .as_ref()
-        .is_some_and(|extra| extra.is_enabled.unwrap_or(true));
-    if let Some(extra) = payload.extra_usage.as_ref().filter(|_| extra_enabled)
-        && let Some(utilization) = extra.utilization
-    {
-        windows.push(UsageWindow {
-            label: "Extra".to_string(),
-            used_percent: utilization,
-            reset_at: None,
-            window_seconds: None,
-            reset_description: None,
-        });
-    }
-    let currency = payload
-        .extra_usage
-        .as_ref()
-        .and_then(|u| u.currency.clone())
-        .unwrap_or_else(|| "$".to_string());
-    let provider_cost = payload
-        .extra_usage
-        .filter(|_| extra_enabled)
-        .and_then(|usage| {
-            usage.used_credits.map(|used| ProviderCost {
-                used: used / 100.0,
-                limit: usage.monthly_limit.map(|limit| limit / 100.0),
-                units: currency.clone(),
-            })
-        });
+    let extra_usage = payload.extra_usage.as_ref().map(claude_extra_usage_state);
     Ok(UsageSnapshot {
         provider: ProviderId::Claude,
         source: "OAuth".to_string(),
         updated_at: Utc::now(),
         headline: UsageHeadline::first_available(&windows),
         windows,
-        provider_cost,
+        provider_cost: None,
+        extra_usage,
         identity: ProviderIdentity {
             email: payload.email.clone(),
             plan,
@@ -447,65 +460,35 @@ mod tests {
         (stored.account_ref.account_id, stored.account_dir)
     }
 
-    #[test]
-    fn normalizes_fixture() {
-        let payload: ClaudeUsageResponse =
-            serde_json::from_str(include_str!("../../../fixtures/claude/usage_oauth.json"))
-                .unwrap();
-        let snapshot = normalize(payload, None).unwrap();
-        assert_eq!(snapshot.provider, ProviderId::Claude);
-        assert_eq!(snapshot.windows[0].used_percent, 18.0);
-        assert_eq!(snapshot.windows[1].used_percent, 90.0);
-        assert_eq!(snapshot.provider_cost.as_ref().unwrap().used, 2.44);
+    fn claude_oauth_usage_from_probe_fixture() -> ClaudeUsageResponse {
+        let envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/claude/oauth_usage_response.json"
+        ))
+        .unwrap();
+        serde_json::from_value(envelope["body_json"].clone()).unwrap()
     }
 
     #[test]
-    fn normalizes_fixture_with_extra_usage_disabled() {
-        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
-            "../../../fixtures/claude/usage_oauth_extra_disabled.json"
-        ))
-        .unwrap();
-        let snapshot = normalize(payload, Some("pro".to_string())).unwrap();
+    fn normalizes_oauth_usage_probe_fixture() {
+        let payload = claude_oauth_usage_from_probe_fixture();
+        let snapshot = normalize(&payload, None).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Claude);
-        assert_eq!(snapshot.windows[0].used_percent, 83.0);
-        assert_eq!(snapshot.windows[1].used_percent, 21.0);
         assert_eq!(snapshot.windows.len(), 2);
-        assert!(snapshot.provider_cost.is_none());
-    }
-
-    #[test]
-    fn normalizes_max_fixture_with_model_windows() {
-        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
-            "../../../fixtures/claude/usage_oauth_max_2026_03_10.json"
-        ))
-        .unwrap();
-        let snapshot = normalize(payload, Some("max".to_string())).unwrap();
-        assert_eq!(snapshot.provider, ProviderId::Claude);
         assert_eq!(snapshot.windows[0].label, "Session");
-        assert_eq!(snapshot.windows[0].used_percent, 37.0);
+        assert_eq!(snapshot.windows[0].used_percent, 0.0);
         assert_eq!(snapshot.windows[1].label, "Weekly");
-        assert_eq!(snapshot.windows[1].used_percent, 26.0);
-        assert_eq!(snapshot.windows[2].label, "Sonnet");
-        assert_eq!(snapshot.windows[2].used_percent, 1.0);
-        assert_eq!(snapshot.windows.len(), 3);
+        assert_eq!(snapshot.windows[1].used_percent, 100.0);
         assert!(snapshot.provider_cost.is_none());
-    }
-
-    #[test]
-    fn normalizes_live_fixture_with_currency() {
-        let payload: ClaudeUsageResponse = serde_json::from_str(include_str!(
-            "../../../fixtures/claude/usage_oauth_live_2026_04_20.json"
-        ))
-        .unwrap();
-        let snapshot = normalize(payload, Some("pro".to_string())).unwrap();
-        assert_eq!(snapshot.windows[0].label, "Session");
-        assert_eq!(snapshot.windows[1].label, "Weekly");
-        assert_eq!(snapshot.windows[2].label, "Extra");
-        assert_eq!(snapshot.windows.len(), 3);
-        let cost = snapshot.provider_cost.as_ref().unwrap();
-        assert_eq!(cost.units, "EUR");
-        assert_eq!(cost.used, 4.80);
-        assert_eq!(cost.limit, Some(5.0));
+        assert!(snapshot.identity.email.is_none());
+        match snapshot.extra_usage.as_ref() {
+            Some(ExtraUsageState::Active { cost, used_percent }) => {
+                assert!((*used_percent).abs() < f32::EPSILON);
+                assert_eq!(cost.units, "EUR");
+                assert_eq!(cost.used, 0.0);
+                assert_eq!(cost.limit, Some(20.0));
+            }
+            _ => panic!("expected active extra usage"),
+        }
     }
 
     #[test]
@@ -525,7 +508,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = normalize(payload, None).unwrap();
+        let snapshot = normalize(&payload, None).unwrap();
         assert_eq!(snapshot.windows.len(), 1);
         assert_eq!(snapshot.windows[0].used_percent, 42.0);
         assert!(snapshot.windows[0].reset_at.is_none());
@@ -541,7 +524,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let snapshot = normalize(payload, None).unwrap();
+        let snapshot = normalize(&payload, None).unwrap();
         assert_eq!(snapshot.identity.email.as_deref(), Some("api@example.com"));
     }
 

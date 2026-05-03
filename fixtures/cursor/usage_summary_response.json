@@ -1,0 +1,61 @@
+{
+  "body_json": {
+    "autoModelSelectedDisplayMessage": "Example usage message (redacted)",
+    "billingCycleEnd": "2026-05-11T00:00:00.000Z",
+    "billingCycleStart": "2026-04-11T00:00:00.000Z",
+    "individualUsage": {
+      "onDemand": {
+        "enabled": false,
+        "limit": null,
+        "remaining": null,
+        "used": 0
+      },
+      "plan": {
+        "apiPercentUsed": 50.0,
+        "autoPercentUsed": 40.0,
+        "breakdown": {
+          "bonus": 1000,
+          "included": 2000,
+          "total": 3000
+        },
+        "enabled": true,
+        "limit": 2000,
+        "remaining": 500,
+        "totalPercentUsed": 45.0,
+        "used": 1500
+      }
+    },
+    "isUnlimited": false,
+    "limitType": "user",
+    "membershipType": "pro",
+    "namedModelSelectedDisplayMessage": "Example API usage message (redacted)",
+    "teamUsage": {}
+  },
+  "body_text": "{\"autoModelSelectedDisplayMessage\":\"Example usage message (redacted)\",\"billingCycleEnd\":\"2026-05-11T00:00:00.000Z\",\"billingCycleStart\":\"2026-04-11T00:00:00.000Z\",\"individualUsage\":{\"onDemand\":{\"enabled\":false,\"limit\":null,\"remaining\":null,\"used\":0},\"plan\":{\"apiPercentUsed\":50.0,\"autoPercentUsed\":40.0,\"breakdown\":{\"bonus\":1000,\"included\":2000,\"total\":3000},\"enabled\":true,\"limit\":2000,\"remaining\":500,\"totalPercentUsed\":45.0,\"used\":1500}},\"isUnlimited\":false,\"limitType\":\"user\",\"membershipType\":\"pro\",\"namedModelSelectedDisplayMessage\":\"Example API usage message (redacted)\",\"teamUsage\":{}}",
+  "endpoint": "usage_summary",
+  "method": "GET",
+  "requested_at": "2026-05-04T14:08:59.548684+00:00",
+  "response_headers": {
+    "Accept-Ch": "Sec-CH-UA-Arch, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version, Sec-CH-UA-Bitness",
+    "Age": "0",
+    "Cache-Control": "public, max-age=0, must-revalidate",
+    "Connection": "close",
+    "Content-Length": "591",
+    "Content-Security-Policy": "redacted",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Mon, 04 May 2026 14:08:59 GMT",
+    "Etag": "\"redacted\"",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Server": "Vercel",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Matched-Path": "/api/usage-summary",
+    "X-Permitted-Cross-Domain-Policies": "none",
+    "X-Vercel-Cache": "MISS",
+    "X-Vercel-Id": "redacted",
+    "X-Xss-Protection": "1; mode=block"
+  },
+  "status_code": 200,
+  "url": "https://cursor.com/api/usage-summary"
+}

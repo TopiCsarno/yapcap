@@ -9,3 +9,17 @@
 - Before committing, update `docs/spec.md` when behavior or user-facing expectations change.
 - Before committing, run `just check` and `cargo test` and `cargo fmt`, then fix all warnings, errors, and failures.
 - Do not add agent or AI attribution to commit messages (no `Co-Authored-By: Claude` or similar).
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repo uses the default triage label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo. `docs/spec.md` is the current product/domain spec; ADRs may be added under `docs/adr/`. See `docs/agents/domain.md`.

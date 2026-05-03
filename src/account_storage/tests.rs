@@ -30,6 +30,7 @@ fn snapshot() -> UsageSnapshot {
         headline: UsageHeadline(0),
         windows: Vec::new(),
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("person@example.com".to_string()),
             account_id: Some("acct-1".to_string()),

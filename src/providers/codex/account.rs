@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::account_storage::ProviderAccountStorage;
-use crate::config::{Config, ManagedCodexAccountConfig, paths};
+use crate::config::{Config, ManagedCodexAccountConfig, managed_codex_account_dir, paths};
 use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,6 +56,7 @@ pub fn discover_accounts(config: &Config) -> Vec<CodexAccount> {
 
 pub fn sync_managed_accounts(config: &mut Config) -> bool {
     let changed = dedupe_managed_accounts(config);
+    let dirs_changed = resync_managed_codex_dirs(config);
     let had_system = config
         .selected_codex_account_ids
         .iter()
@@ -63,7 +64,19 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     config
         .selected_codex_account_ids
         .retain(|id| id != "system");
-    changed || had_system
+    changed || had_system || dirs_changed
+}
+
+fn resync_managed_codex_dirs(config: &mut Config) -> bool {
+    let mut dirs_changed = false;
+    for account in &mut config.codex_managed_accounts {
+        let canonical = managed_codex_account_dir(&account.id);
+        if account.codex_home != canonical {
+            account.codex_home = canonical;
+            dirs_changed = true;
+        }
+    }
+    dirs_changed
 }
 
 pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConfig) {

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::account_storage::ProviderAccountStorage;
-use crate::config::{Config, ProviderVisibilityMode, paths};
+use crate::config::{
+    Config, ProviderVisibilityMode, managed_claude_account_dir, managed_codex_account_dir, paths,
+};
 use crate::error::AppError;
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderHealth,
@@ -26,7 +28,8 @@ pub fn capabilities(provider: ProviderId) -> ProviderCapabilities {
 pub fn startup_sync(config: &mut Config) -> bool {
     let codex_changed = codex::sync_managed_accounts(config);
     let cursor_changed = cursor::sync_managed_accounts(config);
-    codex_changed | cursor_changed
+    let claude_changed = claude::sync_managed_account_dirs(config);
+    codex_changed | cursor_changed | claude_changed
 }
 
 pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
@@ -203,7 +206,7 @@ impl ProviderAdapter for CodexAdapter {
         Box::pin(async move {
             match handle {
                 ProviderAccountHandle::Codex(account) => {
-                    codex::fetch(client, &account.id, account.codex_home.clone())
+                    codex::fetch(client, &account.id, managed_codex_account_dir(&account.id))
                         .await
                         .map_err(AppError::from)
                 }
@@ -251,15 +254,14 @@ impl ProviderAdapter for ClaudeAdapter {
     }
 
     fn delete_account(&self, account_id: &str, config: &mut Config) -> bool {
-        let account = config
+        if !config
             .claude_managed_accounts
             .iter()
-            .find(|a| a.id == account_id)
-            .cloned();
-        let Some(account) = account else {
+            .any(|a| a.id == account_id)
+        {
             return false;
-        };
-        claude::remove_managed_config_dir(&account.config_dir);
+        }
+        claude::remove_managed_config_dir(&managed_claude_account_dir(account_id));
         config
             .claude_managed_accounts
             .retain(|a| a.id != account_id);
@@ -282,7 +284,7 @@ impl ProviderAdapter for ClaudeAdapter {
         Box::pin(async move {
             match handle {
                 ProviderAccountHandle::Claude(account) => {
-                    claude::fetch(client, &account.id, account.config_dir.clone())
+                    claude::fetch(client, &account.id, managed_claude_account_dir(&account.id))
                         .await
                         .map_err(AppError::from)
                 }

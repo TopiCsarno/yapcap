@@ -5,6 +5,7 @@ mod app;
 mod auth;
 mod cache;
 mod config;
+mod currency_format;
 #[cfg(debug_assertions)]
 mod debug_env;
 mod demo_env;

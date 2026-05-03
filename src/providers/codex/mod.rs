@@ -341,6 +341,7 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
         headline: UsageHeadline::first_available(&windows),
         windows,
         provider_cost,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: payload.email,
             account_id: payload.account_id,

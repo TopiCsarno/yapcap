@@ -1,0 +1,72 @@
+{
+  "body_json": {
+    "account_id": "user-example-redacted",
+    "additional_rate_limits": null,
+    "code_review_rate_limit": null,
+    "credits": {
+      "approx_cloud_messages": [
+        0,
+        0
+      ],
+      "approx_local_messages": [
+        0,
+        0
+      ],
+      "balance": "0",
+      "has_credits": false,
+      "overage_limit_reached": false,
+      "unlimited": false
+    },
+    "email": "user@example.com",
+    "plan_type": "plus",
+    "promo": null,
+    "rate_limit": {
+      "allowed": true,
+      "limit_reached": false,
+      "primary_window": {
+        "limit_window_seconds": 18000,
+        "reset_after_seconds": 18000,
+        "reset_at": 1777900000,
+        "used_percent": 0
+      },
+      "secondary_window": {
+        "limit_window_seconds": 604800,
+        "reset_after_seconds": 60000,
+        "reset_at": 1777950000,
+        "used_percent": 100
+      }
+    },
+    "rate_limit_reached_type": null,
+    "referral_beacon": null,
+    "spend_control": {
+      "individual_limit": null,
+      "reached": false
+    },
+    "user_id": "user-example-redacted"
+  },
+  "body_text": "{\n  \"account_id\": \"user-example-redacted\",\n  \"additional_rate_limits\": null,\n  \"code_review_rate_limit\": null,\n  \"credits\": {\n    \"approx_cloud_messages\": [\n      0,\n      0\n    ],\n    \"approx_local_messages\": [\n      0,\n      0\n    ],\n    \"balance\": \"0\",\n    \"has_credits\": false,\n    \"overage_limit_reached\": false,\n    \"unlimited\": false\n  },\n  \"email\": \"user@example.com\",\n  \"plan_type\": \"plus\",\n  \"promo\": null,\n  \"rate_limit\": {\n    \"allowed\": true,\n    \"limit_reached\": false,\n    \"primary_window\": {\n      \"limit_window_seconds\": 18000,\n      \"reset_after_seconds\": 18000,\n      \"reset_at\": 1777900000,\n      \"used_percent\": 0\n    },\n    \"secondary_window\": {\n      \"limit_window_seconds\": 604800,\n      \"reset_after_seconds\": 60000,\n      \"reset_at\": 1777950000,\n      \"used_percent\": 100\n    }\n  },\n  \"rate_limit_reached_type\": null,\n  \"referral_beacon\": null,\n  \"spend_control\": {\n    \"individual_limit\": null,\n    \"reached\": false\n  },\n  \"user_id\": \"user-example-redacted\"\n}",
+  "endpoint": "wham_usage",
+  "method": "GET",
+  "requested_at": "2026-05-04T14:04:23.785291+00:00",
+  "response_headers": {
+    "CF-RAY": "redacted-ray-id",
+    "Connection": "close",
+    "Content-Length": "986",
+    "Content-Type": "application/json",
+    "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+    "Date": "Mon, 04 May 2026 14:04:23 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.01,\"max_age\":604800}",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"redacted\"}]}",
+    "Server": "cloudflare",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "set-cookie": "__cflb=REDACTED; HttpOnly; SameSite=None; Secure; Path=/;",
+    "x-oai-request-id": "req_redacted_codex_usage_example",
+    "x-openai-proxy-wasm": "v0.1"
+  },
+  "status_code": 200,
+  "url": "https://chatgpt.com/backend-api/wham/usage"
+}

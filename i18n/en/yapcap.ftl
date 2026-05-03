@@ -99,7 +99,8 @@ no-providers-detail = Open Settings, enable a provider, and add an account to ge
 no-providers-open-settings = Open Settings
 account-label = Account
 status-label = Status
-extra-label = Extra
+extra-usage-label = Extra usage
+extra-usage-disabled = Disabled
 credits-label = Credits
 credits-available = { $balance } available
 

@@ -116,6 +116,7 @@ mod tests {
             headline: UsageHeadline(0),
             windows: Vec::new(),
             provider_cost: None,
+            extra_usage: None,
             identity: ProviderIdentity::default(),
         }
     }

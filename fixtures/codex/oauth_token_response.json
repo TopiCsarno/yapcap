@@ -1,0 +1,37 @@
+{
+  "body_json": {
+    "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJhdWQiOlsiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS92MSJdLCJjbGllbnRfaWQiOiJhcHBfRU1vYW1FRVo3M2YwQ2tYYVhwN2hyYW5uIn0.redacted_signature",
+    "expires_in": 864000,
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJuYW1lIjoiRXhhbXBsZSBVc2VyIn0.redacted_signature",
+    "refresh_token": "rt_redacted_example_refresh.token_placeholder",
+    "scope": "openid profile email offline_access api.connectors.read api.connectors.invoke",
+    "token_type": "bearer"
+  },
+  "body_text": "{\n  \"access_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJhdWQiOlsiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS92MSJdLCJjbGllbnRfaWQiOiJhcHBfRU1vYW1FRVo3M2YwQ2tYYVhwN2hyYW5uIn0.redacted_signature\",\n  \"expires_in\": 864000,\n  \"id_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJuYW1lIjoiRXhhbXBsZSBVc2VyIn0.redacted_signature\",\n  \"refresh_token\": \"rt_redacted_example_refresh.token_placeholder\",\n  \"scope\": \"openid profile email offline_access api.connectors.read api.connectors.invoke\",\n  \"token_type\": \"bearer\"\n}",
+  "endpoint": "oauth_token",
+  "method": "POST",
+  "requested_at": "2026-05-04T14:04:22.735851+00:00",
+  "response_headers": {
+    "CF-RAY": "redacted-ray-id",
+    "Connection": "close",
+    "Content-Length": "578",
+    "Content-Type": "application/json",
+    "Date": "Mon, 04 May 2026 14:04:22 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.1,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"redacted\"}]}",
+    "Server": "cloudflare",
+    "Set-Cookie": "oai-did=REDACTED; path=/; Domain=.openai.com; Max-Age=31536000;",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+    "Timing-Allow-Origin": "*",
+    "X-Content-Type-Options": "nosniff",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "openai-processing-ms": "0",
+    "openai-version": "2020-10-01",
+    "set-cookie": "_cfuvid=REDACTED; HttpOnly; SameSite=None; Secure; Path=/; Domain=auth.openai.com",
+    "x-openai-proxy-wasm": "v0.1",
+    "x-request-id": "req_redacted_codex_oauth_example"
+  },
+  "status_code": 200,
+  "url": "https://auth.openai.com/oauth/token"
+}

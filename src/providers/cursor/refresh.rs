@@ -221,6 +221,7 @@ fn normalize(
         headline: UsageHeadline::first_available(&windows),
         windows,
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: identity.as_ref().and_then(|value| value.email.clone()),
             account_id: None,
@@ -373,18 +374,30 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_fixture() {
+    fn normalizes_probe_fixtures() {
+        let usage_envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/cursor/usage_summary_response.json"
+        ))
+        .unwrap();
         let usage: CursorUsageResponse =
-            serde_json::from_str(include_str!("../../../fixtures/cursor/usage_summary.json"))
-                .unwrap();
+            serde_json::from_value(usage_envelope["body_json"].clone()).unwrap();
+        let me_envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/cursor/auth_me_response.json"
+        ))
+        .unwrap();
         let identity: CursorIdentityResponse =
-            serde_json::from_str(include_str!("../../../fixtures/cursor/auth_me.json")).unwrap();
+            serde_json::from_value(me_envelope["body_json"].clone()).unwrap();
         let snapshot = normalize(usage, Some(identity)).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Cursor);
-        assert!((snapshot.windows[0].used_percent - 56.933_333_f32).abs() < 0.001);
-        assert!((snapshot.windows[1].used_percent - 29.828_571_f32).abs() < 0.001);
-        assert_eq!(snapshot.windows[2].used_percent, 100.0);
+        assert_eq!(snapshot.windows[0].used_percent, 45.0);
+        assert_eq!(snapshot.windows[1].used_percent, 40.0);
+        assert_eq!(snapshot.windows[2].used_percent, 50.0);
         assert_eq!(snapshot.identity.plan.as_deref(), Some("pro"));
+        assert_eq!(snapshot.identity.email.as_deref(), Some("user@example.com"));
+        assert_eq!(
+            snapshot.identity.display_name.as_deref(),
+            Some("Example User")
+        );
     }
 
     #[tokio::test]

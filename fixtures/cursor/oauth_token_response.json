@@ -1,0 +1,22 @@
+{
+  "body_json": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJzdWIiOiJhdXRoMHx1c2VyX2V4YW1wbGVfcmVkYWN0ZWQiLCJleHAiOjIwMDAwMDAwMDAsImlzcyI6Imh0dHBzOi8vYXV0aGVudGljYXRpb24uY3Vyc29yLnNoIiwiYXVkIjoiaHR0cHM6Ly9jdXJzb3IuY29tIiwidHlwZSI6InNlc3Npb24ifQ.redacted_signature",
+    "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJzdWIiOiJhdXRoMHx1c2VyX2V4YW1wbGVfcmVkYWN0ZWQiLCJleHAiOjIwMDAwMDAwMDAsImlzcyI6Imh0dHBzOi8vYXV0aGVudGljYXRpb24uY3Vyc29yLnNoIiwiYXVkIjoiaHR0cHM6Ly9jdXJzb3IuY29tIiwidHlwZSI6InNlc3Npb24ifQ.redacted_signature",
+    "shouldLogout": false
+  },
+  "body_text": "{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJzdWIiOiJhdXRoMHx1c2VyX2V4YW1wbGVfcmVkYWN0ZWQiLCJleHAiOjIwMDAwMDAwMDAsImlzcyI6Imh0dHBzOi8vYXV0aGVudGljYXRpb24uY3Vyc29yLnNoIiwiYXVkIjoiaHR0cHM6Ly9jdXJzb3IuY29tIiwidHlwZSI6InNlc3Npb24ifQ.redacted_signature\",\"id_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZWFjdGVkIjp0cnVlLCJzdWIiOiJhdXRoMHx1c2VyX2V4YW1wbGVfcmVkYWN0ZWQiLCJleHAiOjIwMDAwMDAwMDAsImlzcyI6Imh0dHBzOi8vYXV0aGVudGljYXRpb24uY3Vyc29yLnNoIiwiYXVkIjoiaHR0cHM6Ly9jdXJzb3IuY29tIiwidHlwZSI6InNlc3Npb24ifQ.redacted_signature\",\"shouldLogout\":false}",
+  "endpoint": "oauth_token",
+  "method": "POST",
+  "requested_at": "2026-05-04T14:08:59.322290+00:00",
+  "response_headers": {
+    "Connection": "close",
+    "Content-Length": "578",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Mon, 04 May 2026 14:08:59 GMT",
+    "access-control-allow-credentials": "true",
+    "access-control-expose-headers": "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin, Content-Encoding, Connect-Content-Encoding, traceparent, backend-traceparent, x-amzn-trace-id, x-request-id",
+    "vary": "Origin"
+  },
+  "status_code": 200,
+  "url": "https://api2.cursor.sh/oauth/token"
+}

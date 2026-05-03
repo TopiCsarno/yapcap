@@ -237,6 +237,7 @@ fn snapshot_codex_primary() -> UsageSnapshot {
             limit: None,
             units: "credits".to_string(),
         }),
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("ada@example.com".to_string()),
             account_id: Some("demo-acct-8f2a1c".to_string()),
@@ -276,6 +277,7 @@ fn snapshot_codex_secondary() -> UsageSnapshot {
             limit: None,
             units: "credits".to_string(),
         }),
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("pair@example.com".to_string()),
             account_id: Some("demo-acct-31be7d".to_string()),
@@ -320,6 +322,7 @@ fn snapshot_claude_primary() -> UsageSnapshot {
         headline: UsageHeadline(0),
         windows,
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("team@example.com".to_string()),
             account_id: None,
@@ -360,6 +363,7 @@ fn snapshot_claude_secondary() -> UsageSnapshot {
             },
         ],
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("labs@example.com".to_string()),
             account_id: None,
@@ -386,6 +390,7 @@ fn snapshot_cursor_primary() -> UsageSnapshot {
         headline: UsageHeadline(0),
         windows,
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("solo@example.com".to_string()),
             account_id: None,
@@ -411,6 +416,7 @@ fn snapshot_cursor_secondary() -> UsageSnapshot {
             window_cursor("API", 96.0, reset_at, window_seconds),
         ],
         provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity {
             email: Some("reauth@example.com".to_string()),
             account_id: None,

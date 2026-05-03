@@ -3,7 +3,10 @@
 use serde_json::Value;
 
 fn manifest() -> Value {
-    let path = format!("{}/com.topi.YapCap.json", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/packaging/com.topi.YapCap.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let text = std::fs::read_to_string(path).expect("flatpak manifest should be readable");
     serde_json::from_str(&text).expect("flatpak manifest should be valid JSON")
 }

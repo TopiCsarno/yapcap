@@ -162,7 +162,7 @@ pub fn popup_settings_size(state: &AppState) -> Size {
 }
 
 fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
-    let n = state.selected_accounts(provider).len().max(1);
+    let n = state.display_selected_account_count(provider);
     f32::from(u8::try_from(n).unwrap_or(u8::MAX))
 }
 
@@ -704,7 +704,7 @@ fn selected_state(
 
 fn tab_percents(state: &AppState, provider: &ProviderRuntimeState) -> Vec<f32> {
     let now = chrono::Utc::now();
-    let accounts = state.selected_accounts(provider.provider);
+    let accounts = state.display_selected_accounts(provider.provider);
     if accounts.is_empty() {
         let pct = active_snapshot(state, provider)
             .and_then(|s| s.headline_window())

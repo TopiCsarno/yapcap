@@ -1,10 +1,11 @@
 use super::{
     APPLET_ACCOUNT_GAP, APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER, APPLET_ICON_GAP,
-    APPLET_PERCENT_TEXT_WIDTH, Alignment, AppModel, AppState, Config, CosmicButton,
-    CosmicConfigEntry, Element, Length, Limits, Message, PanelIconStyle, ProviderId, Size,
-    UsageAmountFormat, cosmic_config, progress_bar, provider_icon_handle, provider_icon_variant,
-    row, usage_display, widget,
+    APPLET_PERCENT_ACCOUNT_GAP, APPLET_PERCENT_CELL_HORIZONTAL_PAD, APPLET_PERCENT_GLYPH_WIDTH,
+    Alignment, AppModel, AppState, Config, CosmicButton, CosmicConfigEntry, Element, Length,
+    Limits, Message, PanelIconStyle, ProviderId, Size, UsageAmountFormat, cosmic_config,
+    progress_bar, provider_icon_handle, provider_icon_variant, row, usage_display, widget,
 };
+use crate::account_selection::MAX_MULTI_ACCOUNT_SELECTION;
 
 pub(crate) fn applet_settings() -> cosmic::app::Settings {
     let preview_core = cosmic::Core::default();
@@ -18,7 +19,12 @@ pub(crate) fn applet_settings() -> cosmic::app::Settings {
     let n_accounts = ProviderId::ALL
         .iter()
         .filter(|&&p| config.provider_enabled(p))
-        .map(|&p| config.selected_account_ids(p).len().max(1))
+        .map(|&p| {
+            config
+                .selected_account_ids(p)
+                .len()
+                .clamp(1, MAX_MULTI_ACCOUNT_SELECTION)
+        })
         .max()
         .unwrap_or(1);
     let (width, height) = applet_button_size(&preview_core, config.panel_icon_style, n_accounts);
@@ -157,17 +163,21 @@ pub(super) fn applet_button_size(
         PanelIconStyle::LogoAndBars => logo_width + APPLET_ICON_GAP + bars_total,
         PanelIconStyle::BarsOnly => bars_total,
         PanelIconStyle::LogoAndPercent => {
-            let percents_width = n * APPLET_PERCENT_TEXT_WIDTH + (n - 1.0) * APPLET_ACCOUNT_GAP;
-            logo_width + APPLET_ICON_GAP + percents_width
+            logo_width + APPLET_ICON_GAP + percent_columns_content_width(n_accounts)
         }
-        PanelIconStyle::PercentOnly => {
-            n * APPLET_PERCENT_TEXT_WIDTH + (n - 1.0) * APPLET_ACCOUNT_GAP
-        }
+        PanelIconStyle::PercentOnly => percent_columns_content_width(n_accounts),
     };
     let width = content_width + f32::from(2 * horizontal_padding);
     let height = f32::from(suggested_h + 2 * vertical_padding);
 
     (width, height)
+}
+
+fn percent_columns_content_width(n_accounts: usize) -> f32 {
+    let n = n_accounts.max(1);
+    let n_width = f32::from(u8::try_from(n).unwrap_or(u8::MAX));
+    let gap_count = f32::from(u8::try_from(n.saturating_sub(1)).unwrap_or(u8::MAX));
+    n_width * applet_percent_cell_width() + gap_count * APPLET_PERCENT_ACCOUNT_GAP
 }
 
 pub(super) fn applet_bar_width(suggested_w: u16, suggested_h: u16) -> f32 {
@@ -180,13 +190,24 @@ pub(super) fn applet_percent_text(percent: f32) -> String {
     format!("{percent:.1}%")
 }
 
+pub(super) fn applet_percent_cell_width() -> f32 {
+    let n_chars = u8::try_from(applet_percent_text(100.0).chars().count()).unwrap_or(u8::MAX);
+    f32::from(n_chars) * APPLET_PERCENT_GLYPH_WIDTH + APPLET_PERCENT_CELL_HORIZONTAL_PAD
+}
+
 fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Message> {
     let mut r = row![].align_y(Alignment::Center);
     for (i, &(p0, _)) in account_percents.iter().enumerate() {
         if i > 0 {
-            r = r.push(cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_ACCOUNT_GAP)));
+            r = r.push(
+                cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_PERCENT_ACCOUNT_GAP)),
+            );
         }
-        r = r.push(widget::text(applet_percent_text(p0)).size(13));
+        let w = applet_percent_cell_width();
+        let cell = widget::container(widget::text(applet_percent_text(p0)).size(13))
+            .width(Length::Fixed(w))
+            .align_x(Alignment::Center);
+        r = r.push(cell);
     }
     r.into()
 }
@@ -197,7 +218,7 @@ pub(super) fn selected_provider_all_percents(
     usage_amount_format: UsageAmountFormat,
 ) -> Vec<(f32, f32)> {
     let now = chrono::Utc::now();
-    let accounts = state.selected_accounts(selected_provider);
+    let accounts = state.display_selected_accounts(selected_provider);
     if accounts.is_empty() {
         let snapshot = state
             .provider(selected_provider)

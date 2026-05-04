@@ -25,7 +25,7 @@ pub(super) fn selected_provider_view<'a>(
     let Some(provider) = provider else {
         return no_providers_view();
     };
-    let accounts = state.selected_accounts(provider.provider);
+    let accounts = state.display_selected_accounts(provider.provider);
     let summary = provider_summary(provider);
 
     if accounts.len() <= 1 {
@@ -58,7 +58,7 @@ pub(super) fn provider_body_height_multi(
     let Some(provider) = provider else {
         return PROVIDER_SUMMARY_HEIGHT;
     };
-    let accounts = state.selected_accounts(provider.provider);
+    let accounts = state.display_selected_accounts(provider.provider);
     if accounts.is_empty() {
         return provider_body_height_for_account(provider, None);
     }
@@ -156,10 +156,7 @@ fn account_column_header<'a>(
 
     let status = account_status_badge(account, provider);
     let mut status_row = row![status].spacing(8).align_y(Alignment::Center);
-    let active_id = match provider.provider {
-        ProviderId::Claude => provider.active_account_id.as_deref(),
-        _ => provider.system_active_account_id.as_deref(),
-    };
+    let active_id = provider.system_active_account_id.as_deref();
     if active_id == Some(account.account_id.as_str()) {
         status_row = status_row.push(badge_with_tooltip(
             badge_success(fl!("badge-active")),

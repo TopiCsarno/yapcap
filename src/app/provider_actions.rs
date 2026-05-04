@@ -7,6 +7,7 @@ use super::{
     refresh_provider_tasks, registry, resize_popup, runtime, select_provider, update_retry_delay,
     update_retry_task,
 };
+use crate::account_selection::provider_show_all_account_selection;
 
 impl AppModel {
     pub(super) fn handle_provider_refreshed(
@@ -89,9 +90,7 @@ impl AppModel {
     pub(super) fn sync_panel_suggested_bounds(&mut self) {
         let n_accounts = self
             .state
-            .selected_accounts(self.selected_provider)
-            .len()
-            .max(1);
+            .display_selected_account_count(self.selected_provider);
         let (w, h) = applet_button_size(&self.core, self.config.panel_icon_style, n_accounts);
         self.core.applet.suggested_bounds = Some(Size::new(w, h));
     }
@@ -224,28 +223,22 @@ impl AppModel {
         self.write_config(|c| {
             c.set_provider_show_all(provider, show_all);
             if show_all {
-                let all_ids: Vec<String> = match provider {
-                    ProviderId::Codex => c
-                        .codex_managed_accounts
-                        .iter()
-                        .map(|a| a.id.clone())
-                        .collect(),
-                    ProviderId::Claude => c
-                        .claude_managed_accounts
-                        .iter()
-                        .map(|a| a.id.clone())
-                        .collect(),
-                    ProviderId::Cursor => c
-                        .cursor_managed_accounts
-                        .iter()
-                        .map(|a| cursor::managed_account_id(&a.id))
-                        .collect(),
-                };
-                *c.selected_account_ids_mut(provider) = all_ids;
+                *c.selected_account_ids_mut(provider) =
+                    provider_show_all_account_selection(c, provider);
             }
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         Task::none()
+    }
+
+    pub(super) fn on_host_cli_auth_changed(&mut self) {
+        if demo_env::is_active() {
+            return;
+        }
+        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
+        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Claude);
+        runtime::persist_state(&self.state);
+        self.sync_panel_suggested_bounds();
     }
 
     pub(super) fn on_config_update(&mut self, config: Config) {

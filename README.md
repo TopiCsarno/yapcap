@@ -20,6 +20,7 @@
 
 YapCap lives in your COSMIC panel and shows how much of your AI coding quota you've used — without sending anything to a third party. All data is fetched directly from provider APIs using accounts you add in YapCap. No telemetry, no cloud sync, no separate account needed.
 
+
 ## Highlights
 
 - **Three providers**
@@ -30,6 +31,8 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 - **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
 - **Explicit accounts** — credentials are added through YapCap and stored under YapCap-owned account directories
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
+- **COSMIC themes** — popup and panel respect your system theme, accent, and icon context
+<!-- - **Available in the COSMIC Store** — YapCap can be installed through the COSMIC Store as a flatpak package which recieves auto-updates.  -->
 
 ## Screenshots
 
@@ -82,13 +85,45 @@ YapCap follows your COSMIC system theme—the popup and panel pick up light or d
 
 ### Flatpak
 
-YapCap includes a baseline Flatpak manifest for COSMIC Store packaging:
+<!--
+After YapCap is listed in [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) and the COSMIC Store, install from the **cosmic** Flatpak remote:
 
 ```bash
-flatpak-builder --user --install --force-clean build-dir com.topi.YapCap.json
+flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
+flatpak install --user cosmic com.topi.YapCap
 ```
 
-See `docs/flatpak.md` for packaging notes and current permission rationale.
+You can also open **COSMIC Store**, search for **YapCap**, and install from there (add the `cosmic` remote if the store asks for it).
+
+-->
+
+Manifests follow the same layout as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets: `com.system76.Cosmic.BaseApp`, primary **`git`** source, plus `packaging/cargo-sources.json` from `Cargo.lock`. The clone under `packaging/` tracks branch **`dev`**; `flatpak-builder` fetches that branch from GitHub, so **`just flatpak-build` tests what is on the remote branch**, not uncommitted local edits (push first, or temporarily switch the manifest to a `dir` source for purely local experiments).
+
+From a clone:
+
+```bash
+just flatpak-build
+```
+
+Install (runs an incremental `flatpak-build` first, then exports and installs):
+
+```bash
+just flatpak-install
+```
+
+Re-export and install from an existing `build-dir` without running `flatpak-builder` again:
+
+```bash
+just flatpak-install-only
+```
+
+Manual build (user Flatpak install, Flathub deps):
+
+```bash
+flatpak-builder --user --install-deps-from=flathub --install --force-clean build-dir packaging/com.topi.YapCap.json
+```
+
+Packaging details are in `docs/spec.md` § Packaging; regenerate `packaging/cargo-sources.json` after lockfile changes with [flatpak-cargo-generator](https://github.com/flatpak/flatpak-builder-tools/blob/master/cargo/flatpak-cargo-generator.py) and `Cargo.lock`.
 
 ### apt (Debian/Ubuntu/Pop!\_OS)
 
@@ -171,9 +206,11 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 - **Cursor shows no data** — open **Settings → Cursor** and add or re-authenticate the account with the managed browser flow.
 - **Stale data** — a transient failure keeps the last good snapshot visible and marks it stale. Click **Refresh now** once the network or provider is back.
 
-Logs at `~/.local/state/yapcap/logs/yapcap.log` are the fastest way to diagnose issues.
+Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/app/com.topi.YapCap/data/yapcap/logs/yapcap.log`.
 
 ## File locations
+
+**Native** (typical XDG defaults):
 
 | Path | Purpose |
 | --- | --- |
@@ -181,6 +218,8 @@ Logs at `~/.local/state/yapcap/logs/yapcap.log` are the fastest way to diagnose 
 | `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
 | `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`}`-accounts/` | Managed credential copies |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
+
+**Flatpak** (`com.topi.YapCap`): YapCap cache and state live only under `~/.var/app/com.topi.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
 
 ## Limitations
 

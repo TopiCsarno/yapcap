@@ -6,7 +6,7 @@ You are an autonomous coding agent working in the YapCap repository.
 
 The shell script sets these environment variables:
 
-- `RALPH_FEATURE_SLUG`: feature slug under `.scratch/`
+- `RALPH_FEATURE_SLUG`: feature slug under `issues/`
 - `RALPH_FEATURE_DIR`: local feature issue directory
 - `RALPH_PROGRESS_FILE`: append-only progress log
 
@@ -14,7 +14,7 @@ The shell script sets these environment variables:
 
 - Never run `git push`.
 - Never publish issues or comments to GitHub.
-- Work from local markdown files under `.scratch/`.
+- Work from local markdown files under `issues/`.
 - Implement exactly one issue per run.
 - Use TDD where practical: write or update a focused failing test, implement the smallest behavior, then refactor.
 - Keep changes focused to the selected issue.

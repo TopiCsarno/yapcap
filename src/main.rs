@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+mod account_selection;
 pub mod account_storage;
 mod app;
 mod auth;

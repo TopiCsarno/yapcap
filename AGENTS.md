@@ -14,7 +14,7 @@
 
 ### Issue tracker
 
-Issues are tracked as local markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Issues are tracked as local markdown files under `issues/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -148,7 +148,7 @@ fn reset_time_section(current_format: ResetTimeFormat) -> Element<'static, Messa
     let example_window = UsageWindow {
         label: "Session".to_string(),
         used_percent: 50.0,
-        reset_at: Some(now + chrono::Duration::hours(28)),
+        reset_at: Some(now + chrono::Duration::hours(4)),
         window_seconds: None,
         reset_description: None,
     };
@@ -160,7 +160,7 @@ fn reset_time_section(current_format: ResetTimeFormat) -> Element<'static, Messa
             let example = usage_display::reset_label(&example_window, now, *format)
                 .unwrap_or_else(|| fl!("reset-now"));
             let example_size = if *format == ResetTimeFormat::Absolute {
-                9
+                8
             } else {
                 10
             };

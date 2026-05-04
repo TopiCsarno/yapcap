@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 mod account;
+mod host_session;
 mod login;
 mod oauth;
 
@@ -12,6 +13,7 @@ use crate::model::{
 };
 use crate::usage_display;
 use chrono::{DateTime, Duration, Utc};
+pub(crate) use host_session::system_active_account_id;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use std::path::PathBuf;

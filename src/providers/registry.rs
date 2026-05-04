@@ -2,7 +2,8 @@
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{
-    Config, ProviderVisibilityMode, managed_claude_account_dir, managed_codex_account_dir, paths,
+    Config, ProviderVisibilityMode, host_user_home_dir, managed_claude_account_dir,
+    managed_codex_account_dir, paths,
 };
 use crate::error::AppError;
 use crate::model::{
@@ -274,6 +275,10 @@ impl ProviderAdapter for ClaudeAdapter {
     fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState) {
         let accounts = self.discover_accounts(config);
         reconcile_provider_account_descriptors(self.id(), config, state, &accounts);
+        if let Some(provider_state) = state.provider_mut(ProviderId::Claude) {
+            provider_state.system_active_account_id =
+                claude_system_active_account_id(&config.claude_managed_accounts);
+        }
     }
 
     fn fetch_account<'a>(
@@ -547,6 +552,13 @@ pub(crate) fn cursor_system_active_account_id(
 pub(crate) fn codex_system_active_account_id(
     managed_accounts: &[crate::config::ManagedCodexAccountConfig],
 ) -> Option<String> {
-    let auth_path = dirs::home_dir()?.join(".codex/auth.json");
+    let auth_path = host_user_home_dir()?.join(".codex/auth.json");
     codex::system_active_account_id(managed_accounts, &auth_path)
+}
+
+pub(crate) fn claude_system_active_account_id(
+    managed_accounts: &[crate::config::ManagedClaudeAccountConfig],
+) -> Option<String> {
+    let path = host_user_home_dir()?.join(".claude.json");
+    claude::system_active_account_id(managed_accounts, &path)
 }

@@ -1,13 +1,13 @@
 # Issue Tracker
 
-Issues for this repository live as local markdown files under `.scratch/`.
+Issues for this repository live as local markdown files under `issues/`.
 
-Engineering skills that create or update issues should write markdown files under a feature-specific `.scratch/<feature-slug>/` directory.
+Engineering skills that create or update issues should write markdown files under a feature-specific `issues/<feature-slug>/` directory.
 
 Use this layout:
 
 ```text
-.scratch/<feature-slug>/
+issues/<feature-slug>/
   README.md
   PRD.md
   issues/

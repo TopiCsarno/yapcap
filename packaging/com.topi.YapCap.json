@@ -1,31 +1,28 @@
 {
-  "app-id": "com.topi.YapCap",
+  "id": "com.topi.YapCap",
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "25.08",
+  "base": "com.system76.Cosmic.BaseApp",
+  "base-version": "stable",
   "sdk": "org.freedesktop.Sdk",
-  "sdk-extensions": [
-    "org.freedesktop.Sdk.Extension.rust-stable"
-  ],
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
   "command": "yapcap",
   "finish-args": [
-    "--share=network",
     "--share=ipc",
     "--socket=wayland",
     "--socket=fallback-x11",
-    "--socket=session-bus",
     "--device=dri",
-    "--filesystem=xdg-config/cosmic:rw",
+    "--share=network",
+    "--talk-name=com.system76.CosmicSettingsDaemon",
+    "--filesystem=~/.config/cosmic:rw",
     "--filesystem=~/.config/Cursor:ro",
-    "--filesystem=~/.codex/auth.json:ro"
+    "--filesystem=~/.codex/auth.json:ro",
+    "--filesystem=~/.claude.json:ro"
   ],
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin",
-    "build-args": [
-      "--share=network"
-    ],
     "env": {
-      "CARGO_HOME": "/run/build/yapcap/cargo",
-      "RUST_BACKTRACE": "1"
+      "CARGO_HOME": "/run/build/yapcap/cargo"
     }
   },
   "modules": [
@@ -33,7 +30,8 @@
       "name": "yapcap",
       "buildsystem": "simple",
       "build-commands": [
-        "cargo build --release --locked",
+        "cargo --offline fetch --manifest-path Cargo.toml --verbose",
+        "cargo --offline build --release --verbose",
         "install -Dm0755 target/release/yapcap /app/bin/yapcap",
         "install -Dm0644 resources/app.desktop /app/share/applications/com.topi.YapCap.desktop",
         "install -Dm0644 resources/app.metainfo.xml /app/share/metainfo/com.topi.YapCap.metainfo.xml",
@@ -41,9 +39,11 @@
       ],
       "sources": [
         {
-          "type": "dir",
-          "path": "."
-        }
+          "type": "git",
+          "url": "https://github.com/TopiCsarno/yapcap.git",
+          "branch": "dev"
+        },
+        "cargo-sources.json"
       ]
     }
   ]

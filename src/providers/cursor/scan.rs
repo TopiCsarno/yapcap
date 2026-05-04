@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::account_storage::{NewProviderAccount, ProviderAccountStorage, ProviderAccountTokens};
-use crate::config::{ManagedCursorAccountConfig, paths};
+use crate::config::{ManagedCursorAccountConfig, host_user_home_dir, paths};
 use crate::error::CursorError;
 use crate::model::ProviderId;
 use crate::providers::cursor::identity::normalized_email;
@@ -51,7 +51,7 @@ pub enum CursorScanState {
 }
 
 pub fn default_state_db_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|d| d.join(".config/Cursor/User/globalStorage/state.vscdb"))
+    host_user_home_dir().map(|d| d.join(".config/Cursor/User/globalStorage/state.vscdb"))
 }
 
 pub(crate) fn read_state_vscdb(path: &Path) -> Result<(String, String), CursorError> {

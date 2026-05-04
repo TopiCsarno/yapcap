@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 mod applet;
+mod host_auth_watch;
 mod login;
 mod popup_view;
 mod provider_actions;
@@ -56,9 +57,9 @@ const POPUP_MAX_HEIGHT: u16 = 1080;
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
 const APPLET_ACCOUNT_GAP: f32 = 4.0;
-const APPLET_PERCENT_DIGITS: f32 = 7.0;
-const APPLET_PERCENT_GLYPH_WIDTH: f32 = 8.0;
-const APPLET_PERCENT_TEXT_WIDTH: f32 = APPLET_PERCENT_DIGITS * APPLET_PERCENT_GLYPH_WIDTH;
+const APPLET_PERCENT_ACCOUNT_GAP: f32 = 4.0;
+const APPLET_PERCENT_GLYPH_WIDTH: f32 = 7.25;
+const APPLET_PERCENT_CELL_HORIZONTAL_PAD: f32 = 8.0;
 const UPDATE_RETRY_INITIAL_SECS: u64 = 15;
 const UPDATE_RETRY_MAX_SECS: u64 = 15 * 60;
 
@@ -139,6 +140,7 @@ pub enum Message {
     RetryUpdateCheck(u32),
     OpenUrl(String),
     Quit,
+    HostCliAuthChanged,
 }
 
 impl cosmic::Application for AppModel {
@@ -189,7 +191,7 @@ impl cosmic::Application for AppModel {
         let refresh_task = refresh_provider_tasks(&initial_config, &mut state);
         let cursor_status_task =
             refresh_provider_account_statuses_task(&initial_config, &state, ProviderId::Cursor);
-        let n_accounts_init = state.selected_accounts(selected_provider).len().max(1);
+        let n_accounts_init = state.display_selected_account_count(selected_provider);
         let (applet_width, applet_height) =
             applet_button_size(&core, initial_config.panel_icon_style, n_accounts_init);
         core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
@@ -228,9 +230,7 @@ impl cosmic::Application for AppModel {
     fn view(&self) -> Element<'_, Self::Message> {
         let n_accounts = self
             .state
-            .selected_accounts(self.selected_provider)
-            .len()
-            .max(1);
+            .display_selected_account_count(self.selected_provider);
         let indicator = applet_indicator(
             &self.state,
             self.selected_provider,
@@ -303,6 +303,7 @@ impl cosmic::Application for AppModel {
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| Message::UpdateConfig(Box::new(update.config))),
             time::every(Duration::from_secs(interval_secs)).map(|_| Message::Tick),
+            host_auth_watch::subscription(),
         ])
     }
 
@@ -331,61 +332,48 @@ impl AppModel {
             Message::UpdateConfig(config) => {
                 self.on_config_update(*config);
             }
-
             Message::TogglePopup => {
                 return Some(self.toggle_popup());
             }
-
             Message::PopupClosed(id) => {
                 if self.popup.as_ref() == Some(&id) {
                     self.popup = None;
                     self.popup_size = None;
                 }
             }
-
             Message::Tick | Message::RefreshNow => {
                 return Some(refresh_provider_tasks(&self.config, &mut self.state));
             }
-
             Message::ProviderRefreshed(refresh_result) => {
                 return Some(self.handle_provider_refreshed(*refresh_result));
             }
-
             Message::ProviderAccountStatusesRefreshed(provider, accounts) => {
                 self.handle_provider_account_statuses_refreshed(provider, accounts);
             }
-
             Message::SelectProvider(provider) => {
                 return self.select_provider_tab(provider);
             }
-
             Message::NavigateTo(route) => {
                 return self.navigate_to(route);
             }
-
             Message::UpdateChecked { status, attempt } => {
                 return Some(self.handle_update_checked(status, attempt));
             }
-
             Message::CheckUpdates => {
                 self.update_status = UpdateStatus::Unchecked;
                 return Some(update_check_task(0));
             }
-
             Message::RetryUpdateCheck(attempt) => {
                 if matches!(self.update_status, UpdateStatus::Error(_)) {
                     return Some(update_check_task(attempt));
                 }
             }
-
             Message::OpenUrl(url) => open_url(&url),
-
             Message::Quit => std::process::exit(0),
-
+            Message::HostCliAuthChanged => self.on_host_cli_auth_changed(),
             Message::SetProviderEnabled(provider, enabled) => {
                 return Some(self.set_provider_enabled(provider, enabled));
             }
-
             Message::SetRefreshInterval(seconds) => {
                 return Some(self.set_refresh_interval(seconds));
             }
@@ -401,47 +389,31 @@ impl AppModel {
             Message::SetShowAllAccounts(provider, show_all) => {
                 return Some(self.set_show_all_accounts(provider, show_all));
             }
-
             Message::ToggleAccountSelection(provider, account_id) => {
                 return Some(self.toggle_account_selection(provider, &account_id));
             }
-
             Message::DeleteCodexAccount(account_id) => {
                 return Some(self.delete_codex_account(&account_id));
             }
-
             Message::DeleteClaudeAccount(account_id) => {
                 return Some(self.delete_claude_account(&account_id));
             }
-
             Message::ReauthenticateClaudeAccount(account_id) => {
                 return Some(self.reauthenticate_claude_account(&account_id));
             }
-
             Message::ReauthenticateCodexAccount(account_id) => {
                 return Some(self.reauthenticate_codex_account(&account_id));
             }
-
             Message::StartCodexLogin => return Some(self.start_codex_login()),
-
             Message::CancelCodexLogin => self.cancel_codex_login(),
-
-            Message::CodexLoginEvent(event) => {
-                return Some(self.handle_codex_login_event(*event));
-            }
-
+            Message::CodexLoginEvent(event) => return Some(self.handle_codex_login_event(*event)),
             Message::StartClaudeLogin => return Some(self.start_claude_login()),
-
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
-
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
-
             Message::CancelClaudeLogin => self.cancel_claude_login(),
-
             Message::ClaudeLoginEvent(event) => {
                 return Some(self.handle_claude_login_event(*event));
             }
-
             Message::DeleteCursorAccount(_)
             | Message::ReauthenticateCursorAccount(_)
             | Message::StartCursorScan
@@ -490,6 +462,7 @@ impl AppModel {
             self.update_cursor_metadata_from_state();
             self.update_cursor_active_account();
         }
+        self.sync_panel_suggested_bounds();
         runtime::persist_state(&self.state);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "yapcap"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "MPL-2.0"
 description = "COSMIC panel applet for Codex, Claude Code, and Cursor usage"
@@ -42,6 +42,8 @@ cbc = { version = "0.1", features = ["alloc"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 i18n-embed-fl = "0.10"
+libc = "0.2"
+notify = "8"
 pbkdf2 = "0.12"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

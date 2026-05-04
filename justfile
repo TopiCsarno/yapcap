@@ -93,18 +93,66 @@ uninstall-demo:
 uninstall: uninstall-demo
     rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
-# Builds the Flatpak (incremental; reuses .flatpak-builder cache)
+# Builds the Flatpak (incremental; reuses build-dir and .flatpak-builder cache)
 flatpak-build:
-    flatpak-builder --keep-build-dirs --force-clean build-dir {{ appid }}.json
+    flatpak-builder \
+        --install-deps-from=flathub \
+        --keep-build-dirs \
+        build-dir \
+        packaging/{{ appid }}.json
 
-# Builds and installs the Flatpak for the current user
+# Same as flatpak-build but empties build-dir first (full rebuild)
+flatpak-build-clean:
+    flatpak-builder \
+        --install-deps-from=flathub \
+        --keep-build-dirs \
+        --force-clean \
+        build-dir \
+        packaging/{{ appid }}.json
+
+# Builds the Flatpak, exports to ./repo, and installs for the current user (incremental build)
 flatpak-install: flatpak-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p repo
+    flatpak build-export repo build-dir
+    flatpak --user install --reinstall "$(pwd)/repo" {{ appid }}
+
+# Export + install only (no flatpak-builder); use after a successful build when nothing needs recompiling
+flatpak-install-only:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -f build-dir/metadata ]]; then
+        echo 'error: no Flatpak in build-dir; run `just flatpak-build` or `just flatpak-install`' >&2
+        exit 1
+    fi
+    mkdir -p repo
     flatpak build-export repo build-dir
     flatpak --user install --reinstall "$(pwd)/repo" {{ appid }}
 
 # Runs the installed Flatpak
 flatpak-run:
     flatpak run {{ appid }}
+
+# Uninstalls the user Flatpak app (undoes `just flatpak-install` / `flatpak-install-only`).
+# Removes Flatpak exports (including the `.desktop` entry under the user Flatpak export path). Does not delete `~/.var/app/{{ appid }}`; use `flatpak uninstall --delete-data` manually if you want that. Does not remove `build-dir` / `repo`; use `flatpak-clean` for local build artifacts.
+flatpak-uninstall:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if flatpak --user info '{{ appid }}' &>/dev/null; then
+      flatpak --user uninstall --noninteractive '{{ appid }}'
+    else
+      echo '{{ appid }} is not installed for the current user; nothing to uninstall.' >&2
+    fi
+    d="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    if [[ -d "$d" ]] && command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database "$d" || true
+    fi
+
+# Remove local Flatpak build outputs and flatpak-builder cache (build-dir, repo, .flatpak-builder).
+# Does not uninstall the app from Flatpak; use `flatpak-uninstall` if needed.
+flatpak-clean:
+    rm -rf build-dir repo .flatpak-builder
 
 # Vendor dependencies locally
 vendor:

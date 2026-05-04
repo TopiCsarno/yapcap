@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 300]
+#[version = 400]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -213,7 +213,7 @@ pub struct AppPaths {
 
 fn flatpak_var_app_subdir(segments: &[&str]) -> Option<PathBuf> {
     let app_id = std::env::var_os("FLATPAK_ID")?;
-    let mut path = dirs::home_dir()?;
+    let mut path = host_user_home_dir()?;
     path.push(".var");
     path.push("app");
     path.push(app_id);
@@ -241,6 +241,54 @@ fn state_parent_dir() -> PathBuf {
     } else {
         state_dir().unwrap_or_else(|| PathBuf::from("."))
     }
+}
+
+#[must_use]
+pub fn host_user_home_dir() -> Option<PathBuf> {
+    if std::env::var_os("FLATPAK_ID").is_none() {
+        return dirs::home_dir();
+    }
+    passwd_home_dir().or_else(dirs::home_dir)
+}
+
+#[cfg(unix)]
+fn passwd_home_dir() -> Option<PathBuf> {
+    use libc::{c_char, c_int, getpwuid_r, getuid, passwd};
+    use std::ffi::CStr;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStringExt;
+    use std::ptr;
+
+    let uid = unsafe { getuid() };
+    let mut pwd: MaybeUninit<passwd> = MaybeUninit::uninit();
+    let mut result: *mut passwd = ptr::null_mut();
+    let mut buf = vec![0u8; 16 * 1024];
+    let err: c_int = unsafe {
+        getpwuid_r(
+            uid,
+            pwd.as_mut_ptr(),
+            buf.as_mut_ptr().cast::<c_char>(),
+            buf.len(),
+            &raw mut result,
+        )
+    };
+    if err != 0 || result.is_null() {
+        return None;
+    }
+    let pwd = unsafe { pwd.assume_init() };
+    if pwd.pw_dir.is_null() {
+        return None;
+    }
+    let bytes = unsafe { CStr::from_ptr(pwd.pw_dir) }.to_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(std::ffi::OsString::from_vec(bytes.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn passwd_home_dir() -> Option<PathBuf> {
+    None
 }
 
 #[must_use]
@@ -276,7 +324,6 @@ pub fn paths() -> AppPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn default_config_enables_all_providers() {
@@ -292,6 +339,15 @@ mod tests {
         assert_eq!(config.reset_time_format, ResetTimeFormat::Relative);
         assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
         assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
+    }
+
+    #[test]
+    fn config_schema_version_marks_fresh_patch_boundary() {
+        let config = Config::default();
+        assert_eq!(Config::VERSION, 400);
+        assert!(config.codex_managed_accounts.is_empty());
+        assert!(config.claude_managed_accounts.is_empty());
+        assert!(config.cursor_managed_accounts.is_empty());
     }
 
     #[test]
@@ -406,40 +462,51 @@ mod tests {
         let _guard = ENV_LOCK.lock().expect("flatpak path test env lock");
 
         let prev_id = std::env::var_os("FLATPAK_ID");
-        let prev_home = std::env::var_os("HOME");
-        let prev_state = std::env::var_os("XDG_STATE_HOME");
 
         let p = unsafe {
             std::env::set_var("FLATPAK_ID", "com.example.YapCapTest");
-            std::env::set_var("HOME", "/tmp/yapcap-flatpak-paths-home");
-            std::env::set_var(
-                "XDG_STATE_HOME",
-                "/tmp/yapcap-flatpak-paths-home/wrong-state",
-            );
             let p = paths();
             std::env::remove_var("FLATPAK_ID");
             if let Some(ref v) = prev_id {
                 std::env::set_var("FLATPAK_ID", v);
             }
-            if let Some(ref v) = prev_home {
-                std::env::set_var("HOME", v);
-            } else {
-                std::env::remove_var("HOME");
-            }
-            if let Some(ref v) = prev_state {
-                std::env::set_var("XDG_STATE_HOME", v);
-            } else {
-                std::env::remove_var("XDG_STATE_HOME");
-            }
             p
         };
 
-        let base = PathBuf::from("/tmp/yapcap-flatpak-paths-home/.var/app/com.example.YapCapTest");
-        assert_eq!(p.cache_dir, base.join("cache/yapcap"));
-        assert_eq!(
-            p.claude_accounts_dir,
-            base.join("data/yapcap/claude-accounts")
+        use std::path::Path;
+        assert!(
+            p.cache_dir
+                .ends_with(Path::new("com.example.YapCapTest/cache/yapcap")),
+            "unexpected cache_dir: {}",
+            p.cache_dir.display()
         );
-        assert_eq!(p.log_dir, base.join("data/yapcap/logs"));
+        assert!(
+            p.claude_accounts_dir.ends_with(Path::new(
+                "com.example.YapCapTest/data/yapcap/claude-accounts"
+            )),
+            "unexpected claude_accounts_dir: {}",
+            p.claude_accounts_dir.display()
+        );
+        assert!(
+            p.log_dir
+                .ends_with(Path::new("com.example.YapCapTest/data/yapcap/logs")),
+            "unexpected log_dir: {}",
+            p.log_dir.display()
+        );
+    }
+
+    #[test]
+    fn host_user_home_dir_matches_dirs_home_without_flatpak() {
+        let _guard = crate::test_support::env_lock();
+        let prev = std::env::var_os("FLATPAK_ID");
+        unsafe {
+            std::env::remove_var("FLATPAK_ID");
+        }
+        assert_eq!(host_user_home_dir(), dirs::home_dir());
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("FLATPAK_ID", v);
+            }
+        }
     }
 }

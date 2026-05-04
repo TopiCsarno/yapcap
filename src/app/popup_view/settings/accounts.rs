@@ -123,7 +123,7 @@ fn claude_accounts_section<'a>(
     let accounts = state.accounts_for(ProviderId::Claude);
     let active_id = state
         .provider(ProviderId::Claude)
-        .and_then(|provider| provider.active_account_id.as_deref());
+        .and_then(|provider| provider.system_active_account_id.as_deref());
     let mut rows = cosmic::iced::widget::column![]
         .spacing(8)
         .width(Length::Fill);

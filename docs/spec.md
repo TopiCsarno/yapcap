@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.3.1 · **Last updated:** 2026-05-02
+**Status:** As-built v0.4.0 · **Last updated:** 2026-05-04
 
 ## Document Metadata
 
@@ -83,7 +83,7 @@ Binary-only modules (`src/`, compiled only into the applet binary):
 
 | Module | Purpose |
 | --- | --- |
-| `app` | `src/app/` module tree. `mod.rs` owns `AppModel`, `Message`, and the libcosmic `Application` impl. Submodules split applet rendering, popup/window sizing, login flows, provider refresh/account actions, popup UI, provider icon assets, and app-only unit tests. `popup_view.rs` keeps the top-level popup shell and shared widgets, `popup_view/detail.rs` renders provider detail columns, and `popup_view/settings/` splits general settings from provider/account settings rows and login controls. |
+| `app` | `src/app/` module tree. `mod.rs` owns `AppModel`, `Message`, and the libcosmic `Application` impl. Submodules split applet rendering, popup/window sizing, login flows, provider refresh/account actions, popup UI, provider icon assets, host CLI auth file watching (`host_auth_watch`, inotify on Linux), and app-only unit tests. `popup_view.rs` keeps the top-level popup shell and shared widgets, `popup_view/detail.rs` renders provider detail columns, and `popup_view/settings/` splits general settings from provider/account settings rows and login controls. |
 | `i18n` | `fl!()` macro, `i18n_embed` loader wired to `i18n/en/yapcap.ftl`. |
 
 Library modules (`src/`, also usable from tests):
@@ -92,7 +92,7 @@ Library modules (`src/`, also usable from tests):
 | --- | --- |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
 | `providers::codex` | Codex managed login, YapCap-owned account listing, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
-| `providers::claude` | Managed native OAuth login and YapCap-owned account listing under `src/providers/claude/`, OAuth usage fetch, and token refresh against Anthropic’s OAuth token endpoint (no Claude CLI). |
+| `providers::claude` | Managed native OAuth login and YapCap-owned account listing under `src/providers/claude/`, OAuth usage fetch, token refresh against Anthropic’s OAuth token endpoint (no Claude CLI), and read-only host `~/.claude.json` matching for `system_active_account_id`. |
 | `providers::cursor` | Cursor web API via YapCap-owned stored session cookies captured during explicit login. |
 | `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. |
 | `auth` | Parses JWT identity claims used by Codex OAuth compatibility paths. |
@@ -139,7 +139,7 @@ sequenceDiagram
 - `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
 - `Message::RefreshNow` is the popup’s "Refresh now" button and uses the same dispatcher.
 - Account switching marks and refreshes only the selected provider instead of dispatching a global refresh.
-- Each provider has a persisted `show_all_accounts` setting. When it is off, selecting an account makes that provider single-account and YapCap keeps only one selected account for it. When it is on, the provider can keep multiple selected accounts and render one column per account.
+- Each provider has a persisted `show_all_accounts` setting. When it is off, selecting an account makes that provider single-account and YapCap keeps only one selected account for it. When it is on, the provider can keep multiple selected accounts and render up to four accounts. Enabling it selects at most four account ids per provider: the current active account when still available, then additional stored accounts in stable account order. If older or manually edited state contains more than four selected account ids, the panel and provider detail popup still render only the first four. This is a multi-account selection and rendering cap, not a storage limit.
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.
 - When multiple accounts are selected for a provider, `app::refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
@@ -176,6 +176,13 @@ Codex account model:
 - Add-account flows select the new Codex account immediately in single-account
   mode. In show-all mode they preserve existing selections and append the new
   account when appropriate.
+- Host Codex CLI session hint: YapCap read-only reads `~/.codex/auth.json` to set
+  `system_active_account_id` (JWT user id vs stored `provider_account_id`) for the
+  **Active** badge. An inotify-backed subscription (via the `notify` crate on Linux)
+  reapplies Codex reconciliation when that file changes; when the file is missing
+  but `~/.codex` exists, the directory is watched for `auth.json` events. Under
+  Flatpak, the `~/.codex` / auth path uses the passwd home directory so it stays
+  aligned with `finish-args` mounts when `HOME` points at `~/.var/app/...`.
 
 Managed Codex add-account flow:
 
@@ -244,9 +251,15 @@ Claude account model:
   and organization prefer values from account `metadata.json` when loadable;
   otherwise config fields apply. When email is present, entries dedupe by
   normalized email.
-- YapCap does not read `~/.claude`, host Claude Code credential files, import
-  external config trees, or run the `claude` CLI for login, refresh, or
-  discovery.
+- Host Claude Code session hint: YapCap read-only reads `~/.claude.json`
+  (`oauthAccount.accountUuid`, with `emailAddress` as fallback) to set
+  `system_active_account_id` for the **Active** badge against stored metadata.
+  Under Flatpak (`FLATPAK_ID`), that path is resolved with the passwd database
+  home directory (`pw_dir`), not `dirs::home_dir` / `$HOME`, so it matches the
+  bind-mounted host file even when the sandbox overrides `HOME` to
+  `~/.var/app/...`. The same host auth watcher as Codex reapplies Claude reconciliation when
+  `~/.claude.json` changes. YapCap does not import host tokens, host credential
+  trees, or run the `claude` CLI for login, refresh, or discovery.
 - Add-account uses a native OAuth PKCE flow: browser authorization, token
   exchange against Anthropic’s token endpoint, and commit only after the
   response includes required access and refresh tokens, expiry, scope, and
@@ -325,7 +338,8 @@ Account model:
 Managed login flow (add account):
 
 - Settings exposes `Add account` under the Cursor accounts card.
-- YapCap reads `~/.config/Cursor/User/globalStorage/state.vscdb` (read-only),
+- YapCap reads `~/.config/Cursor/User/globalStorage/state.vscdb` (read-only;
+  under Flatpak, the `~` prefix uses passwd `pw_dir` like §6),
   extracts `cursorAuth/accessToken` and `cursorAuth/refreshToken` from
   `ItemTable`, and decodes the JWT to determine `user_id` and `expires_at`.
 - Identity (email, display name, plan) is fetched from
@@ -410,6 +424,11 @@ that integration: settings live under `…/cosmic/com.topi.YapCap/vN/`, so raisi
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
+The next patch release uses schema `v400` as a deliberate fresh-start boundary
+after the provider account model changes. Existing `v300` COSMIC settings may
+remain on disk, but YapCap starts from fresh defaults and users must re-add
+accounts. The schema bump does not delete YapCap-owned account directories,
+snapshot caches, or logs.
 
 The template rebuild intentionally expands
 the existing `Config` entry instead of carrying over the old standalone TOML
@@ -439,7 +458,7 @@ log_level = "info"
 
 - `reset_time_format` ∈ `relative | absolute`. `relative` shows reset durations such as `Resets in 2d 2h`; `absolute` shows local reset labels such as `Resets tomorrow at 8:25 AM` or `Resets Wednesday at 12:00 PM`.
 - `usage_amount_format` ∈ `used | left`. `used` shows labels and usage bars as consumed quota; `left` flips them to remaining quota.
-- `panel_icon_style` ∈ `logo_and_bars | bars_only | logo_and_percent | percent_only`. The default shows the selected provider logo and two compact usage bars, `bars_only` hides the logo, `logo_and_percent` shows the selected provider logo with the first applet usage window as a one-decimal percentage, and `percent_only` shows only that percentage with enough width for `100.0%`. In settings, the percent-only preview shows a sample percentage with a tooltip explaining that it shows the first usage percentage in the panel.
+- `panel_icon_style` ∈ `logo_and_bars | bars_only | logo_and_percent | percent_only`. The default shows the selected provider logo and two compact usage bars, `bars_only` hides the logo, `logo_and_percent` shows the selected provider logo with the first applet usage window as a one-decimal percentage, and `percent_only` shows only that percentage. For **`logo_and_percent`** / **`percent_only`** only (not bar styles), each selected account gets one fixed percentage column wide enough for `100.0%`: `APPLET_PERCENT_CELL_HORIZONTAL_PAD + applet_percent_text(100.0).chars().len() × APPLET_PERCENT_GLYPH_WIDTH`. Shorter labels such as `0.0%` and `86.5%` are centered inside that slot, so percent-style applet width depends on account count, style, logo presence, fixed gaps, and padding, not current usage digits. Columns use `APPLET_PERCENT_ACCOUNT_GAP`. In settings, the percent-only preview shows a sample percentage with a tooltip explaining that it shows the first usage percentage in the panel.
 - `provider_visibility_mode` ∈ `auto_init_pending | user_managed`. New installs begin in `auto_init_pending` until the first startup discovery pass finishes; existing installs and later runs use `user_managed`. During `auto_init_pending`, all providers are enabled regardless of whether accounts exist — providers without accounts show a `Login required` state rather than being hidden.
 - The refresh interval is clamped to a 10-second floor at subscription time.
 - `selected_codex_account_ids` is a preference list, not proof that credentials exist.
@@ -615,17 +634,20 @@ In single-account view the badge appears in the account header. In multi-account
 
 ## 6. Persistence, Logging, Paths
 
-All paths come from `config::paths()`:
+All paths come from `config::paths()`.
 
-- Config: managed by `cosmic_config` under app ID `com.topi.YapCap` (not a hand-rolled file)
-- Snapshot cache: `~/.cache/yapcap/snapshots.json`
-- Logs: `~/.local/state/yapcap/logs/yapcap.log`
+**Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-When `FLATPAK_ID` is set (Flatpak sandbox), YapCap ignores host-inherited
-`XDG_STATE_HOME` / `XDG_CACHE_HOME` for these locations and instead uses
-`~/.var/app/<app-id>/data/yapcap/` for managed accounts and logs and
-`~/.var/app/<app-id>/cache/yapcap/` for the snapshot cache, matching the usual
-Flatpak per-app layout.
+- Config: `cosmic_config` under app ID `com.topi.YapCap`, schema `v400`
+- Snapshot cache: under the XDG cache root (typically `~/.cache/yapcap/snapshots.json`)
+- Managed accounts and logs: under the XDG state root (typically `~/.local/state/yapcap/`)
+
+**Flatpak** (`FLATPAK_ID` set): YapCap-owned cache and state **only** under the per-app tree on the host filesystem:
+
+- Snapshot cache: `~/.var/app/<app-id>/cache/yapcap/` (e.g. `snapshots.json`)
+- Managed accounts and logs: `~/.var/app/<app-id>/data/yapcap/`
+
+Flatpak does **not** read or write the native install’s `~/.local/state/yapcap/` or `~/.cache/yapcap/` for YapCap data. The `~` in the `.var` paths is the passwd home directory (`pw_dir`), not `dirs::home_dir()` / `$HOME`, so locations stay correct when the sandbox overrides `HOME`.
 
 Managed Claude and Codex accounts store `config_dir` / `codex_home` in COSMIC
 config; on startup those paths are rewritten to the current canonical
@@ -653,6 +675,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset.
 - When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
+- In `logo_and_percent` and `percent_only` styles with multiple accounts, each account gets a centered label in a fixed-width column sized for `100.0%`; columns are separated by `APPLET_PERCENT_ACCOUNT_GAP`.
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running.
@@ -668,35 +691,41 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
   - settings: category tabs for General, Codex, Claude, and Cursor, using a theme-symbolic gear icon for General and provider icons for provider settings.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
-  - Provider view always starts with a provider title card (icon + name). Below it, each selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one selected account the column fills the full popup width. When a provider has two or more selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to the widest provider across all tabs.
+- Provider view always starts with a provider title card (icon + name). Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
   - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive.
-  - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means every selected account renders as its own column in the panel and popup.
+  - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) now seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled, each gets managed demo accounts, Codex defaults to two selected accounts with `Show all accounts` on, Cursor includes a re-auth-needed account in Settings, the default startup `Task` batch is skipped, provider-refresh becomes a no-op, snapshot-cache writes are skipped, and the demo data is re-applied after config reconciliation.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets three managed demo accounts, all selected, with synthetic Session and Weekly windows at **100%** usage for exercising full-bar layouts (Claude and Cursor each still use two demo accounts); all three toggles **`Show all accounts`** on so the popup and panel exercise multi-account layouts; the Claude primary snapshot includes synthetic **extra usage** (the secondary demo account does not); Cursor's secondary demo account surfaces **re-auth-needed** in Settings alongside a healthy account; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
   - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code or full callback URL (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
-The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands horizontally to `n × 420 px` when the selected provider has `n` selected accounts, and shrinks back when switching to a single-account provider or opening Settings. Horizontal resize is applied via `xdg_popup::reposition` (`set_size`) each time the provider tab or route changes. The popup height is computed separately for the provider-detail route and the settings route: provider height is the tallest provider across all tabs (independent of settings height); settings height covers only the settings content. The window resizes when switching between the two routes. Both heights are capped at 1080 px; the body panel scrolls when content exceeds the available space. The header, navigation row, and footer are constrained to a single 420 px column centered within the wider popup surface; only the body expands with the additional columns.
+The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands horizontally to `n × 420 px` when the selected provider has `n` displayed selected accounts, capped at four columns, and shrinks back when switching to a single-account provider or opening Settings. Horizontal resize is applied via `xdg_popup::reposition` (`set_size`) each time the provider tab or route changes. The popup height is computed separately for the provider-detail route and the settings route: provider height is the tallest provider across all tabs (independent of settings height); settings height covers only the settings content. The window resizes when switching between the two routes. Both heights are capped at 1080 px; the body panel scrolls when content exceeds the available space. The header, navigation row, and footer are constrained to a single 420 px column centered within the wider popup surface; only the body expands with the additional columns.
 
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
 ## 8. Packaging
 
-- YapCap ships a baseline Flatpak manifest at `packaging/com.topi.YapCap.json` for
-  COSMIC Store-oriented packaging.
+- YapCap ships a Flatpak manifest at `packaging/com.topi.YapCap.json` aligned with
+  [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets:
+  `org.freedesktop.Platform` 25.08, `com.system76.Cosmic.BaseApp` / `stable`,
+  `org.freedesktop.Sdk.Extension.rust-stable`, top-level manifest `id`
+  `com.topi.YapCap`, and offline `cargo fetch` / `cargo build` inside the module.
+- The module’s primary source is `type: git` (same as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) listings), with branch `dev` in this repo; submission to `cosmic-flatpak` should pin a `commit` (and release `tag` when applicable) for reproducible builds.
+- `packaging/cargo-sources.json` is generated from `Cargo.lock` (flatpak-builder-tools
+  `flatpak-cargo-generator.py`) and must be regenerated whenever the lockfile
+  changes.
 - The manifest installs the applet binary, desktop entry, AppStream metainfo,
   and scalable app icon under the `com.topi.YapCap` app id.
-- Runtime permissions avoid host filesystem access and host CLI requirements.
-  They are limited to network access, shared IPC (host IPC namespace for X11
-  shared memory and typical clipboard interop with XWayland), Wayland display,
-  fallback X11, session bus access for COSMIC/libcosmic and portal calls, and
-  DRI rendering.
-- Build-time network access remains an interim packaging constraint because the
-  project still resolves crates.io packages and a git `libcosmic` dependency
-  during the Flatpak build. Store submission should replace this with generated
-  offline cargo sources or a vendored source archive.
+- `resources/app.metainfo.xml` includes a `<releases>` block with semver entries
+  (for example `0.4.0`) so software centers and validators can show version history.
+  Remote `<screenshot>` images and `<url type="bugtracker">` point at GitHub `raw/main`
+  and Issues for store listings.
+- Runtime permissions avoid broad host access: network, IPC, Wayland, fallback
+  X11, DRI, D-Bus access to `com.system76.CosmicSettingsDaemon`, read-only
+  `~/.config/Cursor`, `~/.codex/auth.json`, and `~/.claude.json`, and read-write
+  `~/.config/cosmic` (hardcoded home path) for applet COSMIC config instead of `xdg-config/cosmic`, which some Flatpak setups resolve incorrectly.
 
 ## 9. Localization
 

@@ -2,12 +2,12 @@
 
 use crate::config::{
     Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    paths,
+    ProviderVisibilityMode, paths,
 };
 use crate::model::{
-    AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderCost,
-    ProviderHealth, ProviderId, ProviderIdentity, ProviderRuntimeState, UsageHeadline,
-    UsageSnapshot, UsageWindow,
+    AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
+    ProviderCost, ProviderHealth, ProviderId, ProviderIdentity, ProviderRuntimeState,
+    UsageHeadline, UsageSnapshot, UsageWindow,
 };
 use chrono::{DateTime, Duration, Utc};
 use std::path::PathBuf;
@@ -15,6 +15,7 @@ use std::path::PathBuf;
 const DEMO_ENV: &str = "YAPCAP_DEMO";
 const CODEX_PRIMARY_ID: &str = "yapcap-demo:codex-primary";
 const CODEX_SECONDARY_ID: &str = "yapcap-demo:codex-secondary";
+const CODEX_TERTIARY_ID: &str = "yapcap-demo:codex-tertiary";
 const CLAUDE_PRIMARY_ID: &str = "yapcap-demo:claude-primary";
 const CLAUDE_SECONDARY_ID: &str = "yapcap-demo:claude-secondary";
 const CURSOR_PRIMARY_ID: &str = "yapcap-demo:cursor-primary";
@@ -50,11 +51,25 @@ pub fn apply_config(config: &mut Config) {
     config.claude_managed_accounts = demo_claude_accounts();
     config.cursor_managed_accounts = demo_cursor_accounts();
 
-    config.selected_codex_account_ids =
-        vec![CODEX_PRIMARY_ID.to_string(), CODEX_SECONDARY_ID.to_string()];
-    config.selected_claude_account_ids = vec![CLAUDE_PRIMARY_ID.to_string()];
-    config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
+    config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
+
+    config.selected_codex_account_ids = vec![
+        CODEX_PRIMARY_ID.to_string(),
+        CODEX_SECONDARY_ID.to_string(),
+        CODEX_TERTIARY_ID.to_string(),
+    ];
+    config.selected_claude_account_ids = vec![
+        CLAUDE_PRIMARY_ID.to_string(),
+        CLAUDE_SECONDARY_ID.to_string(),
+    ];
+    config.selected_cursor_account_ids = vec![
+        CURSOR_PRIMARY_ID.to_string(),
+        CURSOR_SECONDARY_ID.to_string(),
+    ];
+
     config.set_provider_show_all(ProviderId::Codex, true);
+    config.set_provider_show_all(ProviderId::Claude, true);
+    config.set_provider_show_all(ProviderId::Cursor, true);
 }
 
 pub fn apply(config: &Config, state: &mut AppState) {
@@ -122,6 +137,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                     auth_state: AuthState::Ready,
                     error: None,
                     snapshot: snapshot_codex_secondary(),
+                },
+            ),
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: CODEX_TERTIARY_ID,
+                    label: "tri@example.com",
+                    last_success_at: now - Duration::minutes(9),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_codex_tertiary(),
                 },
             ),
         ],
@@ -206,34 +233,37 @@ fn demo_account(provider: ProviderId, account: DemoAccount) -> ProviderAccountRu
     }
 }
 
-fn snapshot_codex_primary() -> UsageSnapshot {
-    let now = Utc::now();
-    let session_end = now + Duration::seconds(2 * 3600 + 17 * 60);
-    let weekly_end = now + Duration::days(2) + Duration::hours(5);
-    let windows = vec![
+fn codex_demo_windows_ceiling(now: DateTime<Utc>) -> Vec<UsageWindow> {
+    let session_end = now + Duration::hours(1);
+    let weekly_end = now + Duration::days(3);
+    vec![
         UsageWindow {
             label: "Session".to_string(),
-            used_percent: 44.0,
+            used_percent: 100.0,
             reset_at: Some(session_end),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
-            used_percent: 88.0,
+            used_percent: 100.0,
             reset_at: Some(weekly_end),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
         },
-    ];
+    ]
+}
+
+fn snapshot_codex_primary() -> UsageSnapshot {
+    let now = Utc::now();
     UsageSnapshot {
         provider: ProviderId::Codex,
         source: "OAuth".to_string(),
         updated_at: now,
         headline: UsageHeadline(0),
-        windows,
+        windows: codex_demo_windows_ceiling(now),
         provider_cost: Some(ProviderCost {
-            used: 47.32,
+            used: 0.0,
             limit: None,
             units: "credits".to_string(),
         }),
@@ -249,31 +279,14 @@ fn snapshot_codex_primary() -> UsageSnapshot {
 
 fn snapshot_codex_secondary() -> UsageSnapshot {
     let now = Utc::now();
-    let session_end = now + Duration::minutes(49);
-    let weekly_end = now + Duration::days(1) + Duration::hours(3);
     UsageSnapshot {
         provider: ProviderId::Codex,
         source: "OAuth".to_string(),
         updated_at: now,
         headline: UsageHeadline(0),
-        windows: vec![
-            UsageWindow {
-                label: "Session".to_string(),
-                used_percent: 81.0,
-                reset_at: Some(session_end),
-                window_seconds: Some(5 * 60 * 60),
-                reset_description: None,
-            },
-            UsageWindow {
-                label: "Weekly".to_string(),
-                used_percent: 57.0,
-                reset_at: Some(weekly_end),
-                window_seconds: Some(7 * 24 * 3600),
-                reset_description: None,
-            },
-        ],
+        windows: codex_demo_windows_ceiling(now),
         provider_cost: Some(ProviderCost {
-            used: 12.75,
+            used: 0.0,
             limit: None,
             units: "credits".to_string(),
         }),
@@ -283,6 +296,29 @@ fn snapshot_codex_secondary() -> UsageSnapshot {
             account_id: Some("demo-acct-31be7d".to_string()),
             plan: Some("pro".to_string()),
             display_name: Some("Pair".to_string()),
+        },
+    }
+}
+
+fn snapshot_codex_tertiary() -> UsageSnapshot {
+    let now = Utc::now();
+    UsageSnapshot {
+        provider: ProviderId::Codex,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: codex_demo_windows_ceiling(now),
+        provider_cost: Some(ProviderCost {
+            used: 0.0,
+            limit: None,
+            units: "credits".to_string(),
+        }),
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("tri@example.com".to_string()),
+            account_id: Some("demo-acct-9cce4e".to_string()),
+            plan: Some("team".to_string()),
+            display_name: Some("Tri".to_string()),
         },
     }
 }
@@ -322,7 +358,14 @@ fn snapshot_claude_primary() -> UsageSnapshot {
         headline: UsageHeadline(0),
         windows,
         provider_cost: None,
-        extra_usage: None,
+        extra_usage: Some(ExtraUsageState::Active {
+            used_percent: 63.75,
+            cost: ProviderCost {
+                used: 127.5,
+                limit: Some(200.0),
+                units: "$".to_string(),
+            },
+        }),
         identity: ProviderIdentity {
             email: Some("team@example.com".to_string()),
             account_id: None,
@@ -449,6 +492,16 @@ fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
             updated_at: now,
             last_authenticated_at: Some(now),
         },
+        ManagedCodexAccountConfig {
+            id: CODEX_TERTIARY_ID.to_string(),
+            label: "tri@example.com".to_string(),
+            codex_home: demo_root().join("codex-tertiary"),
+            email: Some("tri@example.com".to_string()),
+            provider_account_id: Some("demo-acct-9cce4e".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
     ]
 }
 
@@ -537,6 +590,7 @@ mod tests {
         for snapshot in [
             snapshot_codex_primary(),
             snapshot_codex_secondary(),
+            snapshot_codex_tertiary(),
             snapshot_claude_primary(),
             snapshot_claude_secondary(),
             snapshot_cursor_primary(),
@@ -559,10 +613,41 @@ mod tests {
             std::env::remove_var(DEMO_ENV);
         }
 
-        assert_eq!(config.codex_managed_accounts.len(), 2);
+        assert_eq!(config.codex_managed_accounts.len(), 3);
         assert_eq!(config.claude_managed_accounts.len(), 2);
         assert_eq!(config.cursor_managed_accounts.len(), 2);
-        assert_eq!(config.selected_codex_account_ids.len(), 2);
+        assert_eq!(config.selected_codex_account_ids.len(), 3);
+        assert_eq!(config.selected_claude_account_ids.len(), 2);
+        assert_eq!(config.selected_cursor_account_ids.len(), 2);
         assert!(config.show_all_accounts(ProviderId::Codex));
+        assert!(config.show_all_accounts(ProviderId::Claude));
+        assert!(config.show_all_accounts(ProviderId::Cursor));
+        assert_eq!(
+            config.provider_visibility_mode,
+            ProviderVisibilityMode::UserManaged
+        );
+    }
+
+    #[test]
+    fn codex_demo_snapshots_have_full_session_and_weekly() {
+        for snapshot in [
+            snapshot_codex_primary(),
+            snapshot_codex_secondary(),
+            snapshot_codex_tertiary(),
+        ] {
+            assert_eq!(snapshot.windows.len(), 2);
+            for window in &snapshot.windows {
+                assert!((window.used_percent - 100.0).abs() < f32::EPSILON);
+            }
+        }
+    }
+
+    #[test]
+    fn claude_demo_primary_includes_extra_usage() {
+        assert!(matches!(
+            snapshot_claude_primary().extra_usage.as_ref(),
+            Some(ExtraUsageState::Active { .. })
+        ));
+        assert!(snapshot_claude_secondary().extra_usage.is_none());
     }
 }

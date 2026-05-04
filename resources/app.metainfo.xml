@@ -19,10 +19,29 @@
       directly over HTTPS.
     </p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Panel applet and default presentation</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Usage detail in the popup</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-detail.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>General settings</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-general.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Provider account settings</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-codex.png</image>
+    </screenshot>
+  </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
     https://github.com/TopiCsarno/yapcap/raw/main/resources/icon.svg
   </icon>
   <url type="homepage">https://github.com/TopiCsarno/yapcap</url>
+  <url type="bugtracker">https://github.com/TopiCsarno/yapcap/issues</url>
   <url type="vcs-browser">https://github.com/TopiCsarno/yapcap</url>
   <launchable type="desktop-id">com.topi.YapCap.desktop</launchable>
   <provides>
@@ -44,5 +63,17 @@
     <keyword>Usage</keyword>
     <keyword>Quota</keyword>
   </keywords>
+  <releases>
+    <release version="0.4.0" date="2026-05-04">
+      <description>
+        <p>
+          Flatpak packaging aligned with COSMIC Store conventions (BaseApp,
+          offline Rust build, pinned git-friendly layout). Improved local install
+          flow via just recipes. Version 0.4.0; see the repository changelog
+          and release notes on GitHub for details.
+        </p>
+      </description>
+    </release>
+  </releases>
   <content_rating type="oars-1.1" />
 </component>

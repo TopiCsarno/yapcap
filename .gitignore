@@ -2,6 +2,7 @@
 .codex
 .flatpak-builder/
 .scratch/
+issues/
 build-dir/
 repo/
 dist/
@@ -22,4 +23,3 @@ debian/*
 !debian/install
 !debian/rules
 !debian/source
-

@@ -7305,7 +7305,7 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yapcap"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7315,7 +7315,9 @@ dependencies = [
  "dirs",
  "i18n-embed",
  "i18n-embed-fl",
+ "libc",
  "libcosmic",
+ "notify",
  "pbkdf2",
  "reqwest",
  "rusqlite",

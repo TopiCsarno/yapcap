@@ -24,7 +24,9 @@ fn strings_at<'a>(value: &'a Value, key: &str) -> Vec<&'a str> {
 #[test]
 fn flatpak_manifest_installs_cosmic_applet_metadata() {
     let manifest = manifest();
-    assert_eq!(manifest["app-id"], "com.topi.YapCap");
+    assert_eq!(manifest["id"], "com.topi.YapCap");
+    assert_eq!(manifest["base"], "com.system76.Cosmic.BaseApp");
+    assert_eq!(manifest["base-version"], "stable");
     assert_eq!(manifest["command"], "yapcap");
     assert_eq!(manifest["runtime-version"], "25.08");
     assert!(
@@ -33,10 +35,30 @@ fn flatpak_manifest_installs_cosmic_applet_metadata() {
     );
 
     let commands = strings_at(&manifest["modules"][0], "build-commands").join("\n");
+    assert!(commands.contains("cargo --offline fetch"));
+    assert!(commands.contains("cargo --offline build"));
     assert!(commands.contains("/app/bin/yapcap"));
     assert!(commands.contains("/app/share/applications/com.topi.YapCap.desktop"));
     assert!(commands.contains("/app/share/metainfo/com.topi.YapCap.metainfo.xml"));
     assert!(commands.contains("/app/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg"));
+
+    let sources = manifest["modules"][0]["sources"]
+        .as_array()
+        .expect("module sources should be an array");
+    let git = sources
+        .first()
+        .and_then(|v| v.as_object())
+        .expect("first source should be a git object");
+    assert_eq!(git.get("type").and_then(Value::as_str), Some("git"));
+    assert_eq!(
+        git.get("url").and_then(Value::as_str),
+        Some("https://github.com/TopiCsarno/yapcap.git")
+    );
+    assert_eq!(git.get("branch").and_then(Value::as_str), Some("dev"));
+    assert_eq!(
+        sources.get(1).and_then(Value::as_str),
+        Some("cargo-sources.json")
+    );
 }
 
 #[test]
@@ -47,8 +69,11 @@ fn flatpak_manifest_keeps_runtime_permissions_narrow() {
     assert!(finish_args.contains(&"--share=network"));
     assert!(finish_args.contains(&"--share=ipc"));
     assert!(finish_args.contains(&"--socket=wayland"));
-    assert!(finish_args.contains(&"--socket=session-bus"));
-    assert!(finish_args.contains(&"--filesystem=xdg-config/cosmic:rw"));
+    assert!(finish_args.contains(&"--talk-name=com.system76.CosmicSettingsDaemon"));
+    assert!(finish_args.contains(&"--filesystem=~/.config/cosmic:rw"));
+    assert!(finish_args.contains(&"--filesystem=~/.config/Cursor:ro"));
+    assert!(finish_args.contains(&"--filesystem=~/.codex/auth.json:ro"));
+    assert!(finish_args.contains(&"--filesystem=~/.claude.json:ro"));
     assert!(
         !finish_args
             .iter()

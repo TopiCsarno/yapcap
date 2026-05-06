@@ -12,7 +12,6 @@ use cosmic::iced::Task;
 use reqwest::Client;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Read as _;
 
@@ -77,7 +76,7 @@ fn prepare_with_target(target_account_id: Option<String>) -> ClaudeLoginState {
         status: ClaudeLoginStatus::Running,
         login_url: Some(authorization_url.clone()),
         code_input: String::new(),
-        output: vec!["Paste the Claude authorization code from the browser".to_string()],
+        output: vec!["Paste the Claude authentication code from the browser".to_string()],
         error: None,
         redirect_uri: REDIRECT_URI.to_string(),
         code_verifier,
@@ -228,40 +227,24 @@ fn parse_authorization_code_input(
     expected_state: &str,
 ) -> Result<(String, String), String> {
     let input = input.trim();
-    let params = if input.starts_with("http://") || input.starts_with("https://") {
-        let query = input
-            .split_once('?')
-            .map(|(_, query)| query)
-            .ok_or_else(|| "Claude OAuth callback was missing query parameters".to_string())?;
-        parse_query(query.split('#').next().unwrap_or(query))
-    } else if input.contains("code=") && input.contains("state=") {
-        parse_query(input)
-    } else if let Some((code, state)) = input.split_once('#') {
-        HashMap::from([
-            ("code".to_string(), percent_decode(code.trim())),
-            ("state".to_string(), percent_decode(state.trim())),
-        ])
-    } else {
-        return Err(
-            "Paste the authentication code from your browser, or the full callback URL."
-                .to_string(),
-        );
+    if input.starts_with("http://")
+        || input.starts_with("https://")
+        || input.contains("code=")
+        || input.contains("state=")
+    {
+        return Err("Paste the authentication code from your browser.".to_string());
+    }
+    let Some((code, state)) = input.split_once('#') else {
+        return Err("Paste the authentication code from your browser.".to_string());
     };
-    if params.get("state").map(String::as_str) != Some(expected_state) {
+    let code = percent_decode(code.trim());
+    let state = percent_decode(state.trim());
+    if state != expected_state {
         return Err("Claude OAuth state did not match".to_string());
     }
-    if let Some(error) = params.get("error").filter(|error| !error.is_empty()) {
-        return Err(format!("Claude OAuth returned {error}"));
+    if code.is_empty() {
+        return Err("Claude OAuth code was missing".to_string());
     }
-    let code = params
-        .get("code")
-        .filter(|code| !code.is_empty())
-        .cloned()
-        .ok_or_else(|| "Claude OAuth code was missing".to_string())?;
-    let state = params
-        .get("state")
-        .cloned()
-        .unwrap_or_else(|| expected_state.to_string());
     Ok((code, state))
 }
 
@@ -367,16 +350,6 @@ fn percent_encode(value: &str) -> String {
     out
 }
 
-fn parse_query(query: &str) -> HashMap<String, String> {
-    query
-        .split('&')
-        .filter_map(|pair| {
-            let (key, value) = pair.split_once('=')?;
-            Some((percent_decode(key), percent_decode(value)))
-        })
-        .collect()
-}
-
 fn percent_decode(value: &str) -> String {
     let mut out = Vec::with_capacity(value.len());
     let bytes = value.as_bytes();
@@ -478,15 +451,50 @@ mod tests {
             parse_authorization_code_input("abc%20123#ok", "ok").unwrap(),
             ("abc 123".to_string(), "ok".to_string())
         );
-        assert_eq!(
-            parse_authorization_code_input(
-                "https://console.anthropic.com/oauth/code/callback?code=abc%20123&state=ok",
-                "ok"
-            )
-            .unwrap(),
-            ("abc 123".to_string(), "ok".to_string())
-        );
         assert!(parse_authorization_code_input("abc#bad", "ok").is_err());
+    }
+
+    #[test]
+    fn rejects_callback_urls_and_raw_queries() {
+        let url_error = parse_authorization_code_input(
+            "https://console.anthropic.com/oauth/code/callback?code=abc%20123&state=ok",
+            "ok",
+        )
+        .unwrap_err();
+        let fragment_url_error = parse_authorization_code_input(
+            "https://console.anthropic.com/oauth/code/callback?code=abc%20123#ok",
+            "ok",
+        )
+        .unwrap_err();
+        let query_error =
+            parse_authorization_code_input("code=abc%20123&state=ok", "ok").unwrap_err();
+        let query_fragment_error =
+            parse_authorization_code_input("code=abc%20123#ok", "ok").unwrap_err();
+
+        assert_eq!(
+            url_error,
+            "Paste the authentication code from your browser.".to_string()
+        );
+        assert_eq!(
+            fragment_url_error,
+            "Paste the authentication code from your browser.".to_string()
+        );
+        assert_eq!(
+            query_error,
+            "Paste the authentication code from your browser.".to_string()
+        );
+        assert_eq!(
+            query_fragment_error,
+            "Paste the authentication code from your browser.".to_string()
+        );
+    }
+
+    #[test]
+    fn malformed_authorization_input_uses_code_focused_error() {
+        assert_eq!(
+            parse_authorization_code_input("not-a-code", "ok").unwrap_err(),
+            "Paste the authentication code from your browser.".to_string()
+        );
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@
 
 Plan: ship v0.4.0 on `main` without a tag first, align Flatpak with [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) (BaseApp, offline Rust, `cargo-sources.json`, pinned git commit in the **store** PR), open the store PR using that commit, verify install from the COSMIC Store after merge, then tag to trigger GitHub release artifacts.
 
-**Local Flatpak:** The repo manifest at `packaging/com.topi.YapCap.json` matches that model (BaseApp, `id`, offline cargo, `git` + `cargo-sources.json`, `CosmicSettingsDaemon`, Flathub deps). `just flatpak-install` runs an incremental `flatpak-build` then exports to `./repo` and user-installs. Use `just flatpak-install-only` to re-export/install without invoking `flatpak-builder`; `just flatpak-build-clean` forces a full rebuild.
+**Local Flatpak:** The repo manifest at `packaging/com.topi.YapCap.json` matches that model (BaseApp, `id`, offline cargo, `git` + `cargo-sources.json`, `CosmicSettingsDaemon`, Flathub deps). `just flatpak-build` generates a temporary manifest that builds from a staged archive of the active local Git branch. `just flatpak-install` runs `flatpak-build` then exports to `./repo` and user-installs that same branch. Use `just flatpak-install-only` to re-export/install without invoking `flatpak-builder`; `just flatpak-build-clean` is kept as an explicit clean-build entry point.
 
 ## Checklist
 
@@ -11,12 +11,12 @@ Plan: ship v0.4.0 on `main` without a tag first, align Flatpak with [pop-os/cosm
 - [ ] Restore or replace standalone `docs/flatpak.md` if you still want a dedicated packaging how-to (README + `docs/spec.md` cover the flow).
 - [ ] **README and screenshots:** treat `README.md` as the main project pitch (see [Documentation, README, and screenshots](#documentation-readme-and-screenshots)); add COSMIC Store install instructions; replace `resources/screenshots/` assets with current UI and fix all image links in the README.
 - [ ] **AppStream screenshots:** when new images exist under `resources/screenshots/`, update **`resources/app.metainfo.xml`** `<screenshots>` (which files are default vs extras, `image` URLs for `raw/main` on GitHub, and captions) so the store gallery matches the release; run **`appstreamcli validate`** on the metainfo.
-- [x] **`packaging/com.topi.YapCap.json`** / **Flatpak UX:** cosmic-flatpak-style manifest (`id`, `com.system76.Cosmic.BaseApp` / `stable`, offline `cargo`, primary **`git`** source for `TopiCsarno/yapcap` + **`cargo-sources.json`**, `finish-args` with `CosmicSettingsDaemon`, Cursor/Codex read-only paths). **`just flatpak-build`** incremental, **`--install-deps-from=flathub`**. **`just flatpak-install`** depends on **`flatpak-build`** then export + install; **`flatpak-install-only`** / **`flatpak-build-clean`** as documented. Tests in `tests/flatpak_manifest.rs`.
+- [x] **`packaging/com.topi.YapCap.json`** / **Flatpak UX:** cosmic-flatpak-style manifest (`id`, `com.system76.Cosmic.BaseApp` / `stable`, offline `cargo`, primary **`git`** source for `TopiCsarno/yapcap` + **`cargo-sources.json`**, `finish-args` with `CosmicSettingsDaemon` and read-only home access for host auth discovery/watching). **`just flatpak-build`** builds from the active local Git branch, **`--install-deps-from=flathub`**. **`just flatpak-install`** depends on **`flatpak-build`** then export + install on that branch; **`flatpak-install-only`** / **`flatpak-build-clean`** as documented. Tests in `tests/flatpak_manifest.rs`.
 - [x] AppStream `<releases>` for 0.4.0 in `resources/app.metainfo.xml`; bump entries when shipping new versions.
 - [x] `just check`, `cargo test`, `cargo fmt`; local **`just flatpak-install`** verified against compliant manifest.
 - [ ] Commit and push v0.4.0 to `origin/main` **without** tag; record the **exact** tip commit SHA (e.g. `git rev-parse origin/main` after push) — this is the revision everything else pins to.
 - [ ] **Cosmic-flatpak PR must use that SHA:** In `pop-os/cosmic-flatpak`, the module’s `git` source needs `"commit": "<full-sha>"` matching `main` at v0.4.0 (add `"tag": "v0.4.0"` too if reviewers expect it). Regenerate `cargo-sources.json` from `Cargo.lock` **at that same commit** — not from an earlier `dev` checkout. Do **not** rely on a moving `branch` in the store manifest.
-- [ ] Open PR to `pop-os/cosmic-flatpak`: add `app/com.topi.YapCap/` with manifest + `cargo-sources.json` (fork layout); pinned `git` URL + **`commit`** (and optional `tag`); PR body explains `--share=network`, `~/.config/Cursor:ro`, `~/.codex/auth.json:ro`, and DBus/secret needs; address review on permissions and BaseApp.
+- [ ] Open PR to `pop-os/cosmic-flatpak`: add `app/com.topi.YapCap/` with manifest + `cargo-sources.json` (fork layout); pinned `git` URL + **`commit`** (and optional `tag`); PR body explains `--share=network`, `--filesystem=home:ro`, and D-Bus needs; address review on permissions and BaseApp.
 - [ ] After merge and propagation: verify YapCap from COSMIC Store / cosmic remote (`docs/qa.md` Flatpak section).
 - [ ] Push annotated tag `v0.4.0` on **the same commit as above** (the `main` release SHA) to trigger `release.yml`; confirm GitHub Release artifacts (tarball, `.deb`, `.rpm`, checksums).
 
@@ -55,7 +55,7 @@ Rust pattern (e.g. `com.github.bgub.CosmicExtAppletPomodoro`):
 - Top-level **`id`**, **`runtime-version` `25.08`**, **`base`:** `com.system76.Cosmic.BaseApp`, **`base-version`:** `stable`**, **`org.freedesktop.Sdk.Extension.rust-stable`**.
 - **Module `sources`:** primary **`git`** (URL + **pinned `commit`** in the store repo; tag optional) + **`cargo-sources.json`** from `Cargo.lock`.
 - **Build commands:** `cargo --offline fetch` then `cargo --offline build --release`.
-- **`finish-args`:** typically `--share=ipc`, `--socket=wayland`, optional `--socket=fallback-x11`, `--device=dri`, `--talk-name=com.system76.CosmicSettingsDaemon`, `--filesystem=~/.config/cosmic:rw`, and `--share=network` when needed. YapCap adds read-only `~/.config/Cursor` and `~/.codex/auth.json` (document in the store PR).
+- **`finish-args`:** typically `--share=ipc`, `--socket=wayland`, optional `--socket=fallback-x11`, `--device=dri`, `--talk-name=com.system76.CosmicSettingsDaemon`, `--filesystem=~/.config/cosmic:rw`, and `--share=network` when needed. YapCap also grants `--talk-name=com.system76.CosmicSettingsDaemon.Config.*` for per-config theme watcher services, plus read-only home access so it can read Cursor/Codex/Claude host auth state and watch `.claude.json` replacement events (document this clearly in the store PR).
 
 ## YapCap repo vs cosmic-flatpak PR
 
@@ -64,7 +64,7 @@ Rust pattern (e.g. `com.github.bgub.CosmicExtAppletPomodoro`):
 | Manifest | `com.topi.YapCap.json` — aligned with patterns above | Copy / mirror under `app/com.topi.YapCap/` |
 | `git` source | `branch: dev` for day-to-day builds from GitHub | Replace with **`commit`** (and optional **`tag`**) matching **`main`** at v0.4.0 |
 | `cargo-sources.json` | Committed; regenerate when `Cargo.lock` changes | Must match **`Cargo.lock` at the pinned commit** |
-| Build / install | `just flatpak-build`, `just flatpak-install`, etc. | Upstream `just build <app-id>` |
+| Build / install | `just flatpak-build`, `just flatpak-install`, etc. build/export the active local branch via a temporary manifest | Upstream `just build <app-id>` |
 
 ## Release and tag sequencing
 

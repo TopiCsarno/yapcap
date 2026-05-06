@@ -1,8 +1,9 @@
 use super::super::super::{
     Alignment, Background, Config, Element, Length, Message, ProviderAccountActionSupport,
     ProviderAccountRuntimeState, ProviderId, accent_selection_fill, account_label_text,
-    apply_alpha, badge_destructive, badge_neutral, badge_success, badge_warning,
-    badge_with_tooltip, container, cursor_account_requires_action, fl, registry, row, widget,
+    apply_alpha, badge_destructive, badge_destructive_soft, badge_neutral, badge_neutral_soft,
+    badge_success, badge_success_soft, badge_warning, badge_warning_soft, badge_with_tooltip,
+    container, cursor_account_requires_action, fl, registry, row, widget,
 };
 use crate::model::{AuthState, ProviderHealth, STALE_THRESHOLD};
 
@@ -31,7 +32,7 @@ pub(super) fn cursor_account_settings_row<'a>(
         .width(Length::Fill);
     if is_active {
         title_row = title_row.push(badge_with_tooltip(
-            badge_success(fl!("badge-active")),
+            active_badge(enabled),
             fl!("badge-active-tooltip"),
         ));
     }
@@ -41,7 +42,11 @@ pub(super) fn cursor_account_settings_row<'a>(
     if requires_action {
         selector_body = selector_body.push(
             row![badge_with_tooltip(
-                badge_neutral(fl!("cursor-account-reauth-badge")),
+                if enabled {
+                    badge_neutral(fl!("cursor-account-reauth-badge"))
+                } else {
+                    badge_neutral_soft(fl!("cursor-account-reauth-badge"))
+                },
                 fl!("badge-reauth-tooltip"),
             )]
             .width(Length::Fill)
@@ -66,21 +71,19 @@ pub(super) fn cursor_account_settings_row<'a>(
         .spacing(0)
         .align_y(Alignment::Center);
     if can_reauthenticate {
-        actions = actions.push(
-            widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
-                .class(account_row_icon_button_class())
-                .tooltip(fl!("cursor-account-reauth-tooltip"))
-                .on_press(Message::ReauthenticateCursorAccount(
-                    account.account_id.clone(),
-                )),
-        );
+        actions = actions.push(account_action_icon_button(
+            "view-refresh-symbolic",
+            fl!("cursor-account-reauth-tooltip"),
+            Some(Message::ReauthenticateCursorAccount(
+                account.account_id.clone(),
+            )),
+        ));
     }
-    actions = actions.push(
-        widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
-            .class(account_row_icon_button_class())
-            .tooltip(fl!("account-delete-tooltip"))
-            .on_press_maybe(delete_press),
-    );
+    actions = actions.push(account_action_icon_button(
+        "edit-delete-symbolic",
+        fl!("account-delete-tooltip"),
+        delete_press,
+    ));
 
     Element::from(account_row_container(
         selector.into(),
@@ -108,7 +111,7 @@ pub(super) fn codex_account_settings_row<'a>(
         .width(Length::Fill);
     if is_active {
         title_row = title_row.push(badge_with_tooltip(
-            badge_success(fl!("badge-active")),
+            active_badge(enabled),
             fl!("badge-active-tooltip"),
         ));
     }
@@ -118,7 +121,11 @@ pub(super) fn codex_account_settings_row<'a>(
     if requires_action {
         selector_body = selector_body.push(
             row![badge_with_tooltip(
-                badge_warning(fl!("badge-login-required")),
+                if enabled {
+                    badge_warning(fl!("badge-login-required"))
+                } else {
+                    badge_warning_soft(fl!("badge-login-required"))
+                },
                 fl!("badge-login-required-tooltip"),
             )]
             .width(Length::Fill)
@@ -145,19 +152,17 @@ pub(super) fn codex_account_settings_row<'a>(
         .spacing(0)
         .align_y(Alignment::Center);
     if enabled && requires_action {
-        actions = actions.push(
-            widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
-                .class(account_row_icon_button_class())
-                .tooltip(fl!("codex-account-reauth-tooltip"))
-                .on_press(Message::ReauthenticateCodexAccount(account_id)),
-        );
+        actions = actions.push(account_action_icon_button(
+            "view-refresh-symbolic",
+            fl!("codex-account-reauth-tooltip"),
+            Some(Message::ReauthenticateCodexAccount(account_id)),
+        ));
     }
-    actions = actions.push(
-        widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
-            .class(account_row_icon_button_class())
-            .tooltip(fl!("account-delete-tooltip"))
-            .on_press_maybe(delete_press),
-    );
+    actions = actions.push(account_action_icon_button(
+        "edit-delete-symbolic",
+        fl!("account-delete-tooltip"),
+        delete_press,
+    ));
 
     Element::from(account_row_container(
         selector.into(),
@@ -194,7 +199,7 @@ pub(super) fn claude_account_settings_row<'a>(
         .width(Length::Fill);
     if is_active {
         label_row = label_row.push(badge_with_tooltip(
-            badge_success(fl!("badge-active")),
+            active_badge(enabled),
             fl!("badge-active-tooltip"),
         ));
     }
@@ -203,7 +208,7 @@ pub(super) fn claude_account_settings_row<'a>(
         .width(Length::Fill);
     if let Some(status) = row_status {
         selector_body = selector_body.push(
-            row![claude_account_row_status_badge(status)]
+            row![claude_account_row_status_badge(status, enabled)]
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
         );
@@ -227,19 +232,17 @@ pub(super) fn claude_account_settings_row<'a>(
         .spacing(0)
         .align_y(Alignment::Center);
     if can_reauthenticate {
-        actions = actions.push(
-            widget::button::icon(widget::icon::from_name("view-refresh-symbolic"))
-                .class(account_row_icon_button_class())
-                .tooltip(fl!("claude-account-reauth-tooltip"))
-                .on_press(Message::ReauthenticateClaudeAccount(account_id)),
-        );
+        actions = actions.push(account_action_icon_button(
+            "view-refresh-symbolic",
+            fl!("claude-account-reauth-tooltip"),
+            Some(Message::ReauthenticateClaudeAccount(account_id)),
+        ));
     }
-    actions = actions.push(
-        widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
-            .class(account_row_icon_button_class())
-            .tooltip(fl!("account-delete-tooltip"))
-            .on_press_maybe(delete_press),
-    );
+    actions = actions.push(account_action_icon_button(
+        "edit-delete-symbolic",
+        fl!("account-delete-tooltip"),
+        delete_press,
+    ));
 
     Element::from(account_row_container(
         selector.into(),
@@ -348,18 +351,41 @@ fn claude_account_row_status(
     None
 }
 
-fn claude_account_row_status_badge(status: ClaudeAccountRowStatus) -> Element<'static, Message> {
+fn active_badge(enabled: bool) -> Element<'static, Message> {
+    if enabled {
+        badge_success(fl!("badge-active"))
+    } else {
+        badge_success_soft(fl!("badge-active"))
+    }
+}
+
+fn claude_account_row_status_badge(
+    status: ClaudeAccountRowStatus,
+    enabled: bool,
+) -> Element<'static, Message> {
     match status {
         ClaudeAccountRowStatus::ReauthRequired => badge_with_tooltip(
-            badge_warning(fl!("badge-login-required")),
+            if enabled {
+                badge_warning(fl!("badge-login-required"))
+            } else {
+                badge_warning_soft(fl!("badge-login-required"))
+            },
             fl!("badge-login-required-tooltip"),
         ),
         ClaudeAccountRowStatus::Error => badge_with_tooltip(
-            badge_destructive(fl!("badge-error")),
+            if enabled {
+                badge_destructive(fl!("badge-error"))
+            } else {
+                badge_destructive_soft(fl!("badge-error"))
+            },
             fl!("badge-error-tooltip"),
         ),
         ClaudeAccountRowStatus::Stale => badge_with_tooltip(
-            badge_warning(fl!("badge-stale")),
+            if enabled {
+                badge_warning(fl!("badge-stale"))
+            } else {
+                badge_warning_soft(fl!("badge-stale"))
+            },
             fl!("badge-stale-tooltip"),
         ),
     }
@@ -421,6 +447,17 @@ mod tests {
             ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
         account.auth_state = AuthState::ActionRequired;
         assert!(codex_account_requires_action(&account));
+    }
+
+    #[test]
+    fn cursor_reauth_copy_does_not_use_inactive() {
+        assert_eq!(fl!("cursor-account-reauth-badge"), "Re-auth needed");
+        assert_eq!(
+            fl!("cursor-account-reauth-tooltip"),
+            "Rescan Cursor account"
+        );
+        assert!(!fl!("cursor-account-reauth-detail").contains("inactive"));
+        assert!(!fl!("cursor-accounts-reauth-summary").contains("inactive"));
     }
 
     #[test]
@@ -537,7 +574,11 @@ fn account_row_container<'a>(
                 },
             },
             shadow: cosmic::iced::Shadow::default(),
-            icon_color: Some(surface.on.into()),
+            icon_color: Some(if enabled {
+                surface.on.into()
+            } else {
+                apply_alpha(surface.on.into(), 0.45)
+            }),
             snap: true,
         }
     })
@@ -581,13 +622,49 @@ fn account_row_button_style(
     style
 }
 
-fn account_row_icon_button_class() -> cosmic::theme::Button {
+fn account_row_icon_button_class(available: bool) -> cosmic::theme::Button {
     cosmic::theme::Button::Custom {
-        active: Box::new(move |_focused, theme| account_row_icon_button_style(theme, 1.0)),
+        active: Box::new(move |_focused, theme| {
+            account_row_icon_button_style(theme, if available { 1.0 } else { 0.45 })
+        }),
         disabled: Box::new(move |theme| account_row_icon_button_style(theme, 0.45)),
-        hovered: Box::new(move |_focused, theme| account_row_icon_button_style(theme, 1.0)),
-        pressed: Box::new(move |_focused, theme| account_row_icon_button_style(theme, 0.85)),
+        hovered: Box::new(move |_focused, theme| {
+            account_row_icon_button_style(theme, if available { 1.0 } else { 0.45 })
+        }),
+        pressed: Box::new(move |_focused, theme| {
+            account_row_icon_button_style(theme, if available { 0.85 } else { 0.45 })
+        }),
     }
+}
+
+fn account_action_icon_button(
+    icon_name: &'static str,
+    tooltip: String,
+    press: Option<Message>,
+) -> Element<'static, Message> {
+    let available = press.is_some();
+    let handle = widget::icon::from_name(icon_name)
+        .icon()
+        .into_svg_handle()
+        .unwrap_or_else(|| widget::svg::Handle::from_memory(Vec::new()));
+    let icon = widget::Svg::new(handle)
+        .symbolic(true)
+        .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
+            color: Some(theme.cosmic().background.component.on.into()),
+        }))
+        .opacity(if available { 1.0 } else { 0.45 })
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0));
+
+    widget::tooltip::tooltip(
+        widget::button::custom(icon)
+            .class(account_row_icon_button_class(available))
+            .padding(4)
+            .on_press_maybe(press),
+        widget::text(tooltip).size(12),
+        widget::tooltip::Position::Top,
+    )
+    .into()
 }
 
 fn account_row_icon_button_style(theme: &cosmic::Theme, opacity: f32) -> widget::button::Style {

@@ -1,6 +1,6 @@
 use super::applet::{
-    applet_bar_width, applet_button_size, applet_percent_cell_width, applet_percent_text,
-    select_provider, selected_provider_all_percents,
+    applet_bar_width, applet_button_size, applet_percent_cell_alignment, applet_percent_cell_width,
+    applet_percent_text, select_provider, selected_provider_all_percents,
 };
 use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size};
 use super::{
@@ -205,6 +205,14 @@ fn applet_percent_cell_width_is_fixed_to_widest_normal_percent() {
     assert_eq!(applet_percent_text(86.5), "86.5%");
     assert_eq!(applet_percent_text(100.0), "100.0%");
     assert_eq!(applet_percent_cell_width(), expected);
+}
+
+#[test]
+fn applet_percent_cells_left_align_text_in_fixed_slot() {
+    assert_eq!(
+        applet_percent_cell_alignment(),
+        cosmic::iced::Alignment::Start
+    );
 }
 
 #[test]

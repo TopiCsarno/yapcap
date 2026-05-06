@@ -247,22 +247,22 @@ fn provider_status_message(
 ) -> String {
     let mut messages = Vec::new();
 
-    let cursor_inactive = active_account.is_some_and(|a| {
+    let cursor_reauth_needed = active_account.is_some_and(|a| {
         a.provider == ProviderId::Cursor && a.auth_state == AuthState::ActionRequired
     });
 
-    if !cursor_inactive {
-        if let Some(account) = active_account
-            && account.health == ProviderHealth::Error
-        {
-            if account.auth_state == AuthState::ActionRequired {
-                messages.push(fl!("account-reauth-summary"));
-            } else if let Some(error) = &account.error {
-                messages.push(error.clone());
-            }
-        } else {
-            messages.push(provider.status_line(active_account));
+    if cursor_reauth_needed {
+        messages.push(fl!("cursor-account-reauth-detail"));
+    } else if let Some(account) = active_account
+        && account.health == ProviderHealth::Error
+    {
+        if account.auth_state == AuthState::ActionRequired {
+            messages.push(fl!("account-reauth-summary"));
+        } else if let Some(error) = &account.error {
+            messages.push(error.clone());
         }
+    } else {
+        messages.push(provider.status_line(active_account));
     }
 
     dedup_status_messages(messages).join(" ")
@@ -560,8 +560,8 @@ fn account_status_badge(
     if account.auth_state == AuthState::ActionRequired {
         if account.provider == ProviderId::Cursor {
             return badge_with_tooltip(
-                badge_neutral(fl!("badge-cursor-inactive")),
-                fl!("badge-cursor-inactive-tooltip"),
+                badge_neutral(fl!("badge-cursor-reauth-needed")),
+                fl!("badge-cursor-reauth-needed-tooltip"),
             );
         }
         return badge_with_tooltip(
@@ -646,6 +646,44 @@ mod tests {
             message.contains("Re-authenticate") || message.contains("Settings"),
             "status message should be action-oriented: {message}"
         );
+    }
+
+    #[test]
+    fn cursor_action_required_account_reports_reauth_needed_message() {
+        let provider = ProviderRuntimeState {
+            provider: ProviderId::Cursor,
+            enabled: true,
+            selected_account_ids: vec!["cursor-1".to_string()],
+            active_account_id: Some("cursor-1".to_string()),
+            system_active_account_id: Some("cursor-1".to_string()),
+            account_status: AccountSelectionStatus::Ready,
+            is_refreshing: false,
+            legacy_display_snapshot: None,
+            error: None,
+        };
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Cursor, "cursor-1", "user@example.com");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+        account.error = Some("Unauthorized".to_string());
+        let state = AppState::empty();
+
+        let message = provider_status_message(&provider, &state, Some(&account));
+
+        assert!(
+            message.contains("Re-authenticate") || message.contains("rescan"),
+            "status message should explain the Cursor recovery path: {message}"
+        );
+        assert!(
+            !message.contains("Inactive") && !message.contains("inactive"),
+            "status message must not describe auth failures as inactive: {message}"
+        );
+    }
+
+    #[test]
+    fn cursor_action_required_badge_copy_uses_reauth_needed() {
+        assert_eq!(fl!("badge-cursor-reauth-needed"), "Re-auth needed");
+        assert!(!fl!("badge-cursor-reauth-needed-tooltip").contains("inactive"));
     }
 
     #[test]

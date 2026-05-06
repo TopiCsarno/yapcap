@@ -462,6 +462,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cursor_permanent_refresh_failure_requires_action_and_keeps_previous_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Cursor);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Cursor, "cursor-1", "user@example.com");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Cursor,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "cursor-1".to_string(),
+            "user@example.com".to_string(),
+            async { Err(AppError::from(crate::error::CursorError::Unauthorized)) },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.auth_state, AuthState::ActionRequired);
+        assert_eq!(
+            result.provider.account_status,
+            AccountSelectionStatus::LoginRequired
+        );
+        assert!(account.snapshot.is_some());
+        assert!(account.last_success_at.is_some());
+    }
+
+    #[tokio::test]
     async fn refresh_provider_transient_error_sets_error_state() {
         let result = refresh_provider_account(
             ProviderId::Claude,

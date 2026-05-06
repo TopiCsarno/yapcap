@@ -130,7 +130,25 @@ pub async fn scan(
     };
     match scan_inner(client, existing_accounts, &db_path).await {
         Ok(result) => result,
-        Err(error) => (CursorScanState::Error(error.to_string()), None),
+        Err(error) => (CursorScanState::Error(scan_error_message(&error)), None),
+    }
+}
+
+fn scan_error_message(error: &CursorError) -> String {
+    match error {
+        CursorError::StateDbNotFound { .. } => {
+            "No Cursor account detected. Make sure Cursor IDE is installed and you're logged in."
+                .to_string()
+        }
+        CursorError::StateDbMissingKey(_) => {
+            "No Cursor account detected. Make sure you're logged in to Cursor IDE.".to_string()
+        }
+        CursorError::Unauthorized
+        | CursorError::TokenRefreshLogout
+        | CursorError::TokenRefreshFailed { status: 400..=499 } => {
+            "Cursor session expired. Log in to Cursor IDE and scan again.".to_string()
+        }
+        _ => error.to_string(),
     }
 }
 
@@ -373,6 +391,60 @@ mod tests {
         let db = create_test_db(&[]);
         let result = read_state_vscdb(db.path());
         assert!(matches!(result, Err(CursorError::StateDbMissingKey(_))));
+    }
+
+    #[test]
+    fn scan_missing_database_uses_account_detection_message() {
+        let error = CursorError::StateDbNotFound {
+            path: PathBuf::from("/missing/state.vscdb"),
+        };
+        let message = scan_error_message(&error);
+        assert_eq!(
+            message,
+            "No Cursor account detected. Make sure Cursor IDE is installed and you're logged in."
+        );
+    }
+
+    #[test]
+    fn scan_missing_access_token_uses_login_message_without_key_name() {
+        let message = scan_error_message(&CursorError::StateDbMissingKey(
+            "cursorAuth/accessToken".to_string(),
+        ));
+        assert_eq!(
+            message,
+            "No Cursor account detected. Make sure you're logged in to Cursor IDE."
+        );
+        assert!(!message.contains("cursorAuth"));
+    }
+
+    #[test]
+    fn scan_missing_refresh_token_uses_login_message_without_key_name() {
+        let message = scan_error_message(&CursorError::StateDbMissingKey(
+            "cursorAuth/refreshToken".to_string(),
+        ));
+        assert_eq!(
+            message,
+            "No Cursor account detected. Make sure you're logged in to Cursor IDE."
+        );
+        assert!(!message.contains("cursorAuth"));
+    }
+
+    #[test]
+    fn scan_unauthorized_uses_login_and_scan_again_message() {
+        let message = scan_error_message(&CursorError::Unauthorized);
+        assert_eq!(
+            message,
+            "Cursor session expired. Log in to Cursor IDE and scan again."
+        );
+    }
+
+    #[test]
+    fn scan_logout_refresh_uses_login_and_scan_again_message() {
+        let message = scan_error_message(&CursorError::TokenRefreshLogout);
+        assert_eq!(
+            message,
+            "Cursor session expired. Log in to Cursor IDE and scan again."
+        );
     }
 
     #[test]

@@ -97,7 +97,7 @@ You can also open **COSMIC Store**, search for **YapCap**, and install from ther
 
 -->
 
-Manifests follow the same layout as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets: `com.system76.Cosmic.BaseApp`, primary **`git`** source, plus `packaging/cargo-sources.json` from `Cargo.lock`. The clone under `packaging/` tracks branch **`dev`**; `flatpak-builder` fetches that branch from GitHub, so **`just flatpak-build` tests what is on the remote branch**, not uncommitted local edits (push first, or temporarily switch the manifest to a `dir` source for purely local experiments).
+Manifests follow the same layout as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets: `com.system76.Cosmic.BaseApp`, primary **`git`** source, plus `packaging/cargo-sources.json` from `Cargo.lock`. The repo manifest keeps the store-style GitHub source, while `just flatpak-build` and `just flatpak-install` generate a temporary local manifest from the active local Git branch and export that same branch. Uncommitted edits are not included; commit them first.
 
 From a clone:
 
@@ -105,7 +105,7 @@ From a clone:
 just flatpak-build
 ```
 
-Install (runs an incremental `flatpak-build` first, then exports and installs):
+Install (runs `flatpak-build` first, then exports and installs):
 
 ```bash
 just flatpak-install
@@ -122,6 +122,8 @@ Manual build (user Flatpak install, Flathub deps):
 ```bash
 flatpak-builder --user --install-deps-from=flathub --install --force-clean build-dir packaging/com.topi.YapCap.json
 ```
+
+That manual command uses the store-style manifest source from GitHub. Use the `just` recipes for local branch testing.
 
 Packaging details are in `docs/spec.md` § Packaging; regenerate `packaging/cargo-sources.json` after lockfile changes with [flatpak-cargo-generator](https://github.com/flatpak/flatpak-builder-tools/blob/master/cargo/flatpak-cargo-generator.py) and `Cargo.lock`.
 
@@ -153,7 +155,7 @@ just install
 
 1. After installing, restart your COSMIC session (log out and back in).
 2. Add **YapCap** from the panel applet picker.
-3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex uses a managed CLI browser login, Claude uses native browser OAuth, and Cursor uses a managed browser profile.
+3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex and Claude use browser OAuth, and Cursor scans the local Cursor IDE account state.
 4. Click the panel button to open the popup.
 5. To add more accounts or switch between them, open the popup → **Settings → [Provider]**.
 
@@ -163,7 +165,7 @@ just install
 
 Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-- **Add account** — triggers the provider's own login flow: Codex CLI browser login (`codex login`), native Claude OAuth in the browser, or an isolated managed browser profile for Cursor, without leaving YapCap.
+- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, or Cursor IDE account scanning, without leaving YapCap.
 - **Switch account** — tap any account row to make it active; the panel and popup update immediately.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 

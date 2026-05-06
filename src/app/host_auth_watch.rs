@@ -41,7 +41,7 @@ pub(super) fn subscription() -> Subscription<Message> {
                 tracing::warn!("host CLI auth file watcher could not be created");
                 return;
             };
-            if install_watches(&mut watcher, &home, &codex_auth, &claude_json).is_err() {
+            if !install_watches(&mut watcher, &home, &codex_auth, &claude_json) {
                 tracing::warn!(
                     codex_auth = %codex_auth.display(),
                     claude_json = %claude_json.display(),
@@ -65,20 +65,30 @@ fn install_watches(
     home: &Path,
     codex_auth: &Path,
     claude_json: &Path,
-) -> notify::Result<()> {
+) -> bool {
+    let mut installed = false;
     let codex_dir = home.join(".codex");
     if codex_auth.exists() {
-        watcher.watch(codex_auth, RecursiveMode::NonRecursive)?;
+        installed |= install_watch(watcher, codex_auth);
     } else if codex_dir.is_dir() {
-        watcher.watch(&codex_dir, RecursiveMode::NonRecursive)?;
+        installed |= install_watch(watcher, &codex_dir);
     }
 
     if claude_json.exists() {
-        watcher.watch(claude_json, RecursiveMode::NonRecursive)?;
-    } else {
-        watcher.watch(home, RecursiveMode::NonRecursive)?;
+        installed |= install_watch(watcher, claude_json);
     }
-    Ok(())
+    installed |= install_watch(watcher, home);
+    installed
+}
+
+fn install_watch(watcher: &mut RecommendedWatcher, path: &Path) -> bool {
+    match watcher.watch(path, RecursiveMode::NonRecursive) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), error = %error, "host CLI auth path watch could not be installed");
+            false
+        }
+    }
 }
 
 fn event_targets_cli_auth(
@@ -109,6 +119,7 @@ fn claude_json_in_home_event(path: &Path, home: &Path, claude_json: &Path) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use notify::EventKind;
     use std::path::PathBuf;
 
     #[test]
@@ -135,5 +146,17 @@ mod tests {
             &home,
             &claude
         ));
+    }
+
+    #[test]
+    fn cli_auth_event_matches_claude_json_rename_target() {
+        let home = PathBuf::from("/home/u");
+        let codex_auth = home.join(".codex").join("auth.json");
+        let claude = home.join(".claude.json");
+        let event = Event::new(EventKind::Any)
+            .add_path(home.join(".claude.json.tmp"))
+            .add_path(claude.clone());
+
+        assert!(event_targets_cli_auth(&event, &codex_auth, &claude, &home));
     }
 }

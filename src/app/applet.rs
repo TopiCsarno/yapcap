@@ -195,6 +195,10 @@ pub(super) fn applet_percent_cell_width() -> f32 {
     f32::from(n_chars) * APPLET_PERCENT_GLYPH_WIDTH + APPLET_PERCENT_CELL_HORIZONTAL_PAD
 }
 
+pub(super) fn applet_percent_cell_alignment() -> Alignment {
+    Alignment::Start
+}
+
 fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Message> {
     let mut r = row![].align_y(Alignment::Center);
     for (i, &(p0, _)) in account_percents.iter().enumerate() {
@@ -206,7 +210,7 @@ fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Mes
         let w = applet_percent_cell_width();
         let cell = widget::container(widget::text(applet_percent_text(p0)).size(13))
             .width(Length::Fixed(w))
-            .align_x(Alignment::Center);
+            .align_x(applet_percent_cell_alignment());
         r = r.push(cell);
     }
     r.into()

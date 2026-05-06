@@ -264,6 +264,7 @@ mod tests {
 
     #[test]
     fn directory_naming_is_deterministic() {
+        let _guard = test_support::env_lock();
         let email = normalized_email("User+test@example.com");
         let id = stable_storage_id_from_normalized_email(&email);
         assert_eq!(managed_account_dir(&id), managed_account_dir(&id));

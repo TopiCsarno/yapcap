@@ -9,6 +9,8 @@ use crate::runtime;
 use cosmic::app::Task;
 
 pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Message> {
+    reconcile_host_active_accounts(config, state);
+
     let mut tasks = Vec::new();
 
     for provider in ProviderId::ALL {
@@ -22,6 +24,20 @@ pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Mes
         Task::none()
     } else {
         Task::batch(tasks)
+    }
+}
+
+fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
+    if demo_env::is_active() {
+        return;
+    }
+    if let Some(provider) = state.provider_mut(ProviderId::Codex) {
+        provider.system_active_account_id =
+            registry::codex_system_active_account_id(&config.codex_managed_accounts);
+    }
+    if let Some(provider) = state.provider_mut(ProviderId::Claude) {
+        provider.system_active_account_id =
+            registry::claude_system_active_account_id(&config.claude_managed_accounts);
     }
 }
 
@@ -59,7 +75,7 @@ pub fn refresh_provider_task(
             tracing::info!(
                 provider = provider.label(),
                 account_id = %account.account_id,
-                "skipping refresh for inactive account"
+                "skipping refresh for account requiring user action"
             );
         }
     }
@@ -156,12 +172,67 @@ fn account_ids_to_refresh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::account_storage::{
+        NewProviderAccount, ProviderAccountStorage, ProviderAccountTokens,
+    };
+    use crate::config::{ManagedClaudeAccountConfig, paths};
     use crate::model::AccountSelectionStatus;
+    use crate::test_support;
+    use chrono::Utc;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn mark_all_ready(state: &mut AppState) {
         for provider in &mut state.providers {
             provider.account_status = AccountSelectionStatus::Ready;
             provider.selected_account_ids = vec!["default".to_string()];
+        }
+    }
+
+    fn temp_state_root(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("yapcap-refresh-{name}-{nanos}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn stored_claude_account(
+        storage: &ProviderAccountStorage,
+        email: &str,
+        provider_account_id: &str,
+    ) -> ManagedClaudeAccountConfig {
+        let stored = storage
+            .create_account(NewProviderAccount {
+                provider: ProviderId::Claude,
+                email: email.to_string(),
+                provider_account_id: Some(provider_account_id.to_string()),
+                organization_id: None,
+                organization_name: None,
+                tokens: ProviderAccountTokens {
+                    access_token: "access".to_string(),
+                    refresh_token: "refresh".to_string(),
+                    expires_at: Utc::now(),
+                    scope: vec![],
+                    token_id: None,
+                },
+                snapshot: None,
+            })
+            .unwrap();
+        ManagedClaudeAccountConfig {
+            id: stored.metadata.account_id.clone(),
+            label: email.to_string(),
+            config_dir: paths()
+                .claude_accounts_dir
+                .join(&stored.metadata.account_id),
+            email: Some(email.to_string()),
+            organization: None,
+            subscription_type: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_authenticated_at: None,
         }
     }
 
@@ -209,5 +280,60 @@ mod tests {
         let _tasks = refresh_provider_tasks(&config, &mut state);
 
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn refresh_tasks_reconcile_claude_host_active_account_before_fetching() {
+        let _guard = test_support::env_lock();
+        let state_root = temp_state_root("claude-active");
+        let prev_home = std::env::var_os("HOME");
+        let prev_state = std::env::var_os("XDG_STATE_HOME");
+        let prev_flatpak = std::env::var_os("FLATPAK_ID");
+        unsafe {
+            std::env::set_var("HOME", &state_root);
+            std::env::set_var("XDG_STATE_HOME", &state_root);
+            std::env::remove_var("FLATPAK_ID");
+        }
+        let storage = ProviderAccountStorage::new(paths().claude_accounts_dir.clone());
+        let account_a = stored_claude_account(&storage, "a@example.com", "acct-a");
+        let account_b = stored_claude_account(&storage, "b@example.com", "acct-b");
+        fs::write(
+            state_root.join(".claude.json"),
+            r#"{"oauthAccount":{"accountUuid":"acct-b","emailAddress":"b@example.com"}}"#,
+        )
+        .unwrap();
+        let config = Config {
+            claude_managed_accounts: vec![account_a, account_b.clone()],
+            selected_claude_account_ids: vec![account_b.id.clone()],
+            ..Config::default()
+        };
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+
+        let _tasks = refresh_provider_tasks(&config, &mut state);
+
+        unsafe {
+            if let Some(value) = prev_home {
+                std::env::set_var("HOME", value);
+            } else {
+                std::env::remove_var("HOME");
+            }
+            if let Some(value) = prev_state {
+                std::env::set_var("XDG_STATE_HOME", value);
+            } else {
+                std::env::remove_var("XDG_STATE_HOME");
+            }
+            if let Some(value) = prev_flatpak {
+                std::env::set_var("FLATPAK_ID", value);
+            } else {
+                std::env::remove_var("FLATPAK_ID");
+            }
+        }
+        assert_eq!(
+            state
+                .provider(ProviderId::Claude)
+                .and_then(|p| p.system_active_account_id.as_deref()),
+            Some(account_b.id.as_str())
+        );
     }
 }

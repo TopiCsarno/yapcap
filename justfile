@@ -1,6 +1,7 @@
 name := 'yapcap'
 name-debug := 'yapcap-debug'
 appid := 'com.topi.YapCap'
+flatpak-manifest := 'packaging/' + appid + '.json'
 
 rootdir := ''
 prefix := home_directory() / '.local'
@@ -93,49 +94,92 @@ uninstall-demo:
 uninstall: uninstall-demo
     rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
-# Builds the Flatpak (incremental; reuses build-dir and .flatpak-builder cache)
+# Builds the Flatpak (recreates build-dir; reuses .flatpak-builder cache)
 flatpak-build:
-    flatpak-builder \
-        --install-deps-from=flathub \
-        --keep-build-dirs \
-        build-dir \
-        packaging/{{ appid }}.json
-
-# Same as flatpak-build but empties build-dir first (full rebuild)
-flatpak-build-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch="$(git symbolic-ref --quiet --short HEAD)"
+    source_dir="$(mktemp -d --tmpdir yapcap-source.XXXXXX)"
+    manifest="$(mktemp --tmpdir yapcap-flatpak.XXXXXX.json)"
+    trap 'rm -rf "$source_dir" "$manifest"' EXIT
+    if ! git diff-index --quiet HEAD --; then
+      echo 'warning: uncommitted changes are not included in Flatpak local-branch builds; commit them first.' >&2
+    fi
+    git archive "$branch" | tar -x -C "$source_dir"
+    jq --arg source "$source_dir" --arg cargo_sources "$(pwd)/packaging/cargo-sources.json" '.modules[0].sources = [{"type":"dir","path":$source}, $cargo_sources]' {{ flatpak-manifest }} > "$manifest"
+    if [[ -d build-dir && ! -f build-dir/metadata ]]; then
+      rm -rf build-dir
+    fi
     flatpak-builder \
         --install-deps-from=flathub \
         --keep-build-dirs \
         --force-clean \
+        --default-branch="$branch" \
         build-dir \
-        packaging/{{ appid }}.json
+        "$manifest"
 
-# Builds the Flatpak, exports to ./repo, and installs for the current user (incremental build)
+# Same as flatpak-build; kept as an explicit clean-build entry point
+flatpak-build-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch="$(git symbolic-ref --quiet --short HEAD)"
+    source_dir="$(mktemp -d --tmpdir yapcap-source.XXXXXX)"
+    manifest="$(mktemp --tmpdir yapcap-flatpak.XXXXXX.json)"
+    trap 'rm -rf "$source_dir" "$manifest"' EXIT
+    if ! git diff-index --quiet HEAD --; then
+      echo 'warning: uncommitted changes are not included in Flatpak local-branch builds; commit them first.' >&2
+    fi
+    git archive "$branch" | tar -x -C "$source_dir"
+    jq --arg source "$source_dir" --arg cargo_sources "$(pwd)/packaging/cargo-sources.json" '.modules[0].sources = [{"type":"dir","path":$source}, $cargo_sources]' {{ flatpak-manifest }} > "$manifest"
+    flatpak-builder \
+        --install-deps-from=flathub \
+        --keep-build-dirs \
+        --force-clean \
+        --default-branch="$branch" \
+        build-dir \
+        "$manifest"
+
+# Builds the Flatpak, exports to ./repo, and installs for the current user
 flatpak-install: flatpak-build
     #!/usr/bin/env bash
     set -euo pipefail
+    branch="$(git symbolic-ref --quiet --short HEAD)"
     mkdir -p repo
-    flatpak build-export repo build-dir
-    flatpak --user install --reinstall "$(pwd)/repo" {{ appid }}
+    flatpak build-export repo build-dir "$branch"
+    flatpak --user install --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
+    flatpak --user list --app --columns=application,branch | while IFS=$'\t' read -r app installed_branch; do
+      if [[ "$app" == "{{ appid }}" && "$installed_branch" != "$branch" ]]; then
+        flatpak --user uninstall --noninteractive "{{ appid }}//$installed_branch" || echo "warning: could not uninstall old Flatpak branch $installed_branch" >&2
+      fi
+    done
 
 # Export + install only (no flatpak-builder); use after a successful build when nothing needs recompiling
 flatpak-install-only:
     #!/usr/bin/env bash
     set -euo pipefail
+    branch="$(git symbolic-ref --quiet --short HEAD)"
     if [[ ! -f build-dir/metadata ]]; then
         echo 'error: no Flatpak in build-dir; run `just flatpak-build` or `just flatpak-install`' >&2
         exit 1
     fi
     mkdir -p repo
-    flatpak build-export repo build-dir
-    flatpak --user install --reinstall "$(pwd)/repo" {{ appid }}
+    flatpak build-export repo build-dir "$branch"
+    flatpak --user install --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
+    flatpak --user list --app --columns=application,branch | while IFS=$'\t' read -r app installed_branch; do
+      if [[ "$app" == "{{ appid }}" && "$installed_branch" != "$branch" ]]; then
+        flatpak --user uninstall --noninteractive "{{ appid }}//$installed_branch" || echo "warning: could not uninstall old Flatpak branch $installed_branch" >&2
+      fi
+    done
 
 # Runs the installed Flatpak
 flatpak-run:
-    flatpak run {{ appid }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch="$(git symbolic-ref --quiet --short HEAD)"
+    flatpak run --branch="$branch" {{ appid }}
 
 # Uninstalls the user Flatpak app (undoes `just flatpak-install` / `flatpak-install-only`).
-# Removes Flatpak exports (including the `.desktop` entry under the user Flatpak export path). Does not delete `~/.var/app/{{ appid }}`; use `flatpak uninstall --delete-data` manually if you want that. Does not remove `build-dir` / `repo`; use `flatpak-clean` for local build artifacts.
+# Removes Flatpak exports (including the `.desktop` entry under the user Flatpak export path). Does not remove `build-dir` / `repo`; use `flatpak-clean` for local build artifacts and app data.
 flatpak-uninstall:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -149,10 +193,29 @@ flatpak-uninstall:
       update-desktop-database "$d" || true
     fi
 
-# Remove local Flatpak build outputs and flatpak-builder cache (build-dir, repo, .flatpak-builder).
+# Uninstalls the user Flatpak app and clears its installed app data/config.
+# This is the reset path when an already-installed Flatpak is in the way.
+flatpak-clear-installed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if flatpak --user info '{{ appid }}' &>/dev/null; then
+      flatpak --user uninstall --delete-data --noninteractive '{{ appid }}'
+    else
+      echo '{{ appid }} is not installed for the current user; clearing leftover data only.' >&2
+    fi
+    rm -rf "{{ home_directory() / '.var' / 'app' / appid }}"
+    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/{{ appid }}"
+    d="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    if [[ -d "$d" ]] && command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database "$d" || true
+    fi
+
+# Remove local Flatpak build outputs, flatpak-builder cache, COSMIC config, and per-app Flatpak data.
 # Does not uninstall the app from Flatpak; use `flatpak-uninstall` if needed.
 flatpak-clean:
     rm -rf build-dir repo .flatpak-builder
+    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/{{ appid }}"
+    rm -rf "{{ home_directory() / '.var' / 'app' / appid }}"
 
 # Vendor dependencies locally
 vendor:

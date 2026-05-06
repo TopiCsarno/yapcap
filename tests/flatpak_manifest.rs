@@ -11,6 +11,11 @@ fn manifest() -> Value {
     serde_json::from_str(&text).expect("flatpak manifest should be valid JSON")
 }
 
+fn justfile() -> String {
+    let path = format!("{}/justfile", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(path).expect("justfile should be readable")
+}
+
 fn strings_at<'a>(value: &'a Value, key: &str) -> Vec<&'a str> {
     value
         .get(key)
@@ -19,6 +24,28 @@ fn strings_at<'a>(value: &'a Value, key: &str) -> Vec<&'a str> {
         .iter()
         .map(|item| item.as_str().expect("array values should be strings"))
         .collect()
+}
+
+#[test]
+fn flatpak_recipes_build_and_install_active_local_branch() {
+    let justfile = justfile();
+
+    assert!(justfile.contains("branch=\"$(git symbolic-ref --quiet --short HEAD)\""));
+    assert!(justfile.contains("source_dir=\"$(mktemp -d --tmpdir yapcap-source.XXXXXX)\""));
+    assert!(justfile.contains("git archive \"$branch\" | tar -x -C \"$source_dir\""));
+    assert!(
+        justfile.contains(
+            "jq --arg source \"$source_dir\" --arg cargo_sources \"$(pwd)/packaging/cargo-sources.json\" '.modules[0].sources = [{\"type\":\"dir\",\"path\":$source}, $cargo_sources]' {{ flatpak-manifest }} > \"$manifest\""
+        )
+    );
+    assert!(justfile.contains("--default-branch=\"$branch\""));
+    assert!(justfile.contains("flatpak build-export repo build-dir \"$branch\""));
+    assert!(
+        justfile.contains(
+            "flatpak --user install --reinstall \"$(pwd)/repo\" \"{{ appid }}//$branch\""
+        )
+    );
+    assert!(justfile.contains("flatpak run --branch=\"$branch\" {{ appid }}"));
 }
 
 #[test]
@@ -62,7 +89,7 @@ fn flatpak_manifest_installs_cosmic_applet_metadata() {
 }
 
 #[test]
-fn flatpak_manifest_keeps_runtime_permissions_narrow() {
+fn flatpak_manifest_keeps_runtime_permissions_read_only() {
     let manifest = manifest();
     let finish_args = strings_at(&manifest, "finish-args");
 
@@ -70,19 +97,25 @@ fn flatpak_manifest_keeps_runtime_permissions_narrow() {
     assert!(finish_args.contains(&"--share=ipc"));
     assert!(finish_args.contains(&"--socket=wayland"));
     assert!(finish_args.contains(&"--talk-name=com.system76.CosmicSettingsDaemon"));
+    assert!(finish_args.contains(&"--talk-name=com.system76.CosmicSettingsDaemon.Config"));
+    assert!(finish_args.contains(&"--talk-name=com.system76.CosmicSettingsDaemon.Config.*"));
     assert!(finish_args.contains(&"--filesystem=~/.config/cosmic:rw"));
-    assert!(finish_args.contains(&"--filesystem=~/.config/Cursor:ro"));
-    assert!(finish_args.contains(&"--filesystem=~/.codex/auth.json:ro"));
-    assert!(finish_args.contains(&"--filesystem=~/.claude.json:ro"));
+    assert!(finish_args.contains(&"--filesystem=home:ro"));
     assert!(
         !finish_args
             .iter()
             .any(|arg| arg.starts_with("--filesystem=host"))
     );
     assert!(!finish_args.iter().any(|arg| arg == &"--filesystem=home"));
+    assert!(!finish_args.iter().any(|arg| arg == &"--filesystem=home:rw"));
     assert!(
         !finish_args
             .iter()
             .any(|arg| arg == &"--talk-name=org.freedesktop.Flatpak")
+    );
+    assert!(
+        !finish_args
+            .iter()
+            .any(|arg| arg == &"--talk-name=org.freedesktop.DBus")
     );
 }

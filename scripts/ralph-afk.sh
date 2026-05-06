@@ -170,14 +170,12 @@ run_agent() {
 trap restore_hook EXIT
 install_hook
 
+echo
+info "Ralph AFK  feature: $FEATURE_SLUG  runner: $RUNNER"
+dim "  pending: $(open_issue_count)"
+
 for i in $(seq 1 "$MAX_ITERATIONS"); do
   iter_start=$(date +%s)
-  echo
-  info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  info "  Ralph AFK  iteration $i/$MAX_ITERATIONS  [$(date '+%H:%M:%S')]  runner: $RUNNER"
-  dim "  feature: $FEATURE_SLUG  pending: $(open_issue_count)"
-  print_open_issues
-  info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   status_before=$(snapshot_statuses)
   _out=$(mktemp)
@@ -197,7 +195,7 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo
   print_newly_completed "$status_before"
   elapsed=$(( $(date +%s) - iter_start ))
-  dim "  iteration $i finished in ${elapsed}s"
+  dim "  task finished in ${elapsed}s"
 
   if [[ "$agent_status" -ne 0 ]]; then
     echo
@@ -213,7 +211,7 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   if all_done; then
     echo
     success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    success "  Ralph complete: all local issues done in $i iteration(s)."
+    success "  Ralph complete: all local issues done."
     success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     rm -f "$_out"
     exit 0

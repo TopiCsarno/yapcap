@@ -14,10 +14,10 @@
     "--device=dri",
     "--share=network",
     "--talk-name=com.system76.CosmicSettingsDaemon",
+    "--talk-name=com.system76.CosmicSettingsDaemon.Config",
+    "--talk-name=com.system76.CosmicSettingsDaemon.Config.*",
     "--filesystem=~/.config/cosmic:rw",
-    "--filesystem=~/.config/Cursor:ro",
-    "--filesystem=~/.codex/auth.json:ro",
-    "--filesystem=~/.claude.json:ro"
+    "--filesystem=home:ro"
   ],
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin",

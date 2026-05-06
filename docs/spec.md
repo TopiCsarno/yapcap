@@ -91,13 +91,15 @@ Library modules (`src/`, also usable from tests):
 | Module | Purpose |
 | --- | --- |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
+| `providers::registry` | Provider-facing interface used by runtime and UI code. It exposes provider capabilities, account discovery, account deletion, account status refresh, and usage fetch through provider adapters. |
+| `providers::adapters` | Provider adapter implementations for Codex, Claude, and Cursor. Each adapter maps the shared provider interface onto provider-specific account and fetch modules. |
+| `providers::interface` | Shared provider adapter trait, capability flags, account descriptors, account handles, and async future alias. |
 | `providers::codex` | Codex managed login, YapCap-owned account listing, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
 | `providers::claude` | Managed native OAuth login and YapCap-owned account listing under `src/providers/claude/`, OAuth usage fetch, token refresh against Anthropic’s OAuth token endpoint (no Claude CLI), and read-only host `~/.claude.json` matching for `system_active_account_id`. |
-| `providers::cursor` | Cursor web API via YapCap-owned stored session cookies captured during explicit login. |
+| `providers::cursor` | Cursor web API via YapCap-owned tokens scanned from Cursor IDE's local SQLite state. |
 | `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. |
 | `auth` | Parses JWT identity claims used by Codex OAuth compatibility paths. |
-| `browser` | Chromium AES-GCM/CBC cookie decrypt; Firefox cookies.sqlite read. |
-| `config` | COSMIC config entry, provider toggles, Cursor login browser choice, and provider account preferences. |
+| `config` | COSMIC config entry, provider toggles, and provider account preferences. |
 | `cache` | Load/save `snapshots.json`. |
 | `model` | `UsageSnapshot`, `ProviderRuntimeState`, `ProviderHealth`, `AuthState`, `AppState`. |
 | `updates` | GitHub release check; `UpdateStatus` and debug-only update simulation. |
@@ -254,16 +256,28 @@ Claude account model:
 - Host Claude Code session hint: YapCap read-only reads `~/.claude.json`
   (`oauthAccount.accountUuid`, with `emailAddress` as fallback) to set
   `system_active_account_id` for the **Active** badge against stored metadata.
+  UUID matches are authoritative when present; email matching is used only when
+  the host config has no usable UUID, so untracked host accounts do not mark a
+  tracked account active by email.
   Under Flatpak (`FLATPAK_ID`), that path is resolved with the passwd database
   home directory (`pw_dir`), not `dirs::home_dir` / `$HOME`, so it matches the
   bind-mounted host file even when the sandbox overrides `HOME` to
-  `~/.var/app/...`. The same host auth watcher as Codex reapplies Claude reconciliation when
-  `~/.claude.json` changes. YapCap does not import host tokens, host credential
-  trees, or run the `claude` CLI for login, refresh, or discovery.
+  `~/.var/app/...`. Under Flatpak, the manifest grants read-only home access so
+  the host auth watcher can observe `.claude.json` atomic replacements in the
+  home directory. The same host auth watcher as Codex reapplies Claude
+  reconciliation when `~/.claude.json` changes. Manual refresh also reapplies
+  Codex and Claude host-session reconciliation before usage fetches, so the
+  **Active** badge rereads host auth files even if Flatpak file watching misses a
+  change.
+  YapCap does not import host tokens, host credential trees, or run the `claude`
+  CLI for login, refresh, or discovery.
 - Add-account uses a native OAuth PKCE flow: browser authorization, token
   exchange against Anthropic’s token endpoint, and commit only after the
   response includes required access and refresh tokens, expiry, scope, and
   account email.
+- The login paste field accepts only Claude's copied authentication code format
+  (`code#state`). Full callback URLs and raw query strings are rejected with
+  code-focused guidance.
 - Duplicate login by normalized email updates the existing account’s tokens and
   metadata instead of adding a second account.
 - Add-account and single-account selection behavior match other providers:
@@ -345,6 +359,13 @@ Managed login flow (add account):
 - Identity (email, display name, plan) is fetched from
   `GET https://cursor.com/api/auth/me` using the session cookie built from
   the scanned tokens.
+- Normal scan failures are action-oriented: a missing state database reports
+  that no Cursor account was detected and asks the user to install/log into
+  Cursor IDE; missing local auth-token rows report that no Cursor account was
+  detected and ask the user to log into Cursor IDE; unauthorized or logout
+  responses report that the Cursor session expired and ask the user to log into
+  Cursor IDE and scan again. These user-facing scan messages do not expose
+  internal `cursorAuth` SQLite key names.
 - On success, Cursor identity must include an email. YapCap writes the tokens
   and first usage snapshot into the shared account-storage layout and stores
   non-secret metadata in config (including the opaque id and normalized email).
@@ -371,7 +392,7 @@ Token refresh:
 
 Usage fetch:
 
-- YapCap builds the `WorkosCursorSessionToken` cookie header as
+- YapCap builds the `WorkosCursorSessionToken` request cookie header as
   `WorkosCursorSessionToken=<token_id>%3A%3A<access_token>`.
 - Sends the session cookie in one `Cookie` header to:
   - `GET https://cursor.com/api/usage-summary`
@@ -410,10 +431,7 @@ account directories as `tokens.json`. Provider errors bubble up as
 
 Cursor tokens are read directly from Cursor's own SQLite state database at
 `~/.config/Cursor/User/globalStorage/state.vscdb` (read-only). YapCap does not
-read browser cookie databases, use the OS keyring, or launch a browser
-subprocess to acquire Cursor credentials. The browser cookie infrastructure
-(browser.rs, fixtures/browser/) has been removed; this section is retained as a
-tombstone to explain the removal.
+use the OS keyring or launch a browser subprocess to acquire Cursor credentials.
 
 ### 4.3 Configuration
 
@@ -458,7 +476,7 @@ log_level = "info"
 
 - `reset_time_format` ∈ `relative | absolute`. `relative` shows reset durations such as `Resets in 2d 2h`; `absolute` shows local reset labels such as `Resets tomorrow at 8:25 AM` or `Resets Wednesday at 12:00 PM`.
 - `usage_amount_format` ∈ `used | left`. `used` shows labels and usage bars as consumed quota; `left` flips them to remaining quota.
-- `panel_icon_style` ∈ `logo_and_bars | bars_only | logo_and_percent | percent_only`. The default shows the selected provider logo and two compact usage bars, `bars_only` hides the logo, `logo_and_percent` shows the selected provider logo with the first applet usage window as a one-decimal percentage, and `percent_only` shows only that percentage. For **`logo_and_percent`** / **`percent_only`** only (not bar styles), each selected account gets one fixed percentage column wide enough for `100.0%`: `APPLET_PERCENT_CELL_HORIZONTAL_PAD + applet_percent_text(100.0).chars().len() × APPLET_PERCENT_GLYPH_WIDTH`. Shorter labels such as `0.0%` and `86.5%` are centered inside that slot, so percent-style applet width depends on account count, style, logo presence, fixed gaps, and padding, not current usage digits. Columns use `APPLET_PERCENT_ACCOUNT_GAP`. In settings, the percent-only preview shows a sample percentage with a tooltip explaining that it shows the first usage percentage in the panel.
+- `panel_icon_style` ∈ `logo_and_bars | bars_only | logo_and_percent | percent_only`. The default shows the selected provider logo and two compact usage bars, `bars_only` hides the logo, `logo_and_percent` shows the selected provider logo with the first applet usage window as a one-decimal percentage, and `percent_only` shows only that percentage. For **`logo_and_percent`** / **`percent_only`** only (not bar styles), each selected account gets one fixed percentage column wide enough for `100.0%`: `APPLET_PERCENT_CELL_HORIZONTAL_PAD + applet_percent_text(100.0).chars().len() × APPLET_PERCENT_GLYPH_WIDTH`. Shorter labels such as `0.0%` and `86.5%` are left-aligned inside that slot, so percent-style applet width depends on account count, style, logo presence, fixed gaps, and padding, not current usage digits. Columns use `APPLET_PERCENT_ACCOUNT_GAP`. In settings, the percent-only preview shows a sample percentage with a tooltip explaining that it shows the first usage percentage in the panel.
 - `provider_visibility_mode` ∈ `auto_init_pending | user_managed`. New installs begin in `auto_init_pending` until the first startup discovery pass finishes; existing installs and later runs use `user_managed`. During `auto_init_pending`, all providers are enabled regardless of whether accounts exist — providers without accounts show a `Login required` state rather than being hidden.
 - The refresh interval is clamped to a 10-second floor at subscription time.
 - `selected_codex_account_ids` is a preference list, not proof that credentials exist.
@@ -675,10 +693,10 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
 - The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset.
 - When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
-- In `logo_and_percent` and `percent_only` styles with multiple accounts, each account gets a centered label in a fixed-width column sized for `100.0%`; columns are separated by `APPLET_PERCENT_ACCOUNT_GAP`.
+- In `logo_and_percent` and `percent_only` styles with multiple accounts, each account gets a left-aligned label in a fixed-width column sized for `100.0%`; columns are separated by `APPLET_PERCENT_ACCOUNT_GAP`.
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
-- YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running.
+- YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running. Native and Flatpak builds both rely on the COSMIC settings daemon config watcher for those live updates.
 
 ### 7.2 Popup
 
@@ -692,12 +710,12 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
 - Provider view always starts with a provider title card (icon + name). Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
-  - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive.
+  - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive; account status badges and account action icons use softer inactive colors in both light and dark themes.
   - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. Debug builds can simulate an expired Cursor managed session with `YAPCAP_DEBUG_CURSOR_EXPIRED_COOKIE`; the same false-value parsing disables it, and any other present value writes a debug-only invalid managed session override for existing Cursor accounts so the UI behaves as though the stored session expired. Re-authenticating the account replaces that managed state and clears the simulated issue. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets three managed demo accounts, all selected, with synthetic Session and Weekly windows at **100%** usage for exercising full-bar layouts (Claude and Cursor each still use two demo accounts); all three toggles **`Show all accounts`** on so the popup and panel exercise multi-account layouts; the Claude primary snapshot includes synthetic **extra usage** (the secondary demo account does not); Cursor's secondary demo account surfaces **re-auth-needed** in Settings alongside a healthy account; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
-  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code or full callback URL (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account launches an isolated managed Chromium-family browser profile and waits for a valid Cursor cookie. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to go to Settings and reauthenticate. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets three managed demo accounts, all selected, with synthetic Session and Weekly windows at **100%** usage for exercising full-bar layouts (Claude and Cursor each still use two demo accounts); all three toggles **`Show all accounts`** on so the popup and panel exercise multi-account layouts; the Claude primary snapshot includes synthetic **extra usage** (the secondary demo account does not); Cursor's secondary demo account surfaces **re-auth-needed** in Settings alongside a healthy account; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
+  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
@@ -712,7 +730,7 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
   `org.freedesktop.Platform` 25.08, `com.system76.Cosmic.BaseApp` / `stable`,
   `org.freedesktop.Sdk.Extension.rust-stable`, top-level manifest `id`
   `com.topi.YapCap`, and offline `cargo fetch` / `cargo build` inside the module.
-- The module’s primary source is `type: git` (same as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) listings), with branch `dev` in this repo; submission to `cosmic-flatpak` should pin a `commit` (and release `tag` when applicable) for reproducible builds.
+- The module’s primary source is `type: git` (same as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) listings), with branch `dev` in the committed manifest. Local `just flatpak-build`, `just flatpak-build-clean`, and `just flatpak-install` builds stage the active local Git branch with `git archive`, generate a temporary manifest that uses that staged tree as the app source, then exports/installs the same branch. Uncommitted edits are not included. Submission to `cosmic-flatpak` should pin a `commit` (and release `tag` when applicable) for reproducible builds.
 - `packaging/cargo-sources.json` is generated from `Cargo.lock` (flatpak-builder-tools
   `flatpak-cargo-generator.py`) and must be regenerated whenever the lockfile
   changes.
@@ -722,9 +740,13 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
   (for example `0.4.0`) so software centers and validators can show version history.
   Remote `<screenshot>` images and `<url type="bugtracker">` point at GitHub `raw/main`
   and Issues for store listings.
-- Runtime permissions avoid broad host access: network, IPC, Wayland, fallback
-  X11, DRI, D-Bus access to `com.system76.CosmicSettingsDaemon`, read-only
-  `~/.config/Cursor`, `~/.codex/auth.json`, and `~/.claude.json`, and read-write
+- Runtime permissions avoid host-wide and writable home access: network, IPC,
+  Wayland, fallback X11, DRI, D-Bus access to
+  `com.system76.CosmicSettingsDaemon` and its
+  `com.system76.CosmicSettingsDaemon.Config` watcher namespace, including
+  `com.system76.CosmicSettingsDaemon.Config.*` for per-config watcher services
+  returned by `WatchConfig`, read-only home access for host Claude/Codex/Cursor
+  auth discovery and file watching, and read-write
   `~/.config/cosmic` (hardcoded home path) for applet COSMIC config instead of `xdg-config/cosmic`, which some Flatpak setups resolve incorrectly.
 
 ## 9. Localization
@@ -740,8 +762,7 @@ Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail
 
 ## 10. Testing
 
-- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, browser fixture contracts (Chromium + Firefox), usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, runtime refresh state machine, error classification, update check version parsing, debug update simulation, and app-level state transitions.
+- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
 - No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,cursor}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures.
-- Browser cookie fixtures under `fixtures/browser/*.sql` are synthetic and sanitized. Real browser databases must not be committed.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.
 - Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.

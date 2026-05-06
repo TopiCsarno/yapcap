@@ -4,7 +4,7 @@
 
 **A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, and Cursor.**
 
-<img src="resources/screenshots/screenshot.png" alt="YapCap panel applet" width="780" />
+<img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
 [![CI](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml/badge.svg)](https://github.com/TopiCsarno/yapcap/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/TopiCsarno/yapcap?label=release)](https://github.com/TopiCsarno/yapcap/releases/latest)
@@ -28,6 +28,7 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Claude Code** — session/weekly/extra usage
     - **Cursor** — plan usage + billing cycle end
 - **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
+- **Active badge** — YapCap reads your local Codex and Claude Code session state to mark which account is currently active in the host CLI.
 - **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
 - **Explicit accounts** — credentials are added through YapCap and stored under YapCap-owned account directories
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
@@ -38,22 +39,28 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 
 <table>
 <tr>
-<td align="center" valign="top" colspan="2" width="50%">
+<td align="center" valign="top" width="25%">
 
-<strong>Popup — usage detail</strong><br />
-<img src="resources/screenshots/screenshot-detail.png" alt="YapCap popup showing Codex usage for two accounts" />
+<strong>Claude usage</strong><br />
+<img src="resources/screenshots/screenshot-claude.png" alt="YapCap popup showing Claude Code usage" />
+
+</td>
+<td align="center" valign="top" width="25%">
+
+<strong>Cursor usage</strong><br />
+<img src="resources/screenshots/screenshot-cursor.png" alt="YapCap popup showing Cursor usage" />
 
 </td>
 <td align="center" valign="top" width="25%">
 
 <strong>Settings — General</strong><br />
-<img src="resources/screenshots/screenshot-settings-general.png" alt="YapCap General settings" />
+<img src="resources/screenshots/screenshot-settings.png" alt="YapCap General settings" />
 
 </td>
 <td align="center" valign="top" width="25%">
 
 <strong>Settings — Accounts</strong><br />
-<img src="resources/screenshots/screenshot-settings-codex.png" alt="YapCap Codex account settings" />
+<img src="resources/screenshots/screenshot-accounts.png" alt="YapCap account settings" />
 
 </td>
 </tr>
@@ -67,65 +74,38 @@ YapCap follows your COSMIC system theme—the popup and panel pick up light or d
 </tr>
 <tr>
 <td align="center" valign="top" width="25%">
-<img src="resources/screenshots/screenshot_theme1.png" alt="YapCap popup matching COSMIC system theme (1)" />
+<img src="resources/screenshots/screenshot-theme-dark-orange.png" alt="YapCap popup — dark theme, orange accent" />
 </td>
 <td align="center" valign="top" width="25%">
-<img src="resources/screenshots/screenshot_theme2.png" alt="YapCap popup matching COSMIC system theme (2)" />
+<img src="resources/screenshots/screenshot-theme-dark-pink.png" alt="YapCap popup — dark theme, pink accent" />
 </td>
 <td align="center" valign="top" width="25%">
-<img src="resources/screenshots/screenshot_theme3.png" alt="YapCap popup matching COSMIC system theme (3)" />
+<img src="resources/screenshots/screenshot-theme-light-blue.png" alt="YapCap popup — light theme, blue accent" />
 </td>
 <td align="center" valign="top" width="25%">
-<img src="resources/screenshots/screenshot_theme4.png" alt="YapCap popup matching COSMIC system theme (4)" />
+<img src="resources/screenshots/screenshot-theme-light-red.png" alt="YapCap popup — light theme, red accent" />
 </td>
 </tr>
 </table>
 
 ## Install
 
-### Flatpak
+### COSMIC Store
 
-<!--
-After YapCap is listed in [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) and the COSMIC Store, install from the **cosmic** Flatpak remote:
+<!-- Once listed, install from the COSMIC Store or run:
 
 ```bash
 flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
 flatpak install --user cosmic com.topi.YapCap
 ```
 
-You can also open **COSMIC Store**, search for **YapCap**, and install from there (add the `cosmic` remote if the store asks for it).
-
 -->
 
-Manifests follow the same layout as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets: `com.system76.Cosmic.BaseApp`, primary **`git`** source, plus `packaging/cargo-sources.json` from `Cargo.lock`. The repo manifest keeps the store-style GitHub source, while `just flatpak-build` and `just flatpak-install` generate a temporary local manifest from the active local Git branch and export that same branch. Uncommitted edits are not included; commit them first.
-
-From a clone:
-
-```bash
-just flatpak-build
-```
-
-Install (runs `flatpak-build` first, then exports and installs):
+Coming soon. In the meantime, install from a clone:
 
 ```bash
 just flatpak-install
 ```
-
-Re-export and install from an existing `build-dir` without running `flatpak-builder` again:
-
-```bash
-just flatpak-install-only
-```
-
-Manual build (user Flatpak install, Flathub deps):
-
-```bash
-flatpak-builder --user --install-deps-from=flathub --install --force-clean build-dir packaging/com.topi.YapCap.json
-```
-
-That manual command uses the store-style manifest source from GitHub. Use the `just` recipes for local branch testing.
-
-Packaging details are in `docs/spec.md` § Packaging; regenerate `packaging/cargo-sources.json` after lockfile changes with [flatpak-cargo-generator](https://github.com/flatpak/flatpak-builder-tools/blob/master/cargo/flatpak-cargo-generator.py) and `Cargo.lock`.
 
 ### apt (Debian/Ubuntu/Pop!\_OS)
 
@@ -205,7 +185,7 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 - **Applet doesn't appear after install** — restart the COSMIC session (log out and back in).
 - **Auth error on Codex** — open **Settings → Codex**, remove the account if needed, and add it again to complete the managed login flow.
 - **Auth error on Claude** — open **Settings → Claude**, remove the account if needed, and add it again to complete the browser OAuth flow.
-- **Cursor shows no data** — open **Settings → Cursor** and add or re-authenticate the account with the managed browser flow.
+- **Cursor shows no data** — log into Cursor IDE, then open **Settings → Cursor** and use **Add account** to re-scan the Cursor session.
 - **Stale data** — a transient failure keeps the last good snapshot visible and marks it stale. Click **Refresh now** once the network or provider is back.
 
 Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/app/com.topi.YapCap/data/yapcap/logs/yapcap.log`.
@@ -216,7 +196,7 @@ Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/cosmic/com.topi.YapCap/v*/` | Settings (provider toggles, accounts, display options) |
+| `~/.config/cosmic/com.topi.YapCap/v400/` | Settings (provider toggles, accounts, display options) |
 | `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
 | `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`}`-accounts/` | Managed credential copies |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |

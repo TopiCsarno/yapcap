@@ -1,15 +1,16 @@
 use super::{
-    Message, PROVIDER_CARD_SPACING, PROVIDER_HEIGHT_SECTION_SPACING, PROVIDER_SECTION_HEIGHT,
-    PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute, account_label_text, badge_destructive,
-    badge_neutral, badge_success, badge_warning, badge_with_tooltip, card, info_block, plan_badge,
-    provider_summary,
+    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_SECTION_HEIGHT,
+    PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute,
+    account_label_text, badge_destructive, badge_neutral, badge_success, badge_warning,
+    badge_with_tooltip, card, info_block, plan_badge, provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::currency_format;
 use crate::fl;
 use crate::model::{
-    AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState, ProviderCost,
-    ProviderHealth, ProviderId, ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot, UsageWindow,
+    AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
+    ProviderCost, ProviderHealth, ProviderId, ProviderRuntimeState, STALE_THRESHOLD, UsageSnapshot,
+    UsageWindow,
 };
 use crate::usage_display;
 use cosmic::Element;
@@ -42,7 +43,7 @@ pub(super) fn selected_provider_view<'a>(
         let mut content = column![summary]
             .spacing(PROVIDER_CARD_SPACING)
             .width(Length::Fill);
-        let mut cols_row = row![].spacing(8).height(Length::Fill);
+        let mut cols_row = row![].spacing(8);
         for account in &accounts {
             cols_row = cols_row.push(account_column_view(account, provider, state, config));
         }
@@ -237,7 +238,43 @@ fn provider_status_info(
     if message.is_empty() {
         return None;
     }
-    Some(info_block(fl!("status-label"), message, None))
+    Some(info_block(
+        fl!("status-label"),
+        message,
+        None,
+        login_required_settings_action(provider, state, active_account),
+    ))
+}
+
+fn login_required_settings_action(
+    provider: &ProviderRuntimeState,
+    state: &AppState,
+    active_account: Option<&ProviderAccountRuntimeState>,
+) -> Option<Element<'static, Message>> {
+    if !should_show_login_required_settings_action(provider, state, active_account) {
+        return None;
+    }
+
+    Some(
+        widget::button::standard(fl!(
+            "open-provider-settings",
+            provider = provider.provider.label()
+        ))
+        .on_press(Message::NavigateTo(PopupRoute::Settings(
+            SettingsRoute::Provider(provider.provider),
+        )))
+        .into(),
+    )
+}
+
+fn should_show_login_required_settings_action(
+    provider: &ProviderRuntimeState,
+    state: &AppState,
+    active_account: Option<&ProviderAccountRuntimeState>,
+) -> bool {
+    active_account.is_none()
+        && state.accounts_for(provider.provider).is_empty()
+        && provider.account_status == AccountSelectionStatus::LoginRequired
 }
 
 fn provider_status_message(
@@ -282,36 +319,51 @@ fn provider_body_height_for_account(
     provider: &ProviderRuntimeState,
     account: Option<&ProviderAccountRuntimeState>,
 ) -> f32 {
-    let mut sections = 1usize;
+    let mut height = PROVIDER_SUMMARY_HEIGHT;
+    let mut cards = 1usize;
+
+    if account.is_some() {
+        height += PROVIDER_ACCOUNT_HEADER_HEIGHT;
+        cards += 1;
+    }
+
     let snapshot = active_snapshot_for_account(account, provider);
     if let Some(snapshot) = snapshot {
         if account.map(|account| &account.health) == Some(&ProviderHealth::Error) {
-            sections += 1;
+            height += PROVIDER_SECTION_HEIGHT;
+            cards += 1;
         }
 
-        sections += snapshot.windows.len();
+        let window_count = f32::from(u16::try_from(snapshot.windows.len()).unwrap_or(u16::MAX));
+        height += window_count * PROVIDER_SECTION_HEIGHT;
+        cards += snapshot.windows.len();
         match snapshot.provider {
             ProviderId::Claude => {
                 if snapshot.extra_usage.is_some() || snapshot.provider_cost.as_ref().is_some() {
-                    sections += 1;
+                    height += PROVIDER_SECTION_HEIGHT;
+                    cards += 1;
                 }
             }
             _ => {
                 if snapshot.provider_cost.as_ref().is_some() {
-                    sections += 1;
+                    height += PROVIDER_SECTION_HEIGHT;
+                    cards += 1;
                 }
             }
         }
-        if snapshot.identity.email.is_some() || account.is_some() {
-            sections += 1;
-        }
     } else {
-        sections += 1;
+        height += if account.is_none()
+            && provider.account_status == AccountSelectionStatus::LoginRequired
+        {
+            PROVIDER_SECTION_WITH_ACTION_HEIGHT
+        } else {
+            PROVIDER_SECTION_HEIGHT
+        };
+        cards += 1;
     }
 
-    let extra_sections = f32::from(u16::try_from(sections.saturating_sub(1)).unwrap_or(u16::MAX));
-    PROVIDER_SUMMARY_HEIGHT
-        + extra_sections * (PROVIDER_SECTION_HEIGHT + PROVIDER_HEIGHT_SECTION_SPACING)
+    let gaps = f32::from(u16::try_from(cards.saturating_sub(1)).unwrap_or(u16::MAX));
+    height + gaps * PROVIDER_CARD_SPACING
 }
 
 fn active_snapshot_for_account<'a>(
@@ -346,9 +398,12 @@ fn extra_usage_detail_section(
     usage_amount_format: UsageAmountFormat,
 ) -> Element<'static, Message> {
     match state {
-        ExtraUsageState::Disabled => {
-            info_block(fl!("extra-usage-label"), fl!("extra-usage-disabled"), None)
-        }
+        ExtraUsageState::Disabled => info_block(
+            fl!("extra-usage-label"),
+            fl!("extra-usage-disabled"),
+            None,
+            None,
+        ),
         ExtraUsageState::Active { used_percent, cost } => {
             extra_usage_cost_bar(cost, Some(*used_percent), usage_amount_format)
         }
@@ -705,5 +760,54 @@ mod tests {
             provider_status_message(&provider, &state, None),
             "Login required"
         );
+    }
+
+    #[test]
+    fn login_required_empty_state_links_to_each_provider_settings_page() {
+        for provider_id in ProviderId::ALL {
+            let provider = ProviderRuntimeState {
+                provider: provider_id,
+                enabled: true,
+                selected_account_ids: Vec::new(),
+                active_account_id: None,
+                system_active_account_id: None,
+                account_status: AccountSelectionStatus::LoginRequired,
+                is_refreshing: false,
+                legacy_display_snapshot: None,
+                error: Some("Login required".to_string()),
+            };
+            let state = AppState::empty();
+
+            assert!(should_show_login_required_settings_action(
+                &provider, &state, None
+            ));
+        }
+    }
+
+    #[test]
+    fn login_required_settings_action_hides_when_account_exists() {
+        let provider = ProviderRuntimeState {
+            provider: ProviderId::Codex,
+            enabled: true,
+            selected_account_ids: Vec::new(),
+            active_account_id: None,
+            system_active_account_id: None,
+            account_status: AccountSelectionStatus::LoginRequired,
+            is_refreshing: false,
+            legacy_display_snapshot: None,
+            error: Some("Login required".to_string()),
+        };
+        let mut state = AppState::empty();
+        state
+            .provider_accounts
+            .push(ProviderAccountRuntimeState::empty(
+                ProviderId::Codex,
+                "codex-test",
+                "test@example.com",
+            ));
+
+        assert!(!should_show_login_required_settings_action(
+            &provider, &state, None
+        ));
     }
 }

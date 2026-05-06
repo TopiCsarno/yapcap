@@ -10,31 +10,26 @@
   </developer>
   <description>
     <p>
-      YapCap is a COSMIC panel applet that shows local usage state for Codex,
-      Claude Code, and Cursor accounts without telemetry, cloud sync, or a
-      YapCap service account.
+      YapCap is a native COSMIC panel applet that tracks your AI coding quota
+      for Codex, Claude Code, and Cursor — right from the panel, without leaving
+      your desktop.
     </p>
     <p>
-      The app stores provider account state locally and calls provider APIs
-      directly over HTTPS.
+      Add accounts once and YapCap fetches usage directly from provider APIs
+      using credentials stored locally under YapCap-owned directories. No
+      telemetry, no cloud sync, no separate service account required.
+    </p>
+    <p>
+      Supports multiple accounts per provider with a side-by-side popup view,
+      an Active badge that reflects your current CLI session, configurable panel
+      styles, and full COSMIC theme integration including light, dark, and accent
+      color support.
     </p>
   </description>
   <screenshots>
     <screenshot type="default">
-      <caption>Panel applet and default presentation</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Usage detail in the popup</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-detail.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>General settings</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-general.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Provider account settings</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-codex.png</image>
+      <caption>Multi-account popup with Codex, Claude Code, and Cursor side by side</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-hero.png</image>
     </screenshot>
   </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
@@ -62,6 +57,12 @@
     <keyword>COSMIC</keyword>
     <keyword>Usage</keyword>
     <keyword>Quota</keyword>
+    <keyword>AI</keyword>
+    <keyword>Codex</keyword>
+    <keyword>Claude</keyword>
+    <keyword>Cursor</keyword>
+    <keyword>Panel</keyword>
+    <keyword>Applet</keyword>
   </keywords>
   <releases>
     <release version="0.4.0" date="2026-05-04">

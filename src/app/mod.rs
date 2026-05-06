@@ -14,7 +14,7 @@ mod window;
 
 pub(crate) use self::applet::applet_settings;
 use self::applet::{applet_button, applet_button_size, applet_indicator, select_provider};
-use self::popup_view::ProviderLoginStates;
+use self::popup_view::{PopupBodyMeasureTarget, ProviderLoginStates};
 use self::provider_assets::{provider_icon_handle, provider_icon_variant};
 use self::refresh::{
     refresh_provider_account_statuses_task, refresh_provider_task, refresh_provider_tasks,
@@ -73,6 +73,7 @@ pub struct AppModel {
     update_status: UpdateStatus,
     launch_mode: LaunchMode,
     popup_size: Option<Size>,
+    popup_body_measurements: PopupBodyMeasurements,
     codex_login: Option<CodexLoginState>,
     codex_login_handle: Option<Handle>,
     claude_login: Option<ClaudeLoginState>,
@@ -87,13 +88,13 @@ pub enum LaunchMode {
     Standalone,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PopupRoute {
     ProviderDetail,
     Settings(SettingsRoute),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsRoute {
     General,
     Provider(ProviderId),
@@ -130,6 +131,7 @@ pub enum Message {
     DismissCursorScan,
     CursorScanComplete(CursorScanState, Option<CursorScanResult>),
     ProviderAccountStatusesRefreshed(ProviderId, Vec<ProviderAccountRuntimeState>),
+    PopupBodyMeasured(PopupBodyMeasureTarget, Size),
     SetRefreshInterval(u64),
     SetResetTimeFormat(ResetTimeFormat),
     SetUsageAmountFormat(UsageAmountFormat),
@@ -141,6 +143,67 @@ pub enum Message {
     OpenUrl(String),
     Quit,
     HostCliAuthChanged,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct PopupBodyMeasurements {
+    codex: Option<f32>,
+    claude: Option<f32>,
+    cursor: Option<f32>,
+    general_settings: Option<f32>,
+    codex_settings: Option<f32>,
+    claude_settings: Option<f32>,
+    cursor_settings: Option<f32>,
+}
+
+impl PopupBodyMeasurements {
+    fn provider(&self, provider: ProviderId) -> Option<f32> {
+        match provider {
+            ProviderId::Codex => self.codex,
+            ProviderId::Claude => self.claude,
+            ProviderId::Cursor => self.cursor,
+        }
+    }
+
+    fn set_provider(&mut self, provider: ProviderId, height: f32) {
+        match provider {
+            ProviderId::Codex => self.codex = Some(height),
+            ProviderId::Claude => self.claude = Some(height),
+            ProviderId::Cursor => self.cursor = Some(height),
+        }
+    }
+
+    fn set_settings(&mut self, route: SettingsRoute, height: f32) {
+        match route {
+            SettingsRoute::General => self.general_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::Codex) => self.codex_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::Claude) => self.claude_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::Cursor) => self.cursor_settings = Some(height),
+        }
+    }
+
+    fn settings_height(&self) -> Option<f32> {
+        Some(
+            self.general_settings?
+                .max(self.codex_settings?)
+                .max(self.claude_settings?)
+                .max(self.cursor_settings?),
+        )
+    }
+
+    fn provider_height(&self, state: &AppState) -> Option<f32> {
+        let mut any_enabled = false;
+        let height = state
+            .providers
+            .iter()
+            .filter(|provider| provider.enabled)
+            .map(|provider| {
+                any_enabled = true;
+                self.provider(provider.provider)
+            })
+            .try_fold(0.0_f32, |height, next| next.map(|next| height.max(next)))?;
+        any_enabled.then_some(height)
+    }
 }
 
 impl cosmic::Application for AppModel {
@@ -205,6 +268,7 @@ impl cosmic::Application for AppModel {
             update_status: UpdateStatus::Unchecked,
             launch_mode,
             popup_size: None,
+            popup_body_measurements: PopupBodyMeasurements::default(),
             codex_login: None,
             codex_login_handle: None,
             claude_login: None,
@@ -350,6 +414,9 @@ impl AppModel {
             Message::ProviderAccountStatusesRefreshed(provider, accounts) => {
                 self.handle_provider_account_statuses_refreshed(provider, accounts);
             }
+            Message::PopupBodyMeasured(target, size) => {
+                return self.handle_popup_body_measured(target, size);
+            }
             Message::SelectProvider(provider) => {
                 return self.select_provider_tab(provider);
             }
@@ -464,6 +531,44 @@ impl AppModel {
         }
         self.sync_panel_suggested_bounds();
         runtime::persist_state(&self.state);
+    }
+
+    fn handle_popup_body_measured(
+        &mut self,
+        target: PopupBodyMeasureTarget,
+        size: Size,
+    ) -> Option<Task<Message>> {
+        let height = size.height.ceil();
+        let previous = match target {
+            PopupBodyMeasureTarget::Provider(provider) => {
+                let previous = self.popup_body_measurements.provider(provider);
+                self.popup_body_measurements.set_provider(provider, height);
+                previous
+            }
+            PopupBodyMeasureTarget::Settings(route) => {
+                let previous = match route {
+                    SettingsRoute::General => self.popup_body_measurements.general_settings,
+                    SettingsRoute::Provider(ProviderId::Codex) => {
+                        self.popup_body_measurements.codex_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::Claude) => {
+                        self.popup_body_measurements.claude_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::Cursor) => {
+                        self.popup_body_measurements.cursor_settings
+                    }
+                };
+                self.popup_body_measurements.set_settings(route, height);
+                previous
+            }
+        };
+
+        if previous == Some(height) {
+            return None;
+        }
+
+        let route = self.popup_route;
+        self.resize_popup_to_route(&route)
     }
 }
 

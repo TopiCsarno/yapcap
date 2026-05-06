@@ -402,9 +402,9 @@ mod tests {
 
     #[tokio::test]
     async fn reactive_refresh_recovers_from_unauthorized() {
-        let _guard = test_support::env_lock();
+        let mut env = test_support::test_env();
         let state_root = test_dir("reactive-ok");
-        unsafe { std::env::set_var("XDG_STATE_HOME", &state_root) };
+        env.set("XDG_STATE_HOME", state_root.as_os_str());
 
         let old_token = make_test_jwt(Utc::now().timestamp() + 3600);
         let new_token = make_test_jwt(Utc::now().timestamp() + 7200);
@@ -457,15 +457,13 @@ mod tests {
         let saved = storage.load_tokens(&account.id).unwrap();
         assert_eq!(saved.access_token, new_token);
         assert_eq!(saved.refresh_token, "refresh_tok");
-
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
     }
 
     #[tokio::test]
     async fn reactive_permanent_refresh_failure_returns_unauthorized() {
-        let _guard = test_support::env_lock();
+        let mut env = test_support::test_env();
         let state_root = test_dir("reactive-perm");
-        unsafe { std::env::set_var("XDG_STATE_HOME", &state_root) };
+        env.set("XDG_STATE_HOME", state_root.as_os_str());
 
         let token = make_test_jwt(Utc::now().timestamp() + 3600);
         let account = create_test_account(&token, "refresh_tok", Utc::now() + Duration::hours(1));
@@ -498,15 +496,13 @@ mod tests {
 
         assert!(matches!(error, CursorError::Unauthorized));
         assert_eq!(handle.await.unwrap().len(), 2);
-
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
     }
 
     #[tokio::test]
     async fn proactive_refresh_updates_tokens_before_fetch() {
-        let _guard = test_support::env_lock();
+        let mut env = test_support::test_env();
         let state_root = test_dir("proactive-ok");
-        unsafe { std::env::set_var("XDG_STATE_HOME", &state_root) };
+        env.set("XDG_STATE_HOME", state_root.as_os_str());
 
         let new_token = make_test_jwt(Utc::now().timestamp() + 7200);
         let account = create_test_account(
@@ -554,7 +550,5 @@ mod tests {
         let storage = ProviderAccountStorage::new(paths().cursor_accounts_dir);
         let saved = storage.load_tokens(&account.id).unwrap();
         assert_eq!(saved.access_token, new_token);
-
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
     }
 }

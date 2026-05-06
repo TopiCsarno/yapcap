@@ -267,15 +267,32 @@ pub(super) fn show_all_accounts_row(
     show_all: bool,
     enabled: bool,
 ) -> Element<'static, Message> {
+    let opacity = if enabled { 1.0 } else { 0.45 };
     let label = widget::tooltip::tooltip(
-        widget::text(fl!("show-all-accounts-label")).size(13),
+        container(widget::text(fl!("show-all-accounts-label")).size(13)).style(
+            move |theme: &cosmic::Theme| {
+                let color = apply_alpha(theme.cosmic().background.component.on.into(), opacity);
+                widget::container::Style {
+                    text_color: Some(color),
+                    background: None,
+                    border: cosmic::iced::Border::default(),
+                    shadow: cosmic::iced::Shadow::default(),
+                    icon_color: Some(color),
+                    snap: true,
+                }
+            },
+        ),
         widget::text(fl!("show-all-accounts-detail")).size(12),
         widget::tooltip::Position::Top,
     );
 
-    let toggle = widget::toggler(show_all).on_toggle_maybe(
-        enabled.then_some(move |enabled| Message::SetShowAllAccounts(provider, enabled)),
-    );
+    let toggle: Element<'static, Message> = if enabled {
+        widget::toggler(show_all)
+            .on_toggle(move |enabled| Message::SetShowAllAccounts(provider, enabled))
+            .into()
+    } else {
+        disabled_show_all_accounts_toggle(show_all)
+    };
 
     container(
         row![label, toggle]
@@ -285,6 +302,72 @@ pub(super) fn show_all_accounts_row(
     )
     .width(Length::Fill)
     .padding([4, 0])
+    .into()
+}
+
+fn disabled_show_all_accounts_toggle(show_all: bool) -> Element<'static, Message> {
+    let handle = container(
+        cosmic::iced::widget::Space::new()
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0)),
+    )
+    .width(Length::Fixed(20.0))
+    .height(Length::Fixed(20.0))
+    .style(|theme: &cosmic::Theme| {
+        let color = apply_alpha(theme.cosmic().background.component.on.into(), 0.45);
+        widget::container::Style {
+            text_color: None,
+            background: Some(Background::Color(color)),
+            border: cosmic::iced::Border {
+                radius: theme.cosmic().radius_xl().into(),
+                width: 0.0,
+                color: cosmic::iced::Color::TRANSPARENT,
+            },
+            shadow: cosmic::iced::Shadow::default(),
+            icon_color: None,
+            snap: true,
+        }
+    });
+    let spacer = cosmic::iced::widget::Space::new()
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(20.0));
+    let content = if show_all {
+        row![spacer, handle]
+    } else {
+        row![handle, spacer]
+    };
+
+    container(
+        content
+            .spacing(0)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+    )
+    .width(Length::Fixed(48.0))
+    .height(Length::Fixed(24.0))
+    .padding(2)
+    .style(move |theme: &cosmic::Theme| {
+        let cosmic = theme.cosmic();
+        let background = if show_all {
+            apply_alpha(cosmic.accent.base.into(), 0.24)
+        } else if cosmic.is_dark {
+            apply_alpha(cosmic.palette.neutral_6.into(), 0.45)
+        } else {
+            apply_alpha(cosmic.palette.neutral_5.into(), 0.45)
+        };
+        widget::container::Style {
+            text_color: None,
+            background: Some(Background::Color(background)),
+            border: cosmic::iced::Border {
+                radius: cosmic.radius_xl().into(),
+                width: 0.0,
+                color: cosmic::iced::Color::TRANSPARENT,
+            },
+            shadow: cosmic::iced::Shadow::default(),
+            icon_color: None,
+            snap: true,
+        }
+    })
     .into()
 }
 
@@ -388,99 +471,6 @@ fn claude_account_row_status_badge(
             },
             fl!("badge-stale-tooltip"),
         ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ManagedClaudeAccountConfig;
-    use crate::model::{AuthState, ProviderHealth};
-    use chrono::Utc;
-    use std::path::PathBuf;
-
-    fn claude_config(id: &str, email: Option<&str>) -> Config {
-        Config {
-            claude_managed_accounts: vec![ManagedClaudeAccountConfig {
-                id: id.to_string(),
-                label: "Claude account".to_string(),
-                config_dir: PathBuf::from("/tmp/claude-test"),
-                email: email.map(str::to_string),
-                organization: None,
-                subscription_type: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                last_authenticated_at: Some(Utc::now()),
-            }],
-            ..Config::default()
-        }
-    }
-
-    #[test]
-    fn claude_row_label_prefers_email_from_config() {
-        let config = claude_config("claude-1", Some("user@example.com"));
-        let account =
-            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
-
-        assert_eq!(
-            claude_account_row_label(&account, &config),
-            "user@example.com"
-        );
-    }
-
-    #[test]
-    fn claude_row_status_marks_action_required_before_error() {
-        let mut account =
-            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
-        account.health = ProviderHealth::Error;
-        account.auth_state = AuthState::ActionRequired;
-
-        assert_eq!(
-            claude_account_row_status(&account),
-            Some(ClaudeAccountRowStatus::ReauthRequired)
-        );
-    }
-
-    #[test]
-    fn codex_row_requires_action_when_auth_state_demands_it() {
-        let mut account =
-            ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
-        account.auth_state = AuthState::ActionRequired;
-        assert!(codex_account_requires_action(&account));
-    }
-
-    #[test]
-    fn cursor_reauth_copy_does_not_use_inactive() {
-        assert_eq!(fl!("cursor-account-reauth-badge"), "Re-auth needed");
-        assert_eq!(
-            fl!("cursor-account-reauth-tooltip"),
-            "Rescan Cursor account"
-        );
-        assert!(!fl!("cursor-account-reauth-detail").contains("inactive"));
-        assert!(!fl!("cursor-accounts-reauth-summary").contains("inactive"));
-    }
-
-    #[test]
-    fn claude_row_status_marks_stale_snapshot() {
-        let mut account =
-            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
-        account.health = ProviderHealth::Error;
-        account.auth_state = AuthState::Ready;
-        account.snapshot = Some(crate::model::UsageSnapshot {
-            provider: ProviderId::Claude,
-            source: "test".to_string(),
-            updated_at: Utc::now(),
-            headline: crate::model::UsageHeadline(0),
-            windows: Vec::new(),
-            provider_cost: None,
-            extra_usage: None,
-            identity: crate::model::ProviderIdentity::default(),
-        });
-
-        assert_eq!(
-            claude_account_row_status(&account),
-            Some(ClaudeAccountRowStatus::Stale)
-        );
     }
 }
 
@@ -677,4 +667,97 @@ fn account_row_icon_button_style(theme: &cosmic::Theme, opacity: f32) -> widget:
     style.border_radius = cosmic.corner_radii.radius_m.into();
 
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ManagedClaudeAccountConfig;
+    use crate::model::{AuthState, ProviderHealth};
+    use chrono::Utc;
+    use std::path::PathBuf;
+
+    fn claude_config(id: &str, email: Option<&str>) -> Config {
+        Config {
+            claude_managed_accounts: vec![ManagedClaudeAccountConfig {
+                id: id.to_string(),
+                label: "Claude account".to_string(),
+                config_dir: PathBuf::from("/tmp/claude-test"),
+                email: email.map(str::to_string),
+                organization: None,
+                subscription_type: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: Some(Utc::now()),
+            }],
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn claude_row_label_prefers_email_from_config() {
+        let config = claude_config("claude-1", Some("user@example.com"));
+        let account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+
+        assert_eq!(
+            claude_account_row_label(&account, &config),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn claude_row_status_marks_action_required_before_error() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+
+        assert_eq!(
+            claude_account_row_status(&account),
+            Some(ClaudeAccountRowStatus::ReauthRequired)
+        );
+    }
+
+    #[test]
+    fn codex_row_requires_action_when_auth_state_demands_it() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
+        account.auth_state = AuthState::ActionRequired;
+        assert!(codex_account_requires_action(&account));
+    }
+
+    #[test]
+    fn cursor_reauth_copy_does_not_use_inactive() {
+        assert_eq!(fl!("cursor-account-reauth-badge"), "Re-auth needed");
+        assert_eq!(
+            fl!("cursor-account-reauth-tooltip"),
+            "Rescan Cursor account"
+        );
+        assert!(!fl!("cursor-account-reauth-detail").contains("inactive"));
+        assert!(!fl!("cursor-accounts-reauth-summary").contains("inactive"));
+    }
+
+    #[test]
+    fn claude_row_status_marks_stale_snapshot() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Claude, "claude-1", "Claude account");
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::Ready;
+        account.snapshot = Some(crate::model::UsageSnapshot {
+            provider: ProviderId::Claude,
+            source: "test".to_string(),
+            updated_at: Utc::now(),
+            headline: crate::model::UsageHeadline(0),
+            windows: Vec::new(),
+            provider_cost: None,
+            extra_usage: None,
+            identity: crate::model::ProviderIdentity::default(),
+        });
+
+        assert_eq!(
+            claude_account_row_status(&account),
+            Some(ClaudeAccountRowStatus::Stale)
+        );
+    }
 }

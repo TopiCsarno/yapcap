@@ -2,14 +2,15 @@ use super::applet::{
     applet_bar_width, applet_button_size, applet_percent_cell_alignment, applet_percent_cell_width,
     applet_percent_text, select_provider, selected_provider_all_percents,
 };
-use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size};
+use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size, popup_settings_size};
 use super::{
     APPLET_ACCOUNT_GAP, APPLET_ICON_GAP, APPLET_PERCENT_ACCOUNT_GAP, AppState, PanelIconStyle,
     ProviderId, Size, UsageAmountFormat, format_retry_delay, popup_size_limits_with_max_width,
     popup_size_tuple, update_retry_delay,
 };
 use crate::model::{
-    ProviderAccountRuntimeState, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
+    ExtraUsageState, ProviderAccountRuntimeState, ProviderCost, ProviderIdentity, UsageHeadline,
+    UsageSnapshot, UsageWindow,
 };
 use chrono::Utc;
 use std::time::Duration;
@@ -197,6 +198,46 @@ fn popup_session_width_is_capped_to_four_selected_accounts() {
 }
 
 #[test]
+fn popup_provider_tabs_share_tallest_provider_height() {
+    let state = state_with_provider_window_counts(&[
+        (ProviderId::Codex, 1, false),
+        (ProviderId::Claude, 3, true),
+        (ProviderId::Cursor, 2, false),
+    ]);
+
+    let codex = popup_session_size(&state, ProviderId::Codex);
+    let claude = popup_session_size(&state, ProviderId::Claude);
+    let cursor = popup_session_size(&state, ProviderId::Cursor);
+
+    assert_eq!(codex.height, claude.height);
+    assert_eq!(claude.height, cursor.height);
+}
+
+#[test]
+fn popup_provider_height_is_independent_from_settings_height() {
+    let mut state = state_with_provider_window_counts(&[
+        (ProviderId::Codex, 1, false),
+        (ProviderId::Claude, 1, false),
+        (ProviderId::Cursor, 1, false),
+    ]);
+    for provider in ProviderId::ALL {
+        for i in 1..8 {
+            state.upsert_account(ProviderAccountRuntimeState::empty(
+                provider,
+                format!("{provider:?}-{i}"),
+                provider.label(),
+            ));
+        }
+    }
+
+    let provider = popup_session_size(&state, ProviderId::Codex);
+    let settings = popup_settings_size(&state);
+
+    assert!(settings.height > provider.height);
+    assert_eq!(provider.width, POPUP_COLUMN_WIDTH);
+}
+
+#[test]
 fn applet_percent_cell_width_is_fixed_to_widest_normal_percent() {
     let expected =
         super::APPLET_PERCENT_CELL_HORIZONTAL_PAD + 6.0 * super::APPLET_PERCENT_GLYPH_WIDTH;
@@ -302,4 +343,53 @@ fn state_with_selected_account_percents(percents: &[f32]) -> AppState {
     }
 
     state
+}
+
+fn state_with_provider_window_counts(providers: &[(ProviderId, usize, bool)]) -> AppState {
+    let mut state = AppState::empty();
+    for &(provider, window_count, with_extra_usage) in providers {
+        let account_id = format!("{provider:?}-0");
+        state.provider_mut(provider).unwrap().selected_account_ids = vec![account_id.clone()];
+        let mut account =
+            ProviderAccountRuntimeState::empty(provider, account_id, provider.label());
+        account.snapshot = Some(snapshot_with_windows(
+            provider,
+            window_count,
+            with_extra_usage,
+        ));
+        state.upsert_account(account);
+    }
+    state
+}
+
+fn snapshot_with_windows(
+    provider: ProviderId,
+    window_count: usize,
+    with_extra_usage: bool,
+) -> UsageSnapshot {
+    UsageSnapshot {
+        provider,
+        source: "test".to_string(),
+        updated_at: Utc::now(),
+        headline: UsageHeadline(0),
+        windows: (0..window_count)
+            .map(|i| UsageWindow {
+                label: format!("Window {i}"),
+                used_percent: 10.0,
+                reset_at: None,
+                window_seconds: None,
+                reset_description: None,
+            })
+            .collect(),
+        provider_cost: None,
+        extra_usage: with_extra_usage.then_some(ExtraUsageState::Active {
+            used_percent: 25.0,
+            cost: ProviderCost {
+                used: 5.0,
+                limit: Some(20.0),
+                units: "USD".to_string(),
+            },
+        }),
+        identity: ProviderIdentity::default(),
+    }
 }

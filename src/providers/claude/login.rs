@@ -526,11 +526,9 @@ mod tests {
 
     #[tokio::test]
     async fn exchanges_console_code_and_commits_account() {
-        let _guard = test_support::env_lock();
+        let mut env = test_support::test_env();
         let state_root = temp_state("commit");
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", &state_root);
-        }
+        env.set("XDG_STATE_HOME", state_root.as_os_str());
         let (token_url, request_handle) =
             token_server(token_response("User@Example.com", "access-1")).await;
 
@@ -545,9 +543,6 @@ mod tests {
             .unwrap();
 
         let token_request = request_handle.await.unwrap();
-        unsafe {
-            std::env::remove_var("XDG_STATE_HOME");
-        }
 
         assert!(token_request.contains("\"grant_type\":\"authorization_code\""));
         assert!(token_request.contains("\"code\":\"code-1\""));

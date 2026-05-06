@@ -455,23 +455,9 @@ mod tests {
 
     #[test]
     fn flatpak_paths_use_dot_var_layout() {
-        use std::sync::Mutex;
-
-        static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-        let _guard = ENV_LOCK.lock().expect("flatpak path test env lock");
-
-        let prev_id = std::env::var_os("FLATPAK_ID");
-
-        let p = unsafe {
-            std::env::set_var("FLATPAK_ID", "com.example.YapCapTest");
-            let p = paths();
-            std::env::remove_var("FLATPAK_ID");
-            if let Some(ref v) = prev_id {
-                std::env::set_var("FLATPAK_ID", v);
-            }
-            p
-        };
+        let mut env = crate::test_support::test_env();
+        env.set("FLATPAK_ID", "com.example.YapCapTest");
+        let p = paths();
 
         use std::path::Path;
         assert!(
@@ -497,16 +483,8 @@ mod tests {
 
     #[test]
     fn host_user_home_dir_matches_dirs_home_without_flatpak() {
-        let _guard = crate::test_support::env_lock();
-        let prev = std::env::var_os("FLATPAK_ID");
-        unsafe {
-            std::env::remove_var("FLATPAK_ID");
-        }
+        let mut env = crate::test_support::test_env();
+        env.remove("FLATPAK_ID");
         assert_eq!(host_user_home_dir(), dirs::home_dir());
-        if let Some(v) = prev {
-            unsafe {
-                std::env::set_var("FLATPAK_ID", v);
-            }
-        }
     }
 }

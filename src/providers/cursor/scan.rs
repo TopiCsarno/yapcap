@@ -556,7 +556,8 @@ mod tests {
             access_token: "new_jwt_token".to_string(),
             ..make_scan_result("user@example.com")
         };
-        let updated_account = confirm_scan(&[existing_account.clone()], &updated_result).unwrap();
+        let updated_account =
+            confirm_scan(std::slice::from_ref(&existing_account), &updated_result).unwrap();
 
         assert_eq!(updated_account.id, existing_account.id);
 

@@ -79,11 +79,33 @@ impl AppModel {
     }
 
     pub(super) fn popup_size_for_route(&self, route: &PopupRoute) -> Size {
+        if let Some(size) = self.measured_popup_size_for_route(route) {
+            return size;
+        }
         match route {
             PopupRoute::ProviderDetail => {
                 popup_view::popup_session_size(&self.state, self.selected_provider)
             }
             PopupRoute::Settings(_) => popup_view::popup_settings_size(&self.state),
+        }
+    }
+
+    fn measured_popup_size_for_route(&self, route: &PopupRoute) -> Option<Size> {
+        match route {
+            PopupRoute::ProviderDetail => self
+                .popup_body_measurements
+                .provider_height(&self.state)
+                .map(|height| {
+                    popup_view::popup_session_size_with_body_height(
+                        &self.state,
+                        self.selected_provider,
+                        height,
+                    )
+                }),
+            PopupRoute::Settings(_) => self
+                .popup_body_measurements
+                .settings_height()
+                .map(popup_view::popup_settings_size_with_body_height),
         }
     }
 

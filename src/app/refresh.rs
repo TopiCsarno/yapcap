@@ -284,16 +284,11 @@ mod tests {
 
     #[test]
     fn refresh_tasks_reconcile_claude_host_active_account_before_fetching() {
-        let _guard = test_support::env_lock();
+        let mut env = test_support::test_env();
         let state_root = temp_state_root("claude-active");
-        let prev_home = std::env::var_os("HOME");
-        let prev_state = std::env::var_os("XDG_STATE_HOME");
-        let prev_flatpak = std::env::var_os("FLATPAK_ID");
-        unsafe {
-            std::env::set_var("HOME", &state_root);
-            std::env::set_var("XDG_STATE_HOME", &state_root);
-            std::env::remove_var("FLATPAK_ID");
-        }
+        env.set("HOME", state_root.as_os_str());
+        env.set("XDG_STATE_HOME", state_root.as_os_str());
+        env.remove("FLATPAK_ID");
         let storage = ProviderAccountStorage::new(paths().claude_accounts_dir.clone());
         let account_a = stored_claude_account(&storage, "a@example.com", "acct-a");
         let account_b = stored_claude_account(&storage, "b@example.com", "acct-b");
@@ -312,23 +307,6 @@ mod tests {
 
         let _tasks = refresh_provider_tasks(&config, &mut state);
 
-        unsafe {
-            if let Some(value) = prev_home {
-                std::env::set_var("HOME", value);
-            } else {
-                std::env::remove_var("HOME");
-            }
-            if let Some(value) = prev_state {
-                std::env::set_var("XDG_STATE_HOME", value);
-            } else {
-                std::env::remove_var("XDG_STATE_HOME");
-            }
-            if let Some(value) = prev_flatpak {
-                std::env::set_var("FLATPAK_ID", value);
-            } else {
-                std::env::remove_var("FLATPAK_ID");
-            }
-        }
         assert_eq!(
             state
                 .provider(ProviderId::Claude)

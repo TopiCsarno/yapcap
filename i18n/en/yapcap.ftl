@@ -97,6 +97,7 @@ update-check-again = Check again
 no-providers = No providers available
 no-providers-detail = Open Settings, enable a provider, and add an account to get started.
 no-providers-open-settings = Open Settings
+open-provider-settings = Open { $provider } settings
 account-label = Account
 status-label = Status
 extra-usage-label = Extra usage

@@ -1,14 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <!-- Speech bubble body -->
-  <path d="M14 6 L86 6 Q94 6 94 14 L94 60 Q94 68 86 68 L48 68 L38 84 L28 68 L14 68 Q6 68 6 60 L6 14 Q6 6 14 6 Z"
-        fill="white" stroke="black" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
-  <!-- Usage bar 1 (Codex, ~30%) -->
-  <rect x="17" y="19" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
-  <rect x="17" y="19" width="20" height="10" rx="3" fill="black"/>
-  <!-- Usage bar 2 (Claude, ~70%) -->
-  <rect x="17" y="35" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
-  <rect x="17" y="35" width="46" height="10" rx="3" fill="black"/>
-  <!-- Usage bar 3 (Cursor, ~50%) -->
-  <rect x="17" y="51" width="66" height="10" rx="3" fill="none" stroke="black" stroke-width="3.5"/>
-  <rect x="17" y="51" width="33" height="10" rx="3" fill="black"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="64" y1="0" x2="444" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+    <clipPath id="c"><path d="M 136,44 L 376,44 Q 444,44 444,112 L 444,316 Q 444,384 376,384 L 216,384 L 80,468 L 160,384 L 136,384 Q 64,384 64,316 L 64,112 Q 64,44 136,44 Z"/></clipPath>
+  </defs>
+  <!-- 2 bars, teal→purple, stroke=30 — thicker bubble, same bars -->
+  <path d="M 136,44 L 376,44 Q 444,44 444,112 L 444,316 Q 444,384 376,384 L 216,384 L 80,468 L 160,384 L 136,384 Q 64,384 64,316 L 64,112 Q 64,44 136,44 Z" fill="none" stroke="url(#g)" stroke-width="30" stroke-linejoin="round"/>
+  <rect x="108" y="129" width="296" height="60" rx="30" fill="#04080F" clip-path="url(#c)"/>
+  <rect x="108" y="129" width="252" height="60" rx="30" fill="url(#g)" clip-path="url(#c)"/>
+  <rect x="108" y="229" width="296" height="60" rx="30" fill="#04080F" clip-path="url(#c)"/>
+  <rect x="108" y="229" width="133" height="60" rx="30" fill="url(#g)" clip-path="url(#c)"/>
 </svg>

@@ -1,11 +1,13 @@
 {
-  "id": "com.topi.YapCap",
+  "id": "io.github.TopiCsarno.YapCap",
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "25.08",
   "base": "com.system76.Cosmic.BaseApp",
   "base-version": "stable",
   "sdk": "org.freedesktop.Sdk",
-  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
   "command": "yapcap",
   "finish-args": [
     "--share=ipc",
@@ -33,15 +35,15 @@
         "cargo --offline fetch --manifest-path Cargo.toml --verbose",
         "cargo --offline build --release --verbose",
         "install -Dm0755 target/release/yapcap /app/bin/yapcap",
-        "install -Dm0644 resources/app.desktop /app/share/applications/com.topi.YapCap.desktop",
-        "install -Dm0644 resources/app.metainfo.xml /app/share/metainfo/com.topi.YapCap.metainfo.xml",
-        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.topi.YapCap.svg"
+        "install -Dm0644 resources/app.desktop /app/share/applications/io.github.TopiCsarno.YapCap.desktop",
+        "install -Dm0644 resources/app.metainfo.xml /app/share/metainfo/io.github.TopiCsarno.YapCap.metainfo.xml",
+        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.TopiCsarno.YapCap.svg"
       ],
       "sources": [
         {
           "type": "git",
           "url": "https://github.com/TopiCsarno/yapcap.git",
-          "branch": "dev"
+          "commit": "66e607b780441371bd938331a5ad3e5d404fbb2e"
         },
         "cargo-sources.json"
       ]

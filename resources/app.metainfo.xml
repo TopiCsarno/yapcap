@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.topi.YapCap</id>
+  <id>io.github.TopiCsarno.YapCap</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
   <name>YapCap</name>
   <summary>COSMIC panel applet for Codex, Claude Code, and Cursor usage</summary>
-  <developer id="com.topi">
+  <developer id="io.github.TopiCsarno">
     <name>Topi Csarno</name>
   </developer>
   <description>
@@ -38,7 +38,7 @@
   <url type="homepage">https://github.com/TopiCsarno/yapcap</url>
   <url type="bugtracker">https://github.com/TopiCsarno/yapcap/issues</url>
   <url type="vcs-browser">https://github.com/TopiCsarno/yapcap</url>
-  <launchable type="desktop-id">com.topi.YapCap.desktop</launchable>
+  <launchable type="desktop-id">io.github.TopiCsarno.YapCap.desktop</launchable>
   <provides>
     <binary>yapcap</binary>
   </provides>

@@ -1,6 +1,6 @@
 name := 'yapcap'
 name-debug := 'yapcap-debug'
-appid := 'com.topi.YapCap'
+appid := 'io.github.TopiCsarno.YapCap'
 flatpak-manifest := 'packaging/' + appid + '.json'
 
 rootdir := ''
@@ -229,6 +229,22 @@ vendor:
 vendor-extract:
     rm -rf vendor
     tar pxf vendor.tar
+
+# Regenerate packaging/cargo-sources.json from Cargo.lock and update the commit hash in the manifest.
+# Run this after any dependency change or before cutting a release PR to cosmic-flatpak.
+update-packaging:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    commit="$(git rev-parse HEAD)"
+    echo "Generating cargo-sources.json from Cargo.lock..."
+    uv run https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/refs/heads/master/cargo/flatpak-cargo-generator.py \
+        Cargo.lock -o packaging/cargo-sources.json
+    echo "Updating commit hash in {{ flatpak-manifest }} to $commit..."
+    jq --arg commit "$commit" \
+        '(.modules[].sources[] | objects | select(.type == "git")) .commit = $commit' \
+        {{ flatpak-manifest }} > /tmp/manifest.tmp.json
+    mv /tmp/manifest.tmp.json {{ flatpak-manifest }}
+    echo "Done. Review packaging/ and copy to cosmic-flatpak/app/{{ appid }}/"
 
 # Bump cargo version, create git commit, and create tag
 tag version:

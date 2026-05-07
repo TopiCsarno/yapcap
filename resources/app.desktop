@@ -2,7 +2,7 @@
 Name=YapCap
 Comment=Provider usage panel applet for COSMIC
 Type=Application
-Icon=com.topi.YapCap
+Icon=io.github.TopiCsarno.YapCap
 Exec=yapcap
 Terminal=false
 StartupNotify=true

@@ -211,7 +211,7 @@ impl cosmic::Application for AppModel {
     type Flags = LaunchMode;
     type Message = Message;
 
-    const APP_ID: &'static str = "com.topi.YapCap";
+    const APP_ID: &'static str = "io.github.TopiCsarno.YapCap";
 
     fn core(&self) -> &cosmic::Core {
         &self.core

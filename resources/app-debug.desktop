@@ -2,7 +2,7 @@
 Name=YapCap (debug)
 Comment=Provider usage panel applet for COSMIC (debug build, demo mode)
 Type=Application
-Icon=com.topi.YapCap
+Icon=io.github.TopiCsarno.YapCap
 Exec=env YAPCAP_DEMO=1 yapcap-debug
 Terminal=false
 StartupNotify=true

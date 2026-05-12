@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.4.0 · **Last updated:** 2026-05-04
+**Status:** As-built v0.4.0 · **Last updated:** 2026-05-12
 
 ## Document Metadata
 
@@ -438,8 +438,8 @@ use the OS keyring or launch a browser subprocess to acquire Cursor credentials.
 ### 4.3 Configuration
 
 Provider settings are stored through the COSMIC template's `cosmic_config`
-entry for app ID `com.topi.YapCap`. The `#[version = N]` on `Config` is part of
-that integration: settings live under `…/cosmic/com.topi.YapCap/vN/`, so raising
+entry for app ID `io.github.TopiCsarno.YapCap`. The `#[version = N]` on `Config` is part of
+that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN/`, so raising
 `N` starts a new on-disk directory and avoids loading incompatible serialized
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
@@ -658,7 +658,7 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Config: `cosmic_config` under app ID `com.topi.YapCap`, schema `v400`
+- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v400`
 - Snapshot cache: under the XDG cache root (typically `~/.cache/yapcap/snapshots.json`)
 - Managed accounts and logs: under the XDG state root (typically `~/.local/state/yapcap/`)
 
@@ -716,7 +716,7 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
   - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets two managed demo accounts, both selected, with contrasting synthetic Session and Weekly usage windows; **Claude** gets one Max managed demo account with Session, Weekly, and Sonnet usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; **`Show all accounts`** is enabled for Codex and disabled for Claude and Cursor; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets one managed demo account with synthetic Session and Weekly usage windows; **Claude** gets one Max managed demo account with Session, Weekly, and Sonnet usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
   - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
@@ -727,21 +727,23 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
 
 ## 8. Packaging
 
-- YapCap ships a Flatpak manifest at `packaging/com.topi.YapCap.json` aligned with
+- YapCap ships a Flatpak manifest at `packaging/io.github.TopiCsarno.YapCap.json` aligned with
   [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) Rust applets:
   `org.freedesktop.Platform` 25.08, `com.system76.Cosmic.BaseApp` / `stable`,
   `org.freedesktop.Sdk.Extension.rust-stable`, top-level manifest `id`
-  `com.topi.YapCap`, and offline `cargo fetch` / `cargo build` inside the module.
-- The module’s primary source is `type: git` (same as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) listings), with branch `dev` in the committed manifest. Local `just flatpak-build`, `just flatpak-build-clean`, and `just flatpak-install` builds stage the active local Git branch with `git archive`, generate a temporary manifest that uses that staged tree as the app source, then exports/installs the same branch. Uncommitted edits are not included. Submission to `cosmic-flatpak` should pin a `commit` (and release `tag` when applicable) for reproducible builds.
+  `io.github.TopiCsarno.YapCap`, and offline `cargo fetch` / `cargo build` inside the module.
+- YapCap is listed in the COSMIC Store through the COSMIC Flatpak packaging flow. Store metadata comes from `resources/app.metainfo.xml`, including the summary, description, screenshots, URLs, icon, release notes, `project_group` `COSMIC`, developer `Tamás Csarnó`, the legacy `developer_name` value COSMIC Store displays, and the `com.system76.CosmicApplet` provide marker that makes COSMIC Store treat YapCap as an applet with the "Place on desktop" action. AppStream categories are intentionally limited to `Utility`; `System` is omitted.
+- The module’s primary source is `type: git` (same as [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) listings), pinned to a commit in the committed manifest. Local `just flatpak-build`, `just flatpak-build-clean`, and `just flatpak-install` builds stage the active local Git branch with `git archive`, generate a temporary manifest that uses that staged tree as the app source, then exports/installs the same branch. Uncommitted edits are not included. Submission updates to `cosmic-flatpak` should keep the manifest pinned to a reproducible commit and release tag when applicable.
 - `packaging/cargo-sources.json` is generated from `Cargo.lock` (flatpak-builder-tools
   `flatpak-cargo-generator.py`) and must be regenerated whenever the lockfile
   changes.
 - The manifest installs the applet binary, desktop entry, AppStream metainfo,
-  and scalable app icon under the `com.topi.YapCap` app id.
+  and scalable app icon under the `io.github.TopiCsarno.YapCap` app id.
 - `resources/app.metainfo.xml` includes a `<releases>` block with semver entries
   (for example `0.4.0`) so software centers and validators can show version history.
   Remote `<screenshot>` images and `<url type="bugtracker">` point at GitHub `raw/main`
-  and Issues for store listings.
+  and Issues for store listings. The default store screenshot is the provider-detail
+  popup, followed by Codex, Claude Code, Cursor, and Settings screenshots.
 - Runtime permissions avoid host-wide and writable home access: network, IPC,
   Wayland, fallback X11, DRI, D-Bus access to
   `com.system76.CosmicSettingsDaemon` and its

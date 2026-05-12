@@ -33,7 +33,7 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 - **Explicit accounts** — credentials are added through YapCap and stored under YapCap-owned account directories
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
 - **COSMIC themes** — popup and panel respect your system theme, accent, and icon context
-<!-- - **Available in the COSMIC Store** — YapCap can be installed through the COSMIC Store as a flatpak package which recieves auto-updates.  -->
+- **Available in the COSMIC Store** — install the Flatpak from COSMIC Store and receive updates through the normal COSMIC update flow.
 
 ## Screenshots
 
@@ -90,21 +90,15 @@ YapCap follows your COSMIC system theme—the popup and panel pick up light or d
 
 ## Install
 
-### COSMIC Store
+### COSMIC Store (recommended)
 
-<!-- Once listed, install from the COSMIC Store or run:
+Install **YapCap** from the COSMIC Store and receive automatic updates. 
+
+If you prefer the command line and have the COSMIC Flatpak remote configured:
 
 ```bash
 flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
-flatpak install --user cosmic com.topi.YapCap
-```
-
--->
-
-Coming soon. In the meantime, install from a clone:
-
-```bash
-just flatpak-install
+flatpak install --user cosmic io.github.TopiCsarno.YapCap
 ```
 
 ### apt (Debian/Ubuntu/Pop!\_OS)
@@ -133,7 +127,7 @@ just install
 
 ## Quickstart
 
-1. After installing, restart your COSMIC session (log out and back in).
+1. After installing, got to COSMIC Settings app  Desktop → Panel → Configure panel applets
 2. Add **YapCap** from the panel applet picker.
 3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex and Claude use browser OAuth, and Cursor scans the local Cursor IDE account state.
 4. Click the panel button to open the popup.
@@ -188,7 +182,7 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 - **Cursor shows no data** — log into Cursor IDE, then open **Settings → Cursor** and use **Add account** to re-scan the Cursor session.
 - **Stale data** — a transient failure keeps the last good snapshot visible and marks it stale. Click **Refresh now** once the network or provider is back.
 
-Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/app/com.topi.YapCap/data/yapcap/logs/yapcap.log`.
+Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`.
 
 ## File locations
 
@@ -196,12 +190,12 @@ Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/cosmic/com.topi.YapCap/v400/` | Settings (provider toggles, accounts, display options) |
+| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/` | Settings (provider toggles, accounts, display options) |
 | `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
 | `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`}`-accounts/` | Managed credential copies |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
-**Flatpak** (`com.topi.YapCap`): YapCap cache and state live only under `~/.var/app/com.topi.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
+**Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap cache and state live only under `~/.var/app/io.github.TopiCsarno.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
 
 ## Limitations
 

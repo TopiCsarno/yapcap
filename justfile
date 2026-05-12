@@ -193,23 +193,6 @@ flatpak-uninstall:
       update-desktop-database "$d" || true
     fi
 
-# Uninstalls the user Flatpak app and clears its installed app data/config.
-# This is the reset path when an already-installed Flatpak is in the way.
-flatpak-clear-installed:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if flatpak --user info '{{ appid }}' &>/dev/null; then
-      flatpak --user uninstall --delete-data --noninteractive '{{ appid }}'
-    else
-      echo '{{ appid }} is not installed for the current user; clearing leftover data only.' >&2
-    fi
-    rm -rf "{{ home_directory() / '.var' / 'app' / appid }}"
-    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/{{ appid }}"
-    d="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-    if [[ -d "$d" ]] && command -v update-desktop-database >/dev/null 2>&1; then
-      update-desktop-database "$d" || true
-    fi
-
 # Remove local Flatpak build outputs, flatpak-builder cache, COSMIC config, and per-app Flatpak data.
 # Does not uninstall the app from Flatpak; use `flatpak-uninstall` if needed.
 flatpak-clean:

@@ -6,15 +6,15 @@ Paths used below:
 
 **Native** (default XDG layout on typical Linux installs):
 
-- Config: `~/.config/cosmic/com.topi.YapCap/v400/`
+- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/`
 - Cache: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
-**Flatpak** (app id `com.topi.YapCap`; paths use passwd `pw_dir` as `~`):
+**Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
 - Config: same COSMIC config schema `v400` dir (manifest mounts `~/.config/cosmic`)
-- Cache: `~/.var/app/com.topi.YapCap/cache/yapcap/snapshots.json`
-- Accounts + logs: `~/.var/app/com.topi.YapCap/data/yapcap/`
+- Cache: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
+- Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
 Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data—that is native-only.
 
@@ -79,7 +79,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 - Settings → Codex → Add account opens browser OAuth flow.
 - Cancel during login returns to normal add-account state with no partial account stored.
-- Successful login stores account under native `~/.local/state/yapcap/codex-accounts/` or Flatpak `~/.var/app/com.topi.YapCap/data/yapcap/codex-accounts/`.
+- Successful login stores account under native `~/.local/state/yapcap/codex-accounts/` or Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/codex-accounts/`.
 - Stored directory contains `metadata.json` and `tokens.json`; `metadata.json` has `email` and `provider_account_id`; `tokens.json` has `access_token`, `refresh_token`, and `expires_at`.
 - Duplicate login (same email) updates the existing account directory, not a second entry.
 - New account is selected immediately in single-account mode.
@@ -115,7 +115,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 - Pasting a wrong or malformed code shows an explicit plain-language error ("paste the authentication code"); existing accounts are untouched.
 - Pasting a full callback URL or raw query string is rejected with the same authentication-code guidance.
 
-- Successful add stores account under native `~/.local/state/yapcap/claude-accounts/` or Flatpak `~/.var/app/com.topi.YapCap/data/yapcap/claude-accounts/`.
+- Successful add stores account under native `~/.local/state/yapcap/claude-accounts/` or Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/claude-accounts/`.
 - Stored directory contains `metadata.json` and `tokens.json`; `tokens.json` has `access_token`, `refresh_token`, and `expires_at`.
 - Duplicate email upserts the existing account rather than creating a second entry.
 - New account is selected immediately in single-account mode.
@@ -159,7 +159,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 - Settings → Cursor → Add account triggers a scan of `~/.config/Cursor/User/globalStorage/state.vscdb`.
 - If Cursor is not installed or the state DB is absent, YapCap reports that no Cursor account was detected and no account is stored.
 - If Cursor IDE is installed but logged out, YapCap asks the user to log into Cursor IDE and does not expose internal `cursorAuth` key names.
-- Successful scan stores account under native `~/.local/state/yapcap/cursor-accounts/<opaque-id>/` or Flatpak `~/.var/app/com.topi.YapCap/data/yapcap/cursor-accounts/<opaque-id>/`.
+- Successful scan stores account under native `~/.local/state/yapcap/cursor-accounts/<opaque-id>/` or Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/cursor-accounts/<opaque-id>/`.
 - Stored `tokens.json` contains `access_token`, `token_id`, `expires_at`, and `refresh_token`.
 - Stored `metadata.json` contains `email` (non-empty), display name, and plan.
 - Directory name is opaque (`cursor-<millis>-<pid>` format) and does not embed the email.
@@ -231,15 +231,15 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ## 13. Accounts removed from filesystem
 
-- Manually delete a provider account directory from the YapCap data tree (`~/.local/state/yapcap/<provider>-accounts/` native, or `~/.var/app/com.topi.YapCap/data/yapcap/<provider>-accounts/` Flatpak). Trigger a refresh. Verify the provider surfaces "Login required" or empty state rather than showing a stale snapshot indefinitely.
+- Manually delete a provider account directory from the YapCap data tree (`~/.local/state/yapcap/<provider>-accounts/` native, or `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/<provider>-accounts/` Flatpak). Trigger a refresh. Verify the provider surfaces "Login required" or empty state rather than showing a stale snapshot indefinitely.
 
 ---
 
 ## 14. Config state file manipulation
 
-- Delete cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/com.topi.YapCap/cache/yapcap/snapshots.json`). Restart. Verify app starts with Loading state and fetches fresh data.
+- Delete cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify app starts with Loading state and fetches fresh data.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
-- Leave an older `~/.config/cosmic/com.topi.YapCap/v300/` config in place. Restart the current build and verify `v400` defaults are used instead.
+- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v300/` config in place. Restart the current build and verify `v400` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
 - Set `refresh_interval_seconds = 5` in config. Verify it is clamped to 10s at runtime (not 5s).
 
@@ -247,7 +247,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ## 15. Logging
 
-- Native: verify `~/.local/state/yapcap/logs/yapcap.log`. Flatpak: verify `~/.var/app/com.topi.YapCap/data/yapcap/logs/yapcap.log`. Each is written during a normal session for that build.
+- Native: verify `~/.local/state/yapcap/logs/yapcap.log`. Flatpak: verify `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`. Each is written during a normal session for that build.
 - Verify no bearer tokens, access tokens, cookie values, or refresh tokens appear in the log.
 - `RUST_LOG=debug just run` — debug output in terminal, still no credentials in log file.
 
@@ -256,12 +256,13 @@ In Settings → General, cycle through all four panel icon styles and verify the
 ## 16. Flatpak-specific
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
+- Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".
+- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.4.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Settings.
 - About section shows "Flatpak" dist label.
 - OAuth flows (Codex, Claude) open the system browser correctly from inside the sandbox.
 - COSMIC dark/light theme and accent colour updates are observed immediately through the settings config watcher.
 - Cursor add-account: Flatpak sandbox can read `~/.config/Cursor/User/globalStorage/state.vscdb` through the read-only home permission. Scan succeeds and account is stored.
 - Flatpak permissions include `--filesystem=home:ro`, not writable home or `--filesystem=host`.
-- Account state for the Flatpak build lives under `~/.var/app/com.topi.YapCap/data/yapcap/` (not `~/.local/state/yapcap/`).
+- Account state for the Flatpak build lives under `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/` (not `~/.local/state/yapcap/`).
 - `just flatpak-run` launches the installed Flatpak version.
 - Native install (`just install`) About section shows "Native".
-

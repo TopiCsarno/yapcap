@@ -3,33 +3,46 @@
   <id>io.github.TopiCsarno.YapCap</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
+  <project_group>COSMIC</project_group>
+  <developer id="io.github.topicsarno">
+    <name>Tamás Csarnó</name>
+  </developer>
+  <developer_name>Tamás Csarnó</developer_name>
   <name>YapCap</name>
   <summary>COSMIC panel applet for Codex, Claude Code, and Cursor usage</summary>
-  <developer id="io.github.TopiCsarno">
-    <name>Topi Csarno</name>
-  </developer>
   <description>
-    <p>
-      YapCap is a native COSMIC panel applet that tracks your AI coding quota
-      for Codex, Claude Code, and Cursor — right from the panel, without leaving
-      your desktop.
-    </p>
-    <p>
-      Add accounts once and YapCap fetches usage directly from provider APIs
-      using credentials stored locally under YapCap-owned directories. No
-      telemetry, no cloud sync, no separate service account required.
-    </p>
-    <p>
-      Supports multiple accounts per provider with a side-by-side popup view,
-      an Active badge that reflects your current CLI session, configurable panel
-      styles, and full COSMIC theme integration including light, dark, and accent
-      color support.
-    </p>
+    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, and Cursor right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
+    <p>Use the popup to compare multiple accounts, see which CLI account is active, switch panel styles, and follow your COSMIC light, dark, and accent color settings.</p>
+    <p>Main features:</p>
+    <ul>
+      <li>Codex usage tracking and credits</li>
+      <li>Claude usage tracking and extra usage meter</li>
+      <li>Cursor usage tracking: API, Composer and Total</li>
+      <li>Multiple accounts per provider</li>
+      <li>Active account badge</li>
+      <li>COSMIC theme integration</li>
+    </ul>
   </description>
   <screenshots>
     <screenshot type="default">
-      <caption>Multi-account popup with Codex, Claude Code, and Cursor side by side</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-hero.png</image>
+      <caption>YapCap popup showing provider tabs and quota details</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-detail.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Codex usage, reset times, and credit balance</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-codex-zoom.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Claude Code usage with extra usage tracking</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-claude-zoom.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Cursor usage across Total, Auto + Composer, and API quotas</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-cursor-zoom.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Configure refresh, styling, and provider settings</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-general.png</image>
     </screenshot>
   </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
@@ -40,6 +53,7 @@
   <url type="vcs-browser">https://github.com/TopiCsarno/yapcap</url>
   <launchable type="desktop-id">io.github.TopiCsarno.YapCap.desktop</launchable>
   <provides>
+    <id>com.system76.CosmicApplet</id>
     <binary>yapcap</binary>
   </provides>
   <requires>
@@ -51,7 +65,7 @@
     <control>touch</control>
   </supports>
   <categories>
-    <category>System</category>
+    <category>Utility</category>
   </categories>
   <keywords>
     <keyword>COSMIC</keyword>
@@ -65,16 +79,7 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
-    <release version="0.4.0" date="2026-05-04">
-      <description>
-        <p>
-          Flatpak packaging aligned with COSMIC Store conventions (BaseApp,
-          offline Rust build, pinned git-friendly layout). Improved local install
-          flow via just recipes. Version 0.4.0; see the repository changelog
-          and release notes on GitHub for details.
-        </p>
-      </description>
-    </release>
+    <release type="stable" version="0.4.0" date="2026-05-04" />
   </releases>
   <content_rating type="oars-1.1" />
 </component>

@@ -1,0 +1,16 @@
+{
+  "body_json": {
+    "error": "invalid_grant",
+    "error_description": "Token has been expired or revoked."
+  },
+  "body_text": "{\n  \"error\": \"invalid_grant\",\n  \"error_description\": \"Token has been expired or revoked.\"\n}",
+  "endpoint": "oauth_token",
+  "method": "POST",
+  "requested_at": "2026-05-14T09:17:07.000000+00:00",
+  "response_headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Thu, 14 May 2026 09:17:07 GMT"
+  },
+  "status_code": 400,
+  "url": "https://oauth2.googleapis.com/token"
+}

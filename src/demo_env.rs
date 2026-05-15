@@ -2,7 +2,7 @@
 
 use crate::config::{
     Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    ProviderVisibilityMode, paths,
+    ManagedGeminiAccountConfig, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -17,6 +17,7 @@ const CODEX_PRIMARY_ID: &str = "yapcap-demo:codex-primary";
 const CODEX_SECONDARY_ID: &str = "yapcap-demo:codex-secondary";
 const CLAUDE_PRIMARY_ID: &str = "yapcap-demo:claude-primary";
 const CURSOR_PRIMARY_ID: &str = "yapcap-demo:cursor-primary";
+const GEMINI_PRIMARY_ID: &str = "yapcap-demo:gemini-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -43,10 +44,12 @@ pub fn apply_config(config: &mut Config) {
     config.codex_enabled = true;
     config.claude_enabled = true;
     config.cursor_enabled = true;
+    config.gemini_enabled = true;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
     config.cursor_managed_accounts = demo_cursor_accounts();
+    config.gemini_managed_accounts = demo_gemini_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -54,10 +57,12 @@ pub fn apply_config(config: &mut Config) {
         vec![CODEX_PRIMARY_ID.to_string(), CODEX_SECONDARY_ID.to_string()];
     config.selected_claude_account_ids = vec![CLAUDE_PRIMARY_ID.to_string()];
     config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
+    config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
 
     config.set_provider_show_all(ProviderId::Codex, true);
     config.set_provider_show_all(ProviderId::Claude, false);
     config.set_provider_show_all(ProviderId::Cursor, false);
+    config.set_provider_show_all(ProviderId::Gemini, false);
 }
 
 pub fn apply(config: &Config, state: &mut AppState) {
@@ -70,7 +75,9 @@ pub fn apply(config: &Config, state: &mut AppState) {
             state.upsert_provider(ProviderRuntimeState::disabled(provider));
             continue;
         }
-        for account in demo_runtime_accounts(provider) {
+        let runtime_accounts = demo_runtime_accounts(provider);
+        let has_accounts = !runtime_accounts.is_empty();
+        for account in runtime_accounts {
             state.upsert_account(account);
         }
         state.upsert_provider(ProviderRuntimeState {
@@ -79,7 +86,11 @@ pub fn apply(config: &Config, state: &mut AppState) {
             selected_account_ids: config.selected_account_ids(provider).to_vec(),
             active_account_id: config.selected_account_ids(provider).first().cloned(),
             system_active_account_id: demo_system_active_account_id(provider),
-            account_status: AccountSelectionStatus::Ready,
+            account_status: if has_accounts {
+                AccountSelectionStatus::Ready
+            } else {
+                AccountSelectionStatus::LoginRequired
+            },
             is_refreshing: false,
             legacy_display_snapshot: None,
             error: None,
@@ -98,6 +109,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
             ProviderId::Codex => CODEX_PRIMARY_ID,
             ProviderId::Claude => CLAUDE_PRIMARY_ID,
             ProviderId::Cursor => CURSOR_PRIMARY_ID,
+            ProviderId::Gemini => GEMINI_PRIMARY_ID,
         }
         .to_string(),
     )
@@ -105,7 +117,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
 
 fn demo_source(provider: ProviderId) -> String {
     match provider {
-        ProviderId::Codex | ProviderId::Claude => "OAuth".to_string(),
+        ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini => "OAuth".to_string(),
         ProviderId::Cursor => "Managed Account".to_string(),
     }
 }
@@ -149,6 +161,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 auth_state: AuthState::Ready,
                 error: None,
                 snapshot: snapshot_claude_primary(),
+            },
+        )],
+        ProviderId::Gemini => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: GEMINI_PRIMARY_ID,
+                label: "pro@example.com",
+                last_success_at: now - Duration::minutes(4),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_gemini_primary(),
             },
         )],
         ProviderId::Cursor => vec![demo_account(
@@ -309,6 +333,52 @@ fn snapshot_claude_primary() -> UsageSnapshot {
     }
 }
 
+fn snapshot_gemini_primary() -> UsageSnapshot {
+    let now = Utc::now();
+    let reset = now + Duration::hours(14);
+    let windows = vec![
+        UsageWindow {
+            label: "Pro".to_string(),
+            used_percent: 45.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: None,
+        },
+        UsageWindow {
+            label: "Flash".to_string(),
+            used_percent: 20.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: None,
+        },
+        UsageWindow {
+            label: "Lite".to_string(),
+            used_percent: 8.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: None,
+        },
+    ];
+    UsageSnapshot {
+        provider: ProviderId::Gemini,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows,
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("pro@example.com".to_string()),
+            account_id: None,
+            plan: Some(
+                crate::providers::gemini::plan_label::plan_label("standard-tier", false)
+                    .to_string(),
+            ),
+            display_name: Some("Pro".to_string()),
+        },
+    }
+}
+
 fn snapshot_cursor_primary() -> UsageSnapshot {
     let now = Utc::now();
     let reset_at = now + Duration::days(20);
@@ -392,6 +462,23 @@ fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
     }]
 }
 
+fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
+    let now = Utc::now();
+    vec![ManagedGeminiAccountConfig {
+        id: GEMINI_PRIMARY_ID.to_string(),
+        label: "pro@example.com".to_string(),
+        account_root: demo_root().join("gemini-primary"),
+        email: "pro@example.com".to_string(),
+        sub: "demo-gemini-sub".to_string(),
+        hd: None,
+        last_tier_id: Some("standard-tier".to_string()),
+        last_cloudaicompanion_project: Some("demo-gemini-project".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
 fn demo_root() -> PathBuf {
     paths().cache_dir.join("demo")
 }
@@ -422,6 +509,7 @@ mod tests {
             snapshot_codex_primary(),
             snapshot_codex_secondary(),
             snapshot_claude_primary(),
+            snapshot_gemini_primary(),
             snapshot_cursor_primary(),
         ] {
             assert!(!snapshot.windows.is_empty());
@@ -444,12 +532,15 @@ mod tests {
         assert_eq!(config.codex_managed_accounts.len(), 2);
         assert_eq!(config.claude_managed_accounts.len(), 1);
         assert_eq!(config.cursor_managed_accounts.len(), 1);
+        assert_eq!(config.gemini_managed_accounts.len(), 1);
         assert_eq!(config.selected_codex_account_ids.len(), 2);
         assert_eq!(config.selected_claude_account_ids.len(), 1);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
+        assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(!config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));
+        assert!(!config.show_all_accounts(ProviderId::Gemini));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
@@ -487,6 +578,12 @@ mod tests {
                 .provider(ProviderId::Cursor)
                 .and_then(|provider| provider.system_active_account_id.as_deref()),
             Some(CURSOR_PRIMARY_ID)
+        );
+        assert_eq!(
+            state
+                .provider(ProviderId::Gemini)
+                .and_then(|provider| provider.system_active_account_id.as_deref()),
+            Some(GEMINI_PRIMARY_ID)
         );
         for account in &state.provider_accounts {
             assert_eq!(account.health, ProviderHealth::Ok);
@@ -533,6 +630,18 @@ mod tests {
             secondary.provider_cost.as_ref().map(|cost| cost.used),
             Some(85.0)
         );
+    }
+
+    #[test]
+    fn gemini_demo_primary_has_pro_flash_lite_bars() {
+        let snapshot = snapshot_gemini_primary();
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Pro"));
+        let labels: Vec<&str> = snapshot.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, vec!["Pro", "Flash", "Lite"]);
+        for window in &snapshot.windows {
+            assert!(window.used_percent > 0.0);
+            assert!(window.reset_at.is_some());
+        }
     }
 
     #[test]

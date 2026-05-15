@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.4.0 · **Last updated:** 2026-05-12
+**Status:** As-built v0.5.0 · **Last updated:** 2026-05-15
 
 ## Document Metadata
 
@@ -18,7 +18,7 @@ read_when:
 | Target desktop | COSMIC |
 | Target language | Rust (edition 2024) |
 | Target runtime | libcosmic applet runtime |
-| Providers | Codex, Claude Code, Cursor |
+| Providers | Codex, Claude Code, Cursor, Gemini |
 
 ## Document Map
 
@@ -26,7 +26,7 @@ read_when:
 | --- | --- |
 | 1. Product Definition | 1.1 Scope and Non-Goals<br>1.2 Supported Sources |
 | 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow |
-| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor |
+| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Gemini |
 | 4. Auth and Config | 4.1 OAuth Credential Files<br>4.2 Cursor Token Source<br>4.3 Configuration |
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
@@ -39,7 +39,7 @@ read_when:
 
 ### 1.1 Scope and Non-Goals
 
-- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, and Cursor.
+- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, and Gemini.
 - Ships only on COSMIC. No GNOME, KDE, tray, or generic indicator paths exist.
 - Reads locally available credentials and caches. No user account, no cloud sync, no telemetry.
 - Out of scope: additional providers, historical charts, notifications, plugin architecture, doctor command, secret vault, alternative DEs.
@@ -51,9 +51,12 @@ read_when:
 | Codex | Active Codex account resolved from YapCap-owned `metadata.json`/`tokens.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` before expiry or once after 401/403 |
 | Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://console.anthropic.com/v1/oauth/token` (`grant_type=refresh_token`) |
 | Cursor | Active Cursor account resolved from YapCap-owned `cursor-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | — |
+| Gemini | Active Gemini account resolved from YapCap-owned `gemini-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | OAuth refresh-token grant against `oauth2.googleapis.com/token` before expiry or once after a `loadCodeAssist` / `retrieveUserQuota` 401 |
 
-Claude, Codex, and Cursor all use YapCap-managed account storage. There is no
-web-cookie path for Claude and no forced-source environment variable.
+Claude, Codex, Cursor, and Gemini all use YapCap-managed account storage. There
+is no web-cookie path for Claude and no forced-source environment variable.
+Gemini supports only Google OAuth accounts; gemini-cli API-key and Vertex AI
+configurations are out of scope.
 
 ## 2. Architecture
 
@@ -409,6 +412,156 @@ Usage fetch:
 Account removal: deletes the managed directory. Cursor's own config files are
 never modified.
 
+### 3.4 Gemini
+
+Gemini account model:
+
+- Managed accounts are explicit entries in `Config.gemini_managed_accounts`.
+  Each entry points at a YapCap-owned account directory under
+  `<state-root>/yapcap/gemini-accounts/<id>/` with `metadata.json`,
+  `tokens.json`, and optional per-account cached snapshots.
+- Gemini account identity is the normalized OAuth `id_token` email
+  (`trim + ASCII lowercase`). Duplicate logins by normalized email update the
+  existing account directory instead of creating a duplicate.
+- Only Google OAuth accounts are supported. API-key (`selectedAuthType:
+  gemini-api-key`) and Vertex AI (`selectedAuthType: vertex-ai`) gemini-cli
+  configurations are explicitly out of scope; YapCap never reads
+  `~/.gemini/oauth_creds.json` for tokens and never holds a Google API key.
+- The active resolver matches the YapCap-managed account list against the host
+  gemini-cli session hint from `~/.gemini/google_accounts.json` (see below).
+
+Managed Gemini add-account flow:
+
+- Settings exposes `Add account` under the Gemini accounts card.
+- YapCap starts a localhost callback listener on a free loopback port,
+  generates a PKCE verifier/challenge (S256) and a state nonce, opens the
+  Google authorization URL in the system browser (via the `OpenURI` portal
+  under Flatpak), and renders a `Cancel` control in Settings for the duration
+  of the flow.
+- The authorization URL uses the public OAuth client id and client secret that
+  ship inside the `@google/gemini-cli` build
+  (`681255809395-…apps.googleusercontent.com` / `GOCSPX-…`). These values are
+  embedded in every installed gemini-cli copy, so hardcoding them mirrors
+  upstream and avoids forcing each YapCap user to register a personal Google
+  OAuth client.
+- Requested scopes are the gemini-cli set: `openid`, `email`, `profile`, and
+  `https://www.googleapis.com/auth/cloud-platform`.
+- On successful callback, YapCap validates the OAuth state, exchanges the code
+  at `https://oauth2.googleapis.com/token` (form-encoded, with the hardcoded
+  `client_secret`), parses the returned `access_token`, `refresh_token`,
+  `expires_in`, `id_token`, and `scope`, decodes the `id_token` to extract
+  `email`, `sub`, optional `hd` (hosted-domain), and optional `name`, then
+  immediately calls `POST cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`
+  with the new access token to capture the current tier id and
+  `cloudaicompanionProject`. The account is committed to YapCap-owned account
+  storage with normalized-email dedupe.
+- On cancel, failure, or task abort, no account is committed and existing
+  account storage is left unchanged.
+
+Usage fetch (per refresh cycle, no caching across cycles):
+
+1. **Preflight refresh.** If `tokens.expires_at` is within five minutes, YapCap
+   calls `POST https://oauth2.googleapis.com/token` with
+   `grant_type=refresh_token`, the stored refresh token, and the hardcoded
+   client id + secret. Rotated `access_token`, `expires_at`, and any rotated
+   `refresh_token` are persisted to `tokens.json`.
+2. **`loadCodeAssist`.** `POST
+   https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` with bearer
+   access token and the standard gemini-cli `metadata` payload. The response
+   yields `currentTier.id` (e.g. `free-tier`, `standard-tier`, `legacy-tier`)
+   and a `cloudaicompanionProject` slug.
+3. **`cloudresourcemanager` fallback.** If `loadCodeAssist` returns no
+   `cloudaicompanionProject`, YapCap calls
+   `GET https://cloudresourcemanager.googleapis.com/v1/projects` and picks the
+   first `ACTIVE` project whose id begins with `gen-lang-client-`. If neither
+   path yields a project, the cycle returns an actionable
+   `NoCloudaicompanionProject` error. The discovered project id is persisted in
+   `metadata.json` for diagnostics.
+4. **`retrieveUserQuota`.** `POST
+   https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` with
+   `{"project": "<id>"}` (or `{}` when none). The response shape is
+   `{"buckets":[{"modelId":…,"remainingFraction":…,"resetTime":…,"tokenType":…}]}`.
+5. **401 reactive refresh.** A 401 from `loadCodeAssist` or
+   `retrieveUserQuota` triggers exactly one reactive token refresh (same
+   endpoint as the preflight) followed by one retry of the failing call. A
+   second 401 ends the cycle as `Unauthorized` without another refresh.
+
+Bucket family classification (`src/providers/gemini/buckets.rs`):
+
+- Each bucket is matched to a family by case-insensitive substring on
+  `modelId`:
+  - `flash-lite` → **Lite** (the substring check excludes Lite from Flash).
+  - otherwise `flash` → **Flash**.
+  - otherwise `pro` → **Pro**.
+  - Unknown families are logged at `warn!` and dropped.
+- Buckets in the same family are aggregated by **lowest remaining fraction**,
+  so the displayed bar reflects the most-exhausted model in that family.
+- Hide rules:
+  - Free-tier Pro is force-hidden (Google returns it at zero with epoch reset
+    and it carries no usable information for free users).
+  - On any tier, a family at zero remaining with no future reset is dropped.
+- Families render in fixed priority order **Pro → Flash → Lite**, with the
+  first up to two windows feeding the panel bars via
+  `UsageSnapshot::applet_windows()` (so paid users see Pro + Flash on the
+  panel and free users see Flash + Lite).
+
+Plan label mapping (`src/providers/gemini/plan_label.rs`):
+
+| `currentTier.id` | `id_token.hd` present | Plan badge |
+| --- | --- | --- |
+| `free-tier` | (any) | **Free** |
+| `standard-tier` | no | **Pro** |
+| `standard-tier` | yes | **Workspace** |
+| `legacy-tier` | (any) | **Legacy** |
+| anything else | (any) | **Plan** |
+
+Host session hint:
+
+- YapCap read-only reads `~/.gemini/google_accounts.json` (`{ "active": "…",
+  "old": [ … ] }`) to mark the **Active** badge on the matching managed
+  account. Matching uses normalized email equality between `active` and the
+  managed account's stored email; entries the host has signed out of but kept
+  in `old` are ignored. Malformed, empty, or missing files are tolerated and
+  produce no active account.
+- An inotify-backed watcher (via the `notify` crate on Linux) reapplies Gemini
+  reconciliation when `google_accounts.json` changes. When the file is missing
+  but `~/.gemini` exists, the directory is watched for `google_accounts.json`
+  events. Manual `Refresh now` also re-reads the file before dispatching.
+- Under Flatpak, the `~/.gemini` path uses the passwd `pw_dir`, matching the
+  `--filesystem=home:ro` mount that `~/.claude.json` and `~/.codex/auth.json`
+  already rely on. Pre-existing host gemini-cli configurations that use an API
+  key or Vertex AI are visible only as the absence of an Active badge — this
+  is expected, not a bug.
+
+Per-account re-authenticate:
+
+- Gemini account rows in Settings show a re-auth icon when
+  `auth_state = ActionRequired` (revoked refresh token, missing scope, etc.).
+  Re-auth runs the same OAuth flow with an additional `login_hint=<email>`
+  parameter and rejects the completed authorization if the returned
+  `id_token.email` does not match (normalized) the original account. On match,
+  YapCap persists the rotated tokens and immediately triggers a usage refresh.
+
+Error classification (`GeminiError`):
+
+- **Permanent / `requires_user_action`:** `TokenRefreshHttp { 400 | 401 | 403 }`,
+  `Unauthorized`, `MissingProfileScope`, `NoCloudaicompanionProject`,
+  re-auth email-mismatch.
+- **Transient:** `RateLimited { retry_after_secs }` (parsed from
+  `Retry-After`; 300s × 2^(n-1) up to 3600s when absent), `TokenRefreshHttp
+  { 5xx }`, `LoadCodeAssistHttp { 5xx }`, `QuotaHttp { 5xx }`, network errors,
+  timeouts.
+- **No usage data:** an empty bucket list after classification returns
+  `NoUsageData` and preserves any prior snapshot.
+
+OAuth client credential hardcoding rationale: the gemini-cli OAuth client is a
+public installed-app client. Its id and secret are embedded in every
+`@google/gemini-cli` build and are not user-specific. Reusing them avoids
+forcing every YapCap user to register their own Google Cloud project, mirrors
+upstream behavior, and does not weaken security: the client secret is not
+treated as a secret in the OAuth installed-app profile, and access tokens
+remain bound to the authenticated user.
+
 ## 4. Auth and Config
 
 ### 4.1 OAuth Credential Files
@@ -425,9 +578,15 @@ Codex native login:
 Claude OAuth material lives only under YapCap-owned account directories as
 `tokens.json` (see §3.2). YapCap does not read Claude Code `.credentials.json`.
 
-Codex and Claude OAuth material used by normal refresh lives under YapCap-owned
-account directories as `tokens.json`. Provider errors bubble up as
-`requires_user_action = true` when user login is needed.
+Gemini OAuth material lives only under YapCap-owned account directories as
+`tokens.json` (see §3.4). YapCap does not read host
+`~/.gemini/oauth_creds.json` for tokens. `~/.gemini/google_accounts.json` is
+read read-only as the host session hint (analog to `~/.claude.json` for Claude
+and `~/.codex/auth.json` for Codex) and drives only the **Active** badge.
+
+Codex, Claude, and Gemini OAuth material used by normal refresh all lives under
+YapCap-owned account directories as `tokens.json`. Provider errors bubble up
+as `requires_user_action = true` when user login is needed.
 
 ### 4.2 Cursor Token Source
 
@@ -697,7 +856,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
 - In `logo_and_percent` and `percent_only` styles with multiple accounts, each account gets a left-aligned label in a fixed-width column sized for `100.0%`; columns are separated by `APPLET_PERCENT_ACCOUNT_GAP`.
 - Clicking toggles the popup.
-- Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Note: full white-theme icon polish is deferred.
+- Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Codex and Cursor use themed monochrome pairs; Claude and Gemini use a single brand-colored SVG (`claude-color.svg`, `gemini-color.svg`) for both variants.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running. Native and Flatpak builds both rely on the COSMIC settings daemon config watcher for those live updates.
 
 ### 7.2 Popup
@@ -716,7 +875,7 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
   - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all three providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets one managed demo account with synthetic Session and Weekly usage windows; **Claude** gets one Max managed demo account with Session, Weekly, and Sonnet usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all four providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets one managed demo account with synthetic Session and Weekly usage windows; **Claude** gets one Max managed demo account with Session, Weekly, and Sonnet usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; **Gemini** gets one Pro-tier managed demo account with Pro/Flash/Lite usage windows and a "Pro" plan badge; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
   - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
@@ -749,9 +908,14 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
   `com.system76.CosmicSettingsDaemon` and its
   `com.system76.CosmicSettingsDaemon.Config` watcher namespace, including
   `com.system76.CosmicSettingsDaemon.Config.*` for per-config watcher services
-  returned by `WatchConfig`, read-only home access for host Claude/Codex/Cursor
-  auth discovery and file watching, and read-write
+  returned by `WatchConfig`, read-only home access for host
+  Claude/Codex/Cursor/Gemini auth discovery and file watching, and read-write
   `~/.config/cosmic` (hardcoded home path) for applet COSMIC config instead of `xdg-config/cosmic`, which some Flatpak setups resolve incorrectly.
+- Gemini introduces no new Flatpak permissions. It reuses the existing
+  `--share=network` for OAuth and Code Assist endpoints, the existing
+  `org.freedesktop.portal.OpenURI` for system-browser launch, and
+  `--filesystem=home:ro` for reading `~/.gemini/google_accounts.json` as a
+  session hint.
 
 ## 9. Localization
 
@@ -766,7 +930,7 @@ Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail
 
 ## 10. Testing
 
-- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all three provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
-- No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,cursor}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures.
+- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all four provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, Gemini id_token decoding, Gemini plan-label mapping, Gemini bucket-family classification (Pro/Flash/Lite, free-tier Pro hide, lowest-remaining aggregation), Gemini OAuth refresh-error classification (400/401/403/429/5xx) and rate-limit backoff, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
+- No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,cursor,gemini}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures; Gemini uses `oauth_token_response.json`, `load_code_assist_response.json`, and `retrieve_user_quota_response.json` plus optional error-path captures (`oauth_token_400_response.json` / `oauth_token_429_response.json`) recorded via `fixtures/gemini/probe.py` and its `--simulate-bad-refresh` flag.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.
 - Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.

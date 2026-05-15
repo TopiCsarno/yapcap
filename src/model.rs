@@ -12,10 +12,11 @@ pub enum ProviderId {
     Codex,
     Claude,
     Cursor,
+    Gemini,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Cursor];
+    pub const ALL: [Self; 4] = [Self::Codex, Self::Claude, Self::Cursor, Self::Gemini];
 
     #[must_use]
     pub fn label(self) -> &'static str {
@@ -23,6 +24,7 @@ impl ProviderId {
             Self::Codex => "Codex",
             Self::Claude => "Claude",
             Self::Cursor => "Cursor",
+            Self::Gemini => "Gemini",
         }
     }
 }

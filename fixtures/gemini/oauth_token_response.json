@@ -1,0 +1,19 @@
+{
+  "body_json": {
+    "access_token": "redacted-access-token",
+    "expires_in": 3599,
+    "id_token": "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlfQ.signature",
+    "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid",
+    "token_type": "Bearer"
+  },
+  "body_text": "{\n  \"access_token\": \"redacted-access-token\",\n  \"expires_in\": 3599,\n  \"scope\": \"https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid\",\n  \"token_type\": \"Bearer\",\n  \"id_token\": \"eyJhbGciOiJub25lIn0.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlfQ.signature\"\n}",
+  "endpoint": "oauth_token",
+  "method": "POST",
+  "requested_at": "2026-05-14T09:17:07.923737+00:00",
+  "response_headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Thu, 14 May 2026 09:17:07 GMT"
+  },
+  "status_code": 200,
+  "url": "https://oauth2.googleapis.com/token"
+}

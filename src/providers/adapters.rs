@@ -3,24 +3,27 @@
 mod claude_adapter;
 mod codex_adapter;
 mod cursor_adapter;
+mod gemini_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, host_user_home_dir, paths};
 use crate::model::{AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderId};
 use crate::providers::interface::{ProviderAccountDescriptor, ProviderAdapter};
-use crate::providers::{claude, codex, cursor};
+use crate::providers::{claude, codex, cursor, gemini};
 
 pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
     match provider {
         ProviderId::Codex => &CODEX_ADAPTER,
         ProviderId::Claude => &CLAUDE_ADAPTER,
         ProviderId::Cursor => &CURSOR_ADAPTER,
+        ProviderId::Gemini => &GEMINI_ADAPTER,
     }
 }
 
 static CODEX_ADAPTER: codex_adapter::CodexAdapter = codex_adapter::CodexAdapter;
 static CLAUDE_ADAPTER: claude_adapter::ClaudeAdapter = claude_adapter::ClaudeAdapter;
 static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAdapter;
+static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,
@@ -134,4 +137,13 @@ pub(super) fn claude_system_active_account_id(
 ) -> Option<String> {
     let path = host_user_home_dir()?.join(".claude.json");
     claude::system_active_account_id(managed_accounts, &path)
+}
+
+pub(super) fn gemini_system_active_account_id(
+    managed_accounts: &[crate::config::ManagedGeminiAccountConfig],
+) -> Option<String> {
+    let path = host_user_home_dir()?
+        .join(".gemini")
+        .join("google_accounts.json");
+    gemini::system_active_account_id(managed_accounts, &path)
 }

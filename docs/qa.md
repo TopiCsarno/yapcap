@@ -1,6 +1,6 @@
 # YapCap QA Plan
 
-Manual test plan for v0.4.0. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
+Manual test plan for v0.5.0. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
 
 Paths used below:
 
@@ -188,7 +188,70 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 9. Multi-account
+## 9. Gemini
+
+### 9.1 Fresh install / Login required
+
+- With no Gemini accounts configured, the Gemini provider tab is visible and shows the **Login required** empty state pointing to Settings → Gemini → Add account.
+- Pre-existing host `~/.gemini/oauth_creds.json` is **not** imported. YapCap does not read host tokens.
+
+### 9.2 Add account (Native and Flatpak)
+
+- Settings → Gemini → Add account opens the system browser (Native: directly; Flatpak: via `org.freedesktop.portal.OpenURI`) at Google's sign-in page.
+- The browser redirects back to a loopback `127.0.0.1:<port>/?code=…&state=…` callback served by YapCap; the success page reads "Signed in to Gemini — you can close this tab and return to YapCap."
+- Cancel during login aborts cleanly with no partial account stored.
+- Successful login stores the account under native `~/.local/state/yapcap/gemini-accounts/<id>/` or Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/gemini-accounts/<id>/`.
+- Stored directory contains `metadata.json` (email, sub, optional `hd`, last tier id, last `cloudaicompanionProject`) and `tokens.json` (`access_token`, `refresh_token`, `expires_at`, `scope`).
+- New account is selected immediately in single-account mode.
+
+### 9.3 Multi-account dedupe
+
+- Add a second Gemini account with a different Google identity — both accounts appear in Settings and the popup.
+- Re-running Add account with an already-stored Google account updates the existing managed directory by normalized email; no second entry is created.
+
+### 9.4 Usage display
+
+- Free-tier account: popup shows two bars (**Flash**, **Lite**); the Pro bar is hidden.
+- Standard-tier (AI Pro) account: popup shows three bars (**Pro**, **Flash**, **Lite**); panel bars show Pro + Flash.
+- Workspace account (id_token `hd` present, `currentTier.id = standard-tier`): plan badge reads **Workspace**.
+- Each bucket reset follows the YapCap-wide `reset_time_format` preference.
+
+### 9.5 Tier transitions
+
+- Upgrade a free-tier account to AI Pro (or downgrade). On the next refresh cycle the Pro bar appears or disappears and the plan badge updates from **Free** to **Pro**/**Workspace** (or back), without restarting YapCap.
+
+### 9.6 Active account hint
+
+- With YapCap running, `gemini auth login` to a Gemini account YapCap is tracking — the **Active** badge follows the new active email written to `~/.gemini/google_accounts.json`.
+- Switching to a Google account that YapCap does not track removes the Active badge from all tracked accounts.
+- Deleting `~/.gemini/google_accounts.json` clears the Active badge; recreating it (e.g. via another `gemini auth login`) restores it without a YapCap restart.
+- Flatpak: same behaviour through the read-only home mount; click **Refresh now** as a fallback if file watching misses an atomic replace.
+
+### 9.7 Token refresh and re-auth
+
+- Set `expires_at` to one minute in the past with a valid `refresh_token`. Verify silent refresh on the next cycle and updated `expires_at` in `tokens.json`.
+- Replace `refresh_token` with junk. Verify `ActionRequired` badge ("Login") on the account, plus a per-account re-auth icon in Settings.
+- Per-account re-auth: click re-auth icon → complete OAuth in the browser with the same Google account → usage refreshes immediately.
+- Per-account re-auth with a different Google account (different `id_token.email`) → rejected with error, existing account left unchanged.
+
+### 9.8 Remove account
+
+- Remove from Settings — only the YapCap-owned account directory is deleted. Host `~/.gemini/` files (`oauth_creds.json`, `google_accounts.json`, `settings.json`) are not touched.
+- If it was the last Gemini account, the provider returns to the Login required empty state.
+
+### 9.9 Host CLI configurations that don't interfere
+
+- Pre-existing `~/.gemini/settings.json` with `selectedAuthType: gemini-api-key` or `vertex-ai`: YapCap still runs OAuth login and stores its own tokens; the absence of an Active badge for these accounts is **expected**, not a bug.
+- A `GEMINI_API_KEY` environment variable on the host shell has no effect on YapCap.
+
+### 9.10 `cloudresourcemanager` fallback
+
+- For accounts where `loadCodeAssist` returns no `cloudaicompanionProject` (common when the user has a paid GCP project but no auto-assigned Code Assist project), YapCap calls `cloudresourcemanager.googleapis.com/v1/projects` and picks the first `ACTIVE` project whose id begins with `gen-lang-client-`. Verify the discovered project id is persisted to `metadata.json` (`gemini_last_cloudaicompanion_project`) and the next refresh re-uses it directly.
+- For accounts where neither path yields a project, the provider surfaces the actionable `NoCloudaicompanionProject` error in the popup.
+
+---
+
+## 10. Multi-account
 
 - Add a second account for any provider.
 - `Show all accounts` toggle appears only when the provider has more than one account.
@@ -200,7 +263,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 10. Stale / error states
+## 11. Stale / error states
 
 - Kill network (`nmcli networking off`). Trigger a refresh. Verify "No internet connection. Showing cached data; information is not up to date." message. Cached usage data still visible. Re-enable network, verify Live badge returns.
 - Wait 11 minutes without refreshing (or set refresh interval to max and advance clock). Verify account badge switches from Live to Stale. Status line appends "(stale)".
@@ -209,7 +272,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 11. Provider enable/disable
+## 12. Provider enable/disable
 
 - Disable a provider via its settings toggle — provider tab disappears from popup nav.
 - All provider-specific settings below the toggle are dimmed and non-interactive when disabled.
@@ -218,7 +281,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 12. Popup sizing
+## 13. Popup sizing
 
 - Single-account provider: popup is 420 px wide.
 - Two-account provider: popup is 840 px wide.
@@ -229,13 +292,13 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 13. Accounts removed from filesystem
+## 14. Accounts removed from filesystem
 
 - Manually delete a provider account directory from the YapCap data tree (`~/.local/state/yapcap/<provider>-accounts/` native, or `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/<provider>-accounts/` Flatpak). Trigger a refresh. Verify the provider surfaces "Login required" or empty state rather than showing a stale snapshot indefinitely.
 
 ---
 
-## 14. Config state file manipulation
+## 15. Config state file manipulation
 
 - Delete cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify app starts with Loading state and fetches fresh data.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
@@ -245,7 +308,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 15. Logging
+## 16. Logging
 
 - Native: verify `~/.local/state/yapcap/logs/yapcap.log`. Flatpak: verify `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`. Each is written during a normal session for that build.
 - Verify no bearer tokens, access tokens, cookie values, or refresh tokens appear in the log.
@@ -253,11 +316,11 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 16. Flatpak-specific
+## 17. Flatpak-specific
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
 - Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".
-- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.4.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Settings.
+- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Settings.
 - About section shows "Flatpak" dist label.
 - OAuth flows (Codex, Claude) open the system browser correctly from inside the sandbox.
 - COSMIC dark/light theme and accent colour updates are observed immediately through the settings config watcher.

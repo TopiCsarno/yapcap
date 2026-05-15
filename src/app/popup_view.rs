@@ -23,6 +23,7 @@ use crate::model::{
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
 use crate::providers::cursor::CursorScanState;
+use crate::providers::gemini::{GeminiLoginState, GeminiLoginStatus};
 use crate::providers::interface::ProviderAccountActionSupport;
 use crate::providers::registry;
 use crate::updates::UpdateStatus;
@@ -57,6 +58,7 @@ pub struct ProviderLoginStates<'a> {
     pub codex: Option<&'a CodexLoginState>,
     pub claude: Option<&'a ClaudeLoginState>,
     pub cursor_scan: &'a CursorScanState,
+    pub gemini: Option<&'a GeminiLoginState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -357,7 +359,7 @@ fn settings_category_row(
     )]
     .spacing(8)
     .width(Length::Fill);
-    let providers = [ProviderId::Codex, ProviderId::Claude, ProviderId::Cursor];
+    let providers = ProviderId::ALL;
     providers
         .into_iter()
         .fold(row, |row, provider| {

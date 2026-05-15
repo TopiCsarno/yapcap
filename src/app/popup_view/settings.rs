@@ -23,7 +23,7 @@ pub(super) fn provider_settings_view<'a>(
 }
 
 pub(super) fn settings_body_height(state: &AppState) -> f32 {
-    let account_counts: Vec<usize> = [ProviderId::Codex, ProviderId::Claude, ProviderId::Cursor]
+    let account_counts: Vec<usize> = ProviderId::ALL
         .into_iter()
         .map(|provider| state.accounts_for(provider).len())
         .collect();

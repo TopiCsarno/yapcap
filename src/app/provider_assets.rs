@@ -17,17 +17,17 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Codex, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/codex-reversed.svg")
         }
-        (ProviderId::Claude, ProviderIconVariant::Default) => {
-            include_bytes!("../../resources/providers/claude.svg")
-        }
-        (ProviderId::Claude, ProviderIconVariant::Reversed) => {
-            include_bytes!("../../resources/providers/claude-reversed.svg")
+        (ProviderId::Claude, _) => {
+            include_bytes!("../../resources/providers/claude-color.svg")
         }
         (ProviderId::Cursor, ProviderIconVariant::Default) => {
             include_bytes!("../../resources/providers/cursor.svg")
         }
         (ProviderId::Cursor, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/cursor-reversed.svg")
+        }
+        (ProviderId::Gemini, _) => {
+            include_bytes!("../../resources/providers/gemini-color.svg")
         }
     };
 

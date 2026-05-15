@@ -1,6 +1,6 @@
 use super::super::super::{
     ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus, CursorScanState,
-    Element, Length, Message, fl, row, widget,
+    Element, GeminiLoginState, GeminiLoginStatus, Length, Message, fl, row, widget,
 };
 
 pub(super) fn codex_login_controls(
@@ -101,6 +101,61 @@ pub(super) fn claude_login_controls(
     }
 
     Element::from(content)
+}
+
+pub(super) fn gemini_login_controls(
+    login: Option<&GeminiLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(enabled.then_some(Message::StartGeminiLogin))
+            .into();
+    };
+
+    let mut content =
+        cosmic::iced::widget::column![widget::text(gemini_login_status(login)).size(13)]
+            .spacing(10)
+            .width(Length::Fill);
+
+    if login.status == GeminiLoginStatus::Running
+        && let Some(url) = &login.login_url
+    {
+        content = content.push(
+            widget::button::standard(fl!("open-browser"))
+                .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
+        );
+    }
+
+    if login.status == GeminiLoginStatus::Running {
+        content = content.push(
+            widget::button::text(fl!("account-cancel"))
+                .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another"))
+                    .on_press_maybe(enabled.then_some(Message::StartGeminiLogin)),
+                widget::button::text(fl!("account-dismiss"))
+                    .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn gemini_login_status(login: &GeminiLoginState) -> String {
+    match login.status {
+        GeminiLoginStatus::Running => fl!("gemini-login-running"),
+        GeminiLoginStatus::Succeeded => fl!("gemini-login-succeeded"),
+        GeminiLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("gemini-login-failed")),
+    }
 }
 
 pub(super) fn cursor_scan_controls(scan: &CursorScanState, enabled: bool) -> Element<'_, Message> {

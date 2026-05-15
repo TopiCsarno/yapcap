@@ -21,17 +21,14 @@ pub(super) fn subscription() -> Subscription<Message> {
             let Some(home) = host_user_home_dir() else {
                 return;
             };
-            let codex_auth = home.join(".codex").join("auth.json");
-            let claude_json = home.join(".claude.json");
+            let targets = WatchTargets::for_home(&home);
             let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(32);
             let tx_cb = tx.clone();
-            let codex_auth_cb = codex_auth.clone();
-            let claude_json_cb = claude_json.clone();
-            let home_cb = home.clone();
+            let targets_cb = targets.clone();
             let Ok(mut watcher) = RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res
-                        && event_targets_cli_auth(&event, &codex_auth_cb, &claude_json_cb, &home_cb)
+                        && event_targets_cli_auth(&event, &targets_cb)
                     {
                         let _ = tx_cb.blocking_send(());
                     }
@@ -41,10 +38,11 @@ pub(super) fn subscription() -> Subscription<Message> {
                 tracing::warn!("host CLI auth file watcher could not be created");
                 return;
             };
-            if !install_watches(&mut watcher, &home, &codex_auth, &claude_json) {
+            if !install_watches(&mut watcher, &targets) {
                 tracing::warn!(
-                    codex_auth = %codex_auth.display(),
-                    claude_json = %claude_json.display(),
+                    codex_auth = %targets.codex_auth.display(),
+                    claude_json = %targets.claude_json.display(),
+                    gemini_accounts = %targets.gemini_accounts.display(),
                     "host CLI auth inotify watches could not be installed"
                 );
                 return;
@@ -60,24 +58,53 @@ pub(super) fn subscription() -> Subscription<Message> {
     })
 }
 
-fn install_watches(
-    watcher: &mut RecommendedWatcher,
-    home: &Path,
-    codex_auth: &Path,
-    claude_json: &Path,
-) -> bool {
+#[derive(Clone)]
+struct WatchTargets {
+    home: std::path::PathBuf,
+    codex_auth: std::path::PathBuf,
+    codex_dir: std::path::PathBuf,
+    claude_json: std::path::PathBuf,
+    gemini_accounts: std::path::PathBuf,
+    gemini_dir: std::path::PathBuf,
+}
+
+impl WatchTargets {
+    fn for_home(home: &Path) -> Self {
+        let codex_dir = home.join(".codex");
+        let codex_auth = codex_dir.join("auth.json");
+        let claude_json = home.join(".claude.json");
+        let gemini_dir = home.join(".gemini");
+        let gemini_accounts = gemini_dir.join("google_accounts.json");
+        Self {
+            home: home.to_path_buf(),
+            codex_auth,
+            codex_dir,
+            claude_json,
+            gemini_accounts,
+            gemini_dir,
+        }
+    }
+}
+
+fn install_watches(watcher: &mut RecommendedWatcher, targets: &WatchTargets) -> bool {
     let mut installed = false;
-    let codex_dir = home.join(".codex");
-    if codex_auth.exists() {
-        installed |= install_watch(watcher, codex_auth);
-    } else if codex_dir.is_dir() {
-        installed |= install_watch(watcher, &codex_dir);
+    if targets.codex_auth.exists() {
+        installed |= install_watch(watcher, &targets.codex_auth);
+    } else if targets.codex_dir.is_dir() {
+        installed |= install_watch(watcher, &targets.codex_dir);
     }
 
-    if claude_json.exists() {
-        installed |= install_watch(watcher, claude_json);
+    if targets.claude_json.exists() {
+        installed |= install_watch(watcher, &targets.claude_json);
     }
-    installed |= install_watch(watcher, home);
+
+    if targets.gemini_accounts.exists() {
+        installed |= install_watch(watcher, &targets.gemini_accounts);
+    } else if targets.gemini_dir.is_dir() {
+        installed |= install_watch(watcher, &targets.gemini_dir);
+    }
+
+    installed |= install_watch(watcher, &targets.home);
     installed
 }
 
@@ -91,17 +118,14 @@ fn install_watch(watcher: &mut RecommendedWatcher, path: &Path) -> bool {
     }
 }
 
-fn event_targets_cli_auth(
-    event: &Event,
-    codex_auth: &Path,
-    claude_json: &Path,
-    home: &Path,
-) -> bool {
+fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
     event.paths.iter().any(|p| {
-        p == codex_auth
-            || p == claude_json
-            || codex_auth_in_dir_event(p, codex_auth)
-            || claude_json_in_home_event(p, home, claude_json)
+        p == &targets.codex_auth
+            || p == &targets.claude_json
+            || p == &targets.gemini_accounts
+            || codex_auth_in_dir_event(p, &targets.codex_auth)
+            || claude_json_in_home_event(p, &targets.home, &targets.claude_json)
+            || gemini_accounts_in_dir_event(p, &targets.gemini_accounts)
     })
 }
 
@@ -114,6 +138,11 @@ fn claude_json_in_home_event(path: &Path, home: &Path, claude_json: &Path) -> bo
     path.file_name() == Some(OsStr::new(".claude.json"))
         && path.parent().map(Path::to_path_buf) == Some(home.to_path_buf())
         && claude_json.parent().map(Path::to_path_buf) == Some(home.to_path_buf())
+}
+
+fn gemini_accounts_in_dir_event(path: &Path, gemini_accounts: &Path) -> bool {
+    path.file_name() == Some(OsStr::new("google_accounts.json"))
+        && path.parent().map(Path::to_path_buf) == gemini_accounts.parent().map(Path::to_path_buf)
 }
 
 #[cfg(test)]
@@ -149,14 +178,42 @@ mod tests {
     }
 
     #[test]
+    fn gemini_accounts_in_dir_event_matches_only_google_accounts_json_in_dot_gemini() {
+        let home = PathBuf::from("/home/u");
+        let gemini_accounts = home.join(".gemini").join("google_accounts.json");
+        assert!(gemini_accounts_in_dir_event(
+            &home.join(".gemini").join("google_accounts.json"),
+            &gemini_accounts
+        ));
+        assert!(!gemini_accounts_in_dir_event(
+            &home.join(".gemini").join("settings.json"),
+            &gemini_accounts
+        ));
+        assert!(!gemini_accounts_in_dir_event(
+            &home.join(".cache").join("google_accounts.json"),
+            &gemini_accounts
+        ));
+    }
+
+    #[test]
     fn cli_auth_event_matches_claude_json_rename_target() {
         let home = PathBuf::from("/home/u");
-        let codex_auth = home.join(".codex").join("auth.json");
-        let claude = home.join(".claude.json");
+        let targets = WatchTargets::for_home(&home);
         let event = Event::new(EventKind::Any)
             .add_path(home.join(".claude.json.tmp"))
-            .add_path(claude.clone());
+            .add_path(home.join(".claude.json"));
 
-        assert!(event_targets_cli_auth(&event, &codex_auth, &claude, &home));
+        assert!(event_targets_cli_auth(&event, &targets));
+    }
+
+    #[test]
+    fn cli_auth_event_matches_gemini_accounts_rename_target() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event::new(EventKind::Any)
+            .add_path(home.join(".gemini").join("google_accounts.json.tmp"))
+            .add_path(home.join(".gemini").join("google_accounts.json"));
+
+        assert!(event_targets_cli_auth(&event, &targets));
     }
 }

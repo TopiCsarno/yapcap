@@ -30,6 +30,10 @@ pub struct ProviderAccountMetadata {
     pub organization_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gemini_last_tier_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gemini_last_cloudaicompanion_project: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,6 +121,8 @@ impl ProviderAccountStorage {
             organization_name: account.organization_name,
             created_at: created_at.unwrap_or(now),
             updated_at: now,
+            gemini_last_tier_id: None,
+            gemini_last_cloudaicompanion_project: None,
         };
 
         fs::create_dir_all(&account_dir).map_err(|source| AccountStorageError::CreateDir {
@@ -235,6 +241,7 @@ impl ProviderAccountStorage {
             ProviderId::Codex => "codex",
             ProviderId::Claude => "claude",
             ProviderId::Cursor => "cursor",
+            ProviderId::Gemini => "gemini",
         };
         let millis = Utc::now().timestamp_millis();
         format!("{prefix}-{millis}-{}", std::process::id())

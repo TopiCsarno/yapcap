@@ -200,6 +200,7 @@ impl AppModel {
             ProviderId::Codex => new_config.codex_enabled = enabled,
             ProviderId::Claude => new_config.claude_enabled = enabled,
             ProviderId::Cursor => new_config.cursor_enabled = enabled,
+            ProviderId::Gemini => new_config.gemini_enabled = enabled,
         });
         if enabled {
             runtime::reconcile_provider(&self.config, &mut self.state, provider);
@@ -259,6 +260,7 @@ impl AppModel {
         }
         runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
         runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Claude);
+        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Gemini);
         runtime::persist_state(&self.state);
         self.sync_panel_suggested_bounds();
     }
@@ -376,6 +378,34 @@ impl AppModel {
             .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
         {
             return refresh_provider_task(&self.config, &mut self.state, ProviderId::Cursor);
+        }
+        Task::none()
+    }
+
+    pub(super) fn delete_gemini_account(&mut self, account_id: &str) -> Task<Message> {
+        let provider = ProviderId::Gemini;
+        if !self
+            .config
+            .gemini_managed_accounts
+            .iter()
+            .any(|account| account.id == account_id)
+        {
+            return Task::none();
+        }
+
+        self.write_config(|new_config| {
+            let _ = registry::delete_account(provider, account_id, new_config);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
+        });
+        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::persist_state(&self.state);
+
+        if self
+            .state
+            .provider(ProviderId::Gemini)
+            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
+        {
+            return refresh_provider_task(&self.config, &mut self.state, ProviderId::Gemini);
         }
         Task::none()
     }

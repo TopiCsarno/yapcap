@@ -1,0 +1,69 @@
+{
+  "body_json": {
+    "buckets": [
+      {
+        "modelId": "gemini-2.5-flash",
+        "remainingFraction": 0.82666665,
+        "resetTime": "2026-05-15T08:52:23Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-2.5-flash-lite",
+        "remainingFraction": 1,
+        "resetTime": "2026-05-15T09:17:04Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-2.5-pro",
+        "remainingFraction": 0,
+        "resetTime": "1970-01-01T00:00:00Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-3-flash-preview",
+        "remainingFraction": 0.82666665,
+        "resetTime": "2026-05-15T08:52:23Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-3-pro-preview",
+        "remainingFraction": 0,
+        "resetTime": "1970-01-01T00:00:00Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-3.1-flash-lite-preview",
+        "remainingFraction": 1,
+        "resetTime": "2026-05-15T09:17:04Z",
+        "tokenType": "REQUESTS"
+      },
+      {
+        "modelId": "gemini-3.1-pro-preview",
+        "remainingFraction": 0,
+        "resetTime": "1970-01-01T00:00:00Z",
+        "tokenType": "REQUESTS"
+      }
+    ]
+  },
+  "body_text": "{\n  \"buckets\": [\n    {\n      \"resetTime\": \"2026-05-15T08:52:23Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-2.5-flash\",\n      \"remainingFraction\": 0.82666665\n    },\n    {\n      \"resetTime\": \"2026-05-15T09:17:04Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-2.5-flash-lite\",\n      \"remainingFraction\": 1\n    },\n    {\n      \"resetTime\": \"1970-01-01T00:00:00Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-2.5-pro\",\n      \"remainingFraction\": 0\n    },\n    {\n      \"resetTime\": \"2026-05-15T08:52:23Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-3-flash-preview\",\n      \"remainingFraction\": 0.82666665\n    },\n    {\n      \"resetTime\": \"1970-01-01T00:00:00Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-3-pro-preview\",\n      \"remainingFraction\": 0\n    },\n    {\n      \"resetTime\": \"2026-05-15T09:17:04Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-3.1-flash-lite-preview\",\n      \"remainingFraction\": 1\n    },\n    {\n      \"resetTime\": \"1970-01-01T00:00:00Z\",\n      \"tokenType\": \"REQUESTS\",\n      \"modelId\": \"gemini-3.1-pro-preview\",\n      \"remainingFraction\": 0\n    }\n  ]\n}\n",
+  "endpoint": "retrieve_user_quota",
+  "method": "POST",
+  "requested_at": "2026-05-14T09:17:04.291574+00:00",
+  "response_headers": {
+    "Accept-Ranges": "none",
+    "Alt-Svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+    "Connection": "close",
+    "Content-Type": "application/json; charset=UTF-8",
+    "Date": "Thu, 14 May 2026 09:17:04 GMT",
+    "Server": "ESF",
+    "Server-Timing": "gfet4t7; dur=458",
+    "Transfer-Encoding": "chunked",
+    "Vary": "Origin,Accept-Encoding",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-XSS-Protection": "0",
+    "x-cloudaicompanion-trace-id": "528b602fb39ac79c"
+  },
+  "status_code": 200,
+  "url": "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
+}

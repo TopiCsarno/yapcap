@@ -1,0 +1,61 @@
+# Ralph Progress
+
+Feature: gemini-provider
+Started: 2026-05-14T15:24:26+02:00
+
+
+## 2026-05-14T15:45:00+02:00 - 001-provider-foundation
+
+- Implemented: Provider foundation stub (ProviderId::Gemini, v500 schema, ManagedGeminiAccountConfig, GeminiAdapter, icons, i18n, popup/settings tab with Login required empty state).
+- Files changed: src/model.rs, src/config.rs, src/account_selection.rs, src/account_storage/mod.rs, src/debug_env.rs (n/a), src/demo_env.rs, src/app/{mod.rs,provider_actions.rs,provider_assets.rs,popup_view.rs,popup_view/settings.rs,popup_view/settings/accounts.rs}, src/providers/{mod.rs,interface.rs,registry.rs,adapters.rs,gemini/mod.rs,adapters/gemini_adapter.rs}, resources/providers/{gemini.svg,gemini-reversed.svg}, i18n/en/yapcap.ftl, issues/gemini-provider/issues/001-provider-foundation.md.
+- Checks run: cargo fmt; cargo test (210 pass); just check (cargo clippy --all-features --all-targets -- -D warnings clean).
+- Learnings: dead_code lints under -D warnings care about field reads in addition to construction; matching the inner ManagedGeminiAccountConfig in fetch_account (even on an unreachable path) silences the field-never-read warning while keeping the variant minimal. The PopupBodyMeasurements struct has separate fields per provider (no map), so adding Gemini required wiring through provider() / set_provider() / set_settings() / settings_height() match arms.
+
+## 2026-05-14T15:57:23+02:00 - 002-pure-deep-modules
+
+- Implemented: Pure Gemini id_token decoder, tier/hosted-domain plan label mapper, and retrieveUserQuota bucket-family classifier for Pro, Flash, and Lite usage windows.
+- Files changed: src/providers/gemini/{mod.rs,id_token.rs,plan_label.rs,buckets.rs}, fixtures/gemini/{oauth_token_response.json,load_code_assist_response.json,retrieve_user_quota_response.json,probe.py}, issues/gemini-provider/issues/002-pure-deep-modules.md.
+- Checks run: cargo fmt; cargo test (228 pass); cargo check; just check (cargo clippy --all-features --all-targets -- -D warnings clean).
+- Learnings: Slice-2 modules are intentionally pure and not wired into refresh/login yet, so they need narrow dead_code allowances until later Gemini slices consume them in production paths.
+
+## 2026-05-14T16:35:00+02:00 - 003-oauth-login-add-account
+
+- Implemented: Native loopback-callback OAuth flow for Gemini — hardcoded client_id/client_secret, PKCE S256, state nonce, form-encoded token exchange with client_secret, post-login loadCodeAssist call, success HTML page, cancellable login task, managed account storage write, dedupe-by-normalized-email upsert. Wired into settings UI: Add account button, gemini account row with re-auth/delete actions, login state on AppModel, i18n strings.
+- Files changed: src/config.rs (managed_gemini_account_dir helper); src/providers/gemini/{mod.rs, oauth.rs (new), code_assist.rs (new), account.rs (new), login.rs (new)}; src/providers/registry.rs (startup_sync wires gemini); src/app/{mod.rs, login.rs, popup_view.rs, provider_actions.rs, popup_view/settings/accounts.rs, popup_view/settings/accounts/login_controls.rs, popup_view/settings/accounts/rows.rs}; i18n/en/yapcap.ftl.
+- Checks run: cargo fmt; cargo test (243 pass); just check (clippy -D warnings clean).
+- Learnings: The probe.py-captured oauth_token_response.json is the refresh_token grant response (no refresh_token field). Authorization-code response shape (refresh_token + id_token) is required for our parser, so the parse test uses synthetic JSON. UI re-export hop: settings/accounts.rs reaches login states via super::super::, so popup_view.rs must import the type for inner modules to pick it up.
+
+## 2026-05-14T22:27:54+02:00 - 004-token-refresh-remove-account
+
+- Implemented: GeminiError enum (TokenRefresh{Request,Http,Decode,Parse}, RateLimited) plumbed through ProviderError + AppError, including is_rate_limited / rate_limit_retry_after_secs. Added oauth::refresh_access_token_at (form-encoded grant_type=refresh_token, client_secret, Retry-After parsing) + parse_refresh_response (preserves original refresh_token when response omits one) + needs_refresh helper for the 5-min pre-expiry threshold.
+- Files changed: src/error.rs, src/providers/gemini/oauth.rs, issues/gemini-provider/issues/004-token-refresh-remove-account.md.
+- Checks run: cargo fmt; cargo test (257 pass, 14 new); just check (clippy -D warnings clean).
+- Learnings: Runtime layer (runtime::refresh_provider_account_statuses) already converts is_rate_limited errors into rate_limit_until + consecutive_rate_limits with the spec's 300s*2^(n-1) cap-3600s backoff, and converts requires_user_action errors into AuthState::ActionRequired. So slice 4 only needed to land the right error classification + the refresh primitive; later slices wire them through fetch_account. New refresh entry points carry narrow #[allow(dead_code)] until slice 005 calls them, mirroring slice 2's pattern for pure modules.
+
+## 2026-05-14T23:30:00+02:00 - 005-quota-fetch-popup-rendering
+
+- Implemented: gemini::fetch end-to-end refresh cycle (preflight token refresh, loadCodeAssist + retrieveUserQuota with reactive 401 refresh+retry once per cycle, slice-2 bucket classification, UsageSnapshot build with email from metadata and plan from tier+hd mapper). Quota+loadCodeAssist HTTP wrappers typed against GeminiError. Tier id + cloudaicompanionProject persisted to metadata.json via two optional fields on ProviderAccountMetadata. gemini_adapter wired to call gemini::fetch. New GeminiError variants for Unauthorized, LoadCodeAssist{Request,Http,Parse}, Quota{Request,Http,Parse}, NoUsageData, AccountStorage with is_network_unavailable / requires_user_action / is_transient classification.
+- Files changed: src/account_storage/mod.rs, src/error.rs, src/providers/adapters/gemini_adapter.rs, src/providers/gemini/code_assist.rs, src/providers/gemini/mod.rs, src/providers/gemini/oauth.rs, issues/gemini-provider/issues/005-quota-fetch-popup-rendering.md.
+- Checks run: cargo fmt; cargo test (260 pass, 3 new fetch_at tests); just check (clippy -D warnings clean).
+- Learnings: classify_buckets already emits visible families in Pro→Flash→Lite priority order, so UsageSnapshot::applet_windows() needed no Gemini-specific branch; the existing (windows[0], windows[1]) shape gives free users [Flash, Lite] and paid users [Pro, Flash] for free. Adding optional Gemini-specific fields to the shared ProviderAccountMetadata (with serde defaults + skip_serializing_if=None) keeps the metadata.json schema backwards compatible while satisfying the slice's display-last-known-state acceptance criterion.
+
+## 2026-05-14T23:35:00+02:00 - 006-active-account-hint
+
+- Implemented: Gemini active-account hint via inotify on `~/.gemini/google_accounts.json` with parent-dir fallback. New `gemini::host_session` parses `{active, old}` JSON tolerating malformed/empty/missing inputs and matches the normalized active email against managed account emails. Wired through GeminiAdapter::reconcile_provider_accounts, refresh::reconcile_host_active_accounts (per-tick + manual refresh), provider_actions::on_host_cli_auth_changed.
+- Files changed: src/providers/gemini/{mod.rs, host_session.rs (new)}, src/providers/adapters.rs, src/providers/adapters/gemini_adapter.rs, src/providers/registry.rs, src/app/host_auth_watch.rs, src/app/refresh.rs, src/app/provider_actions.rs, issues/gemini-provider/issues/006-active-account-hint.md.
+- Checks run: cargo fmt; cargo test (270 pass, 10 new); just check (clippy -D warnings clean).
+- Learnings: Refactored host_auth_watch into a WatchTargets struct so adding the gemini paths didn't require yet another set of cloned closures. host_user_home_dir() already covers Flatpak pw_dir resolution. Manual refresh already routes through refresh_provider_tasks → reconcile_host_active_accounts, so it was enough to add a Gemini branch there for the "Refresh now re-reads the file" criterion. Did not add `docs/spec.md` Gemini section — none of the prior slices have, so the spec write-up is its own future slice (per PRD's "Further Notes" docs list).
+
+## 2026-05-14T23:55:00+02:00 - 007-error-states-reauth
+
+- Implemented: Per-account Gemini re-auth (login_hint + id_token email-match guard; mismatch leaves account untouched), immediate refresh on successful re-auth, cloudresourcemanager.googleapis.com/v1/projects fallback when loadCodeAssist returns no cloudaicompanionProject (picks first ACTIVE gen-lang-client* project, persists to metadata.json), GeminiError::NoCloudaicompanionProject actionable error.
+- Files changed: src/error.rs, src/providers/gemini/{mod.rs, oauth.rs, code_assist.rs, login.rs}, src/app/login.rs, issues/gemini-provider/issues/007-error-states-reauth.md.
+- Checks run: cargo fmt; cargo test (278 pass); just check (clippy -D warnings clean).
+- Learnings: Popup "Login" badge + Settings per-account re-auth icon were already wired pre-slice (slice 1 popup badge in account_status_badge for any ActionRequired, slice 3 settings rows.rs::gemini_account_settings_row dispatching ReauthenticateGeminiAccount). 429/5xx/network classifications were already in GeminiError from slice 4 — Display impl renders the (retry in Xm) suffix automatically through error.user_message() → account.error → provider_status_message. So this slice was mostly: the targeted-OAuth flow (login_hint + email guard), the cloudresourcemanager fallback, and wiring an immediate refresh after re-auth like Codex/Claude do. Bundled FetchEndpoints struct to keep fetch_at under clippy::too_many_arguments after adding the fourth endpoint.
+
+## 2026-05-14T23:48:00+02:00 - 008-docs-fixtures
+
+- Implemented: Gemini docs and fixtures. Added §3.4 Gemini to docs/spec.md (account model, OAuth flow, usage pipeline, cloudresourcemanager fallback, bucket classification, plan-label mapping, host session hint, re-auth, error taxonomy, OAuth client hardcoding rationale); updated §1.2 table, doc metadata, doc map, §4.1, §8 Flatpak permission note, and §10 testing list. Added §8a Gemini section to docs/qa.md. Updated README provider count, highlights, and added OAuth-only + single-project limitations. Extended fixtures/gemini/probe.py with --simulate-bad-refresh flag. Committed redacted oauth_token_400_response.json fixture.
+- Files changed: README.md, docs/spec.md, docs/qa.md, fixtures/gemini/probe.py, fixtures/gemini/oauth_token_400_response.json (new), issues/gemini-provider/issues/008-docs-fixtures.md.
+- Checks run: cargo fmt; cargo test (278 pass); just check (clippy -D warnings clean).
+- Learnings: Slice-2 fixtures were already redacted with synthetic placeholders (user@example.com, sub=1234567890, example-project, redacted-access-token) and the typed tests assert those exact placeholder values, so the redaction acceptance criterion was already satisfied — only the error-path 400 fixture and the probe extension were new work for this slice. The 429 fixture is described as opportunistic capture (rename a recorded 429 token response into oauth_token_429_response.json) rather than a forced simulation, because rate-limiting the OAuth token endpoint on demand is not reliably reproducible from a test machine.

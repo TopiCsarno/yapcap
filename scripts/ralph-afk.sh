@@ -100,7 +100,118 @@ install_hook() {
 
 issues() { shopt -s nullglob; echo "$RALPH_DIR"/[0-9][0-9][0-9]-*.md "$RALPH_DIR"/issues/[0-9][0-9][0-9]-*.md; shopt -u nullglob; }
 issue_status() { awk '/^status:/ { print $2; exit }' "$1" 2>/dev/null || echo "unknown"; }
+issue_type() { awk '/^type:/ { print $2; exit }' "$1" 2>/dev/null || echo "unknown"; }
 is_done() { local s; s=$(issue_status "$1"); [[ "$s" == "done" || "$s" == "complete" ]]; }
+is_started() { [[ "$(issue_status "$1")" == "started" ]]; }
+issue_key() { basename "$1" .md; }
+
+set_issue_status() {
+  local issue="$1" status="$2" tmp
+  tmp=$(mktemp)
+  awk -v status="$status" '
+    NR == 1 && $0 == "---" { in_frontmatter = 1; print; next }
+    in_frontmatter && $0 == "---" {
+      if (!wrote_status) {
+        print "status: " status
+        wrote_status = 1
+      }
+      in_frontmatter = 0
+      print
+      next
+    }
+    in_frontmatter && /^status:/ {
+      print "status: " status
+      wrote_status = 1
+      next
+    }
+    { print }
+  ' "$issue" > "$tmp"
+  cat "$tmp" > "$issue"
+  rm -f "$tmp"
+}
+
+issue_by_key() {
+  local key="$1" issue
+  for issue in $(issues); do
+    [[ "$(issue_key "$issue")" == "$key" ]] && { echo "$issue"; return 0; }
+  done
+  return 1
+}
+
+blocked_by() {
+  awk '
+    /^---$/ { frontmatter++; next }
+    frontmatter == 2 { exit }
+    frontmatter == 1 && /^blocked_by:/ { in_blocked = 1; next }
+    in_blocked && /^  - / { sub(/^  - /, ""); print; next }
+    in_blocked && /^[^ ]/ { exit }
+  ' "$1" 2>/dev/null
+}
+
+hitl_complete() {
+  grep -Eiq 'human validation (is )?complete|HITL (is )?complete|validation complete' "$1"
+}
+
+blocker_reasons() {
+  local issue="$1" dep dep_issue
+  if [[ "$(issue_type "$issue")" == "HITL" ]] && ! hitl_complete "$issue"; then
+    echo "HITL validation is not complete"
+  fi
+  while IFS= read -r dep; do
+    [ -n "$dep" ] || continue
+    if ! dep_issue=$(issue_by_key "$dep"); then
+      echo "$dep is missing"
+    elif ! is_done "$dep_issue"; then
+      echo "$dep is $(issue_status "$dep_issue")"
+    fi
+  done < <(blocked_by "$issue")
+}
+
+is_blocked() {
+  local issue="$1"
+  [ -n "$(blocker_reasons "$issue")" ]
+}
+
+first_runnable_issue() {
+  local issue started_issue="" started_count=0
+  for issue in $(issues); do
+    is_done "$issue" && continue
+    if is_started "$issue"; then
+      started_issue="$issue"
+      started_count=$((started_count + 1))
+    fi
+  done
+  if [[ "$started_count" -eq 1 ]]; then
+    echo "$started_issue"
+    return 0
+  fi
+  for issue in $(issues); do
+    is_done "$issue" && continue
+    is_started "$issue" && continue
+    is_blocked "$issue" && continue
+    echo "$issue"
+    return 0
+  done
+  return 1
+}
+
+print_blockers() {
+  local issue reason had_reason
+  for issue in $(issues); do
+    is_done "$issue" && continue
+    had_reason=0
+    while IFS= read -r reason; do
+      [ -n "$reason" ] || continue
+      if [[ "$had_reason" -eq 0 ]]; then
+        dim "  · $(issue_key "$issue") blocked:"
+        had_reason=1
+      fi
+      dim "    - $reason"
+    done < <(blocker_reasons "$issue")
+    [[ "$had_reason" -eq 0 ]] && dim "  · $(issue_key "$issue") is runnable"
+  done
+  return 0
+}
 
 all_done() {
   local issue
@@ -149,16 +260,16 @@ print_newly_completed() {
 }
 
 run_agent() {
-  local env_prefix="RALPH_FEATURE_SLUG=$FEATURE_SLUG RALPH_FEATURE_DIR=$RALPH_DIR RALPH_PROGRESS_FILE=$PROGRESS_FILE"
+  local selected_issue="$1" issue_log="$2"
   case "$RUNNER" in
     codex)
-      env RALPH_FEATURE_SLUG="$FEATURE_SLUG" RALPH_FEATURE_DIR="$RALPH_DIR" RALPH_PROGRESS_FILE="$PROGRESS_FILE" \
+      env RALPH_FEATURE_SLUG="$FEATURE_SLUG" RALPH_FEATURE_DIR="$RALPH_DIR" RALPH_PROGRESS_FILE="$PROGRESS_FILE" RALPH_SELECTED_ISSUE="$selected_issue" RALPH_ISSUE_LOG="$issue_log" \
         codex --ask-for-approval never exec --cd "$ROOT_DIR" --sandbox danger-full-access - < "$PROMPT_FILE"
       ;;
     claude)
       local model_args=()
       [ -n "${RALPH_CLAUDE_MODEL:-}" ] && model_args=(--model "$RALPH_CLAUDE_MODEL")
-      env RALPH_FEATURE_SLUG="$FEATURE_SLUG" RALPH_FEATURE_DIR="$RALPH_DIR" RALPH_PROGRESS_FILE="$PROGRESS_FILE" \
+      env RALPH_FEATURE_SLUG="$FEATURE_SLUG" RALPH_FEATURE_DIR="$RALPH_DIR" RALPH_PROGRESS_FILE="$PROGRESS_FILE" RALPH_SELECTED_ISSUE="$selected_issue" RALPH_ISSUE_LOG="$issue_log" \
         claude -p --verbose \
           --permission-mode "${RALPH_CLAUDE_PERMISSION_MODE:-bypassPermissions}" \
           --add-dir "$ROOT_DIR" \
@@ -176,18 +287,36 @@ dim "  pending: $(open_issue_count)"
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
   iter_start=$(date +%s)
+  if ! selected_issue=$(first_runnable_issue); then
+    echo
+    warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    warn "  Ralph stopped: all remaining issues are blocked."
+    print_blockers
+    warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+  fi
+  selected_key=$(issue_key "$selected_issue")
+  issue_log_dir="$RALPH_DIR/logs/$selected_key"
+  issue_log="$issue_log_dir/$(date +%Y-%m-%dT%H-%M-%S).log"
+  mkdir -p "$issue_log_dir"
+  if ! is_started "$selected_issue"; then
+    set_issue_status "$selected_issue" started
+  fi
+  dim "  next: $selected_key"
+  dim "  log: ${issue_log#$ROOT_DIR/}"
 
   status_before=$(snapshot_statuses)
   _out=$(mktemp)
   set +e
   if [[ "$VERBOSE" == "1" ]]; then
-    run_agent 2>&1 | tee "$_out" | sed \
+    run_agent "$selected_issue" "$issue_log" 2>&1 | tee "$_out" | tee "$issue_log" | sed \
       's|<promise>COMPLETE</promise>|\x1b[1;32m◆ COMPLETE\x1b[0m|g;
        s|<promise>BLOCKED</promise>|\x1b[1;33m◆ BLOCKED\x1b[0m|g'
     agent_status=${PIPESTATUS[0]}
   else
-    run_agent >"$_out" 2>&1
+    run_agent "$selected_issue" "$issue_log" >"$_out" 2>&1
     agent_status=$?
+    cp "$_out" "$issue_log"
   fi
   set -e
   output=$(cat "$_out")
@@ -220,9 +349,19 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   dim "  remaining: $(open_issue_count)"
 
   if grep -qx "<promise>BLOCKED</promise>" <<<"$output"; then
+    if first_runnable_issue >/dev/null; then
+      echo
+      warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      warn "  Ralph runner reported blocked, but at least one issue is runnable."
+      print_blockers
+      warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      rm -f "$_out"
+      exit 1
+    fi
     echo
     warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     warn "  Ralph stopped: all remaining issues are blocked."
+    print_blockers
     warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     rm -f "$_out"
     exit 1

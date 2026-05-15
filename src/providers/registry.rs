@@ -6,7 +6,7 @@ use crate::providers::adapters::adapter;
 use crate::providers::interface::{
     ProviderAccountDescriptor, ProviderAccountHandle, ProviderCapabilities,
 };
-use crate::providers::{claude, codex, cursor};
+use crate::providers::{claude, codex, cursor, gemini};
 
 #[cfg(test)]
 mod tests;
@@ -19,7 +19,8 @@ pub fn startup_sync(config: &mut Config) -> bool {
     let codex_changed = codex::sync_managed_accounts(config);
     let cursor_changed = cursor::sync_managed_accounts(config);
     let claude_changed = claude::sync_managed_account_dirs(config);
-    codex_changed | cursor_changed | claude_changed
+    let gemini_changed = gemini::sync_managed_accounts(config);
+    codex_changed | cursor_changed | claude_changed | gemini_changed
 }
 
 pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
@@ -83,6 +84,7 @@ pub async fn fetch_handle(
         ProviderAccountHandle::Codex(_) => ProviderId::Codex,
         ProviderAccountHandle::Claude(_) => ProviderId::Claude,
         ProviderAccountHandle::Cursor(_) => ProviderId::Cursor,
+        ProviderAccountHandle::Gemini(_) => ProviderId::Gemini,
     };
     adapter(provider).fetch_account(handle, client).await
 }
@@ -113,6 +115,12 @@ pub(crate) fn claude_system_active_account_id(
     managed_accounts: &[crate::config::ManagedClaudeAccountConfig],
 ) -> Option<String> {
     crate::providers::adapters::claude_system_active_account_id(managed_accounts)
+}
+
+pub(crate) fn gemini_system_active_account_id(
+    managed_accounts: &[crate::config::ManagedGeminiAccountConfig],
+) -> Option<String> {
+    crate::providers::adapters::gemini_system_active_account_id(managed_accounts)
 }
 
 pub async fn refresh_account_statuses(

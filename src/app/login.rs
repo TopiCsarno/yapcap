@@ -1,9 +1,9 @@
 use super::{
     AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent,
-    CodexLoginState, CodexLoginStatus, CursorScanResult, CursorScanState,
-    ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
-    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, cursor,
-    refresh_provider_task, refresh_provider_tasks, runtime,
+    CodexLoginState, CodexLoginStatus, CursorScanResult, CursorScanState, GeminiLoginEvent,
+    GeminiLoginState, GeminiLoginStatus, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCursorAccountConfig, Message, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
+    Task, claude, codex, cursor, gemini, refresh_provider_task, refresh_provider_tasks, runtime,
 };
 
 impl AppModel {
@@ -464,6 +464,153 @@ impl AppModel {
     pub(super) fn dismiss_cursor_scan(&mut self) {
         self.cursor_scan = CursorScanState::Idle;
         self.cursor_scan_result = None;
+    }
+
+    pub(super) fn reauthenticate_gemini_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .gemini_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        if self
+            .gemini_login
+            .as_ref()
+            .is_some_and(|login| login.status == GeminiLoginStatus::Running)
+        {
+            return Task::none();
+        }
+        self.gemini_login = None;
+        let (state, task) = match gemini::prepare_for_reauth(self.config.clone(), account_id) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.gemini_login = Some(GeminiLoginState {
+                    flow_id: "failed".to_string(),
+                    status: GeminiLoginStatus::Failed,
+                    login_url: None,
+                    output: Vec::new(),
+                    error: Some(error),
+                });
+                return Task::none();
+            }
+        };
+        self.gemini_login = Some(state);
+        let task =
+            task.map(|event| cosmic::Action::App(Message::GeminiLoginEvent(Box::new(event))));
+        let (task, handle) = task.abortable();
+        self.gemini_login_handle = Some(handle);
+        task
+    }
+
+    pub(super) fn start_gemini_login(&mut self) -> Task<Message> {
+        if self
+            .gemini_login
+            .as_ref()
+            .is_some_and(|login| login.status == GeminiLoginStatus::Running)
+        {
+            return Task::none();
+        }
+        self.gemini_login = None;
+        let (state, task) = match gemini::prepare(self.config.clone()) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.gemini_login = Some(GeminiLoginState {
+                    flow_id: "failed".to_string(),
+                    status: GeminiLoginStatus::Failed,
+                    login_url: None,
+                    output: Vec::new(),
+                    error: Some(error),
+                });
+                return Task::none();
+            }
+        };
+        self.gemini_login = Some(state);
+        let task =
+            task.map(|event| cosmic::Action::App(Message::GeminiLoginEvent(Box::new(event))));
+        let (task, handle) = task.abortable();
+        self.gemini_login_handle = Some(handle);
+        task
+    }
+
+    pub(super) fn cancel_gemini_login(&mut self) {
+        if let Some(handle) = self.gemini_login_handle.take() {
+            handle.abort();
+        }
+        self.gemini_login = None;
+    }
+
+    pub(super) fn handle_gemini_login_event(&mut self, event: GeminiLoginEvent) -> Task<Message> {
+        match event {
+            GeminiLoginEvent::Output {
+                flow_id,
+                line,
+                login_url,
+            } => {
+                let Some(login) = self.gemini_login.as_mut() else {
+                    return Task::none();
+                };
+                if login.flow_id != flow_id {
+                    return Task::none();
+                }
+                if let Some(url) = login_url {
+                    login.login_url = Some(url);
+                }
+                login.output.push(line);
+                if login.output.len() > 8 {
+                    login.output.remove(0);
+                }
+                Task::none()
+            }
+            GeminiLoginEvent::Finished { flow_id, result } => {
+                let Some(login) = self.gemini_login.as_mut() else {
+                    return Task::none();
+                };
+                if login.flow_id != flow_id {
+                    return Task::none();
+                }
+                self.gemini_login_handle = None;
+                match *result {
+                    Ok(success) => {
+                        login.status = GeminiLoginStatus::Succeeded;
+                        login.error = None;
+                        let account_id = success.account.id.clone();
+                        let account_label = success.account.label.clone();
+                        self.write_config(|new_config| {
+                            gemini::apply_login_account(new_config, success.account.clone());
+                        });
+                        runtime::reconcile_provider(
+                            &self.config,
+                            &mut self.state,
+                            ProviderId::Gemini,
+                        );
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::Gemini,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::Gemini) {
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id);
+                            }
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                        }
+                        runtime::persist_state(&self.state);
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Gemini)
+                    }
+                    Err(error) => {
+                        login.status = GeminiLoginStatus::Failed;
+                        login.error = Some(error);
+                        Task::none()
+                    }
+                }
+            }
+        }
     }
 }
 

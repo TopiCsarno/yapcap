@@ -79,6 +79,7 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.5.0" date="2026-05-15" />
     <release type="stable" version="0.4.0" date="2026-05-04" />
   </releases>
   <content_rating type="oars-1.1" />

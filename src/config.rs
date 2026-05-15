@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 400]
+#[version = 500]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -20,6 +20,8 @@ pub struct Config {
     pub codex_enabled: bool,
     pub claude_enabled: bool,
     pub cursor_enabled: bool,
+    #[serde(default = "default_gemini_enabled")]
+    pub gemini_enabled: bool,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -28,7 +30,15 @@ pub struct Config {
     pub claude_managed_accounts: Vec<ManagedClaudeAccountConfig>,
     pub selected_cursor_account_ids: Vec<String>,
     pub cursor_managed_accounts: Vec<ManagedCursorAccountConfig>,
+    #[serde(default)]
+    pub selected_gemini_account_ids: Vec<String>,
+    #[serde(default)]
+    pub gemini_managed_accounts: Vec<ManagedGeminiAccountConfig>,
     pub log_level: String,
+}
+
+fn default_gemini_enabled() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -42,6 +52,7 @@ impl Default for Config {
             codex_enabled: true,
             claude_enabled: true,
             cursor_enabled: true,
+            gemini_enabled: true,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -49,6 +60,8 @@ impl Default for Config {
             claude_managed_accounts: Vec::new(),
             selected_cursor_account_ids: Vec::new(),
             cursor_managed_accounts: Vec::new(),
+            selected_gemini_account_ids: Vec::new(),
+            gemini_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -65,6 +78,7 @@ impl Config {
             ProviderId::Codex => self.codex_enabled,
             ProviderId::Claude => self.claude_enabled,
             ProviderId::Cursor => self.cursor_enabled,
+            ProviderId::Gemini => self.gemini_enabled,
         }
     }
 
@@ -74,6 +88,7 @@ impl Config {
             ProviderId::Codex => &self.selected_codex_account_ids,
             ProviderId::Claude => &self.selected_claude_account_ids,
             ProviderId::Cursor => &self.selected_cursor_account_ids,
+            ProviderId::Gemini => &self.selected_gemini_account_ids,
         }
     }
 
@@ -82,6 +97,7 @@ impl Config {
             ProviderId::Codex => &mut self.selected_codex_account_ids,
             ProviderId::Claude => &mut self.selected_claude_account_ids,
             ProviderId::Cursor => &mut self.selected_cursor_account_ids,
+            ProviderId::Gemini => &mut self.selected_gemini_account_ids,
         }
     }
 
@@ -103,6 +119,7 @@ impl Config {
             ProviderId::Codex => &mut self.codex_enabled,
             ProviderId::Claude => &mut self.claude_enabled,
             ProviderId::Cursor => &mut self.cursor_enabled,
+            ProviderId::Gemini => &mut self.gemini_enabled,
         };
         let changed = *target != enabled;
         *target = enabled;
@@ -170,6 +187,24 @@ pub struct ManagedClaudeAccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedGeminiAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub account_root: PathBuf,
+    pub email: String,
+    pub sub: String,
+    #[serde(default)]
+    pub hd: Option<String>,
+    #[serde(default)]
+    pub last_tier_id: Option<String>,
+    #[serde(default)]
+    pub last_cloudaicompanion_project: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedCursorAccountConfig {
     #[serde(default)]
     pub id: String,
@@ -208,6 +243,7 @@ pub struct AppPaths {
     pub codex_accounts_dir: PathBuf,
     pub claude_accounts_dir: PathBuf,
     pub cursor_accounts_dir: PathBuf,
+    pub gemini_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -302,6 +338,11 @@ pub fn managed_claude_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_gemini_account_dir(account_id: &str) -> PathBuf {
+    paths().gemini_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -310,6 +351,7 @@ pub fn paths() -> AppPaths {
     let codex_accounts_dir = state_dir.join("codex-accounts");
     let claude_accounts_dir = state_dir.join("claude-accounts");
     let cursor_accounts_dir = state_dir.join("cursor-accounts");
+    let gemini_accounts_dir = state_dir.join("gemini-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
@@ -317,6 +359,7 @@ pub fn paths() -> AppPaths {
         codex_accounts_dir,
         claude_accounts_dir,
         cursor_accounts_dir,
+        gemini_accounts_dir,
         log_dir,
     }
 }
@@ -331,6 +374,7 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Codex));
         assert!(config.provider_enabled(ProviderId::Claude));
         assert!(config.provider_enabled(ProviderId::Cursor));
+        assert!(config.provider_enabled(ProviderId::Gemini));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::AutoInitPending
@@ -344,10 +388,11 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 400);
+        assert_eq!(Config::VERSION, 500);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());
+        assert!(config.gemini_managed_accounts.is_empty());
     }
 
     #[test]

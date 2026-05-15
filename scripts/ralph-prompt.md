@@ -9,6 +9,8 @@ The shell script sets these environment variables:
 - `RALPH_FEATURE_SLUG`: feature slug under `issues/`
 - `RALPH_FEATURE_DIR`: local feature issue directory
 - `RALPH_PROGRESS_FILE`: append-only progress log
+- `RALPH_SELECTED_ISSUE`: absolute path to the issue selected by the wrapper
+- `RALPH_ISSUE_LOG`: path where the wrapper is saving full output for this attempt
 
 ## Hard Rules
 
@@ -31,25 +33,30 @@ The shell script sets these environment variables:
 5. Read `$RALPH_FEATURE_DIR/PRD.md` if it exists. Otherwise skip — `docs/spec.md` is sufficient.
 6. Read `$RALPH_PROGRESS_FILE`.
 7. List local issue files in `$RALPH_FEATURE_DIR`.
-8. Pick the first issue that is not complete and is not blocked by incomplete local issues.
+8. If `$RALPH_SELECTED_ISSUE` is set, implement exactly that issue. Do not pick a different issue.
+   If it is not set, pick the first issue that is not complete and is not blocked by incomplete local issues.
    - Treat `status: done` or `status: complete` as complete.
+   - Treat `status: started` as the active resume issue.
+   - Resolve dependencies from `blocked_by` YAML frontmatter by matching each entry to a local issue filename without `.md`.
+   - Ignore unchecked acceptance-criteria boxes in issues whose frontmatter status is `done` or `complete`; the frontmatter status is authoritative.
    - Treat `type: HITL` as blocked unless its issue explicitly says the required human validation is complete.
    - If every remaining issue is blocked, append a progress note explaining the blocker and print exactly `<promise>BLOCKED</promise>`.
-9. Implement exactly that one issue.
-10. Run the required checks for the touched area. For YapCap, prefer:
+9. If the selected issue has `status: started`, inspect the current git diff and the latest log under `$RALPH_FEATURE_DIR/logs/<issue-file-name>/` before editing. Continue the same issue from the existing worktree state. Do not restart from scratch unless the partial work is unusable; if it is unusable, append a progress note explaining why.
+10. Implement exactly that one issue.
+11. Run the required checks for the touched area. For YapCap, prefer:
     - `cargo fmt`
     - `cargo test`
     - `cargo check`
     - `just check` when clippy-level validation is appropriate for the change
-11. If checks pass:
+12. If checks pass:
     - Update the issue frontmatter status to `done`.
     - Add a short completion note to the issue body.
     - Append a progress entry to `$RALPH_PROGRESS_FILE`.
     - Commit all changes for this issue with a concise message.
-12. If checks fail:
+13. If checks fail:
     - Fix the issue if practical within this run.
     - If still failing, do not commit. Append a progress entry describing the failure and what remains.
-13. After completing one issue, check whether all local issues are complete. Print `<promise>COMPLETE</promise>` only when every local issue file has `status: done` or `status: complete`. If any incomplete issue remains, do not print completion.
+14. After completing one issue, check whether all local issues are complete. Print `<promise>COMPLETE</promise>` only when every local issue file has `status: done` or `status: complete`. If any incomplete issue remains, do not print completion.
 
 ```text
 <promise>COMPLETE</promise>

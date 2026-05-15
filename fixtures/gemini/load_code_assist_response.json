@@ -1,0 +1,49 @@
+{
+  "body_json": {
+    "allowedTiers": [
+      {
+        "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+        "id": "free-tier",
+        "isDefault": true,
+        "name": "Gemini Code Assist for individuals",
+        "privacyNotice": {
+          "noticeText": "redacted privacy notice",
+          "showNotice": true
+        }
+      },
+      {
+        "description": "Unlimited coding assistant with the most powerful Gemini models",
+        "id": "standard-tier",
+        "name": "Gemini Code Assist",
+        "privacyNotice": {},
+        "userDefinedCloudaicompanionProject": true,
+        "usesGcpTos": true
+      }
+    ],
+    "cloudaicompanionProject": "example-project",
+    "currentTier": {
+      "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+      "id": "free-tier",
+      "name": "Gemini Code Assist for individuals",
+      "privacyNotice": {
+        "noticeText": "redacted privacy notice",
+        "showNotice": true
+      },
+      "upgradeSubscriptionText": "Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.",
+      "upgradeSubscriptionType": "GOOGLE_ONE",
+      "upgradeSubscriptionUri": "https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai%3Futm_campaign%3Dhydrogen_cli%26utm_source%3DGEMINI_CLI"
+    },
+    "gcpManaged": false,
+    "upgradeSubscriptionUri": "https://codeassist.google.com/upgrade"
+  },
+  "body_text": "{\n  \"currentTier\": {\n    \"id\": \"free-tier\",\n    \"name\": \"Gemini Code Assist for individuals\",\n    \"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\",\n    \"privacyNotice\": {\n      \"showNotice\": true,\n      \"noticeText\": \"redacted privacy notice\"\n    },\n    \"upgradeSubscriptionUri\": \"https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai%3Futm_campaign%3Dhydrogen_cli%26utm_source%3DGEMINI_CLI\",\n    \"upgradeSubscriptionText\": \"Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.\",\n    \"upgradeSubscriptionType\": \"GOOGLE_ONE\"\n  },\n  \"allowedTiers\": [\n    {\n      \"id\": \"free-tier\",\n      \"name\": \"Gemini Code Assist for individuals\",\n      \"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\",\n      \"privacyNotice\": {\n        \"showNotice\": true,\n        \"noticeText\": \"redacted privacy notice\"\n      },\n      \"isDefault\": true\n    },\n    {\n      \"id\": \"standard-tier\",\n      \"name\": \"Gemini Code Assist\",\n      \"description\": \"Unlimited coding assistant with the most powerful Gemini models\",\n      \"userDefinedCloudaicompanionProject\": true,\n      \"privacyNotice\": {},\n      \"usesGcpTos\": true\n    }\n  ],\n  \"cloudaicompanionProject\": \"example-project\",\n  \"gcpManaged\": false,\n  \"upgradeSubscriptionUri\": \"https://codeassist.google.com/upgrade\"\n}\n",
+  "endpoint": "load_code_assist",
+  "method": "POST",
+  "requested_at": "2026-05-14T09:17:03.803976+00:00",
+  "response_headers": {
+    "Content-Type": "application/json; charset=UTF-8",
+    "Date": "Thu, 14 May 2026 09:17:03 GMT"
+  },
+  "status_code": 200,
+  "url": "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+}

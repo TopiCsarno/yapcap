@@ -256,6 +256,91 @@ pub(super) fn claude_account_settings_row<'a>(
     ))
 }
 
+pub(super) fn gemini_account_settings_row<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    selected_ids: &[&str],
+    active_id: Option<&str>,
+    config: &Config,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let is_selected = selected_ids.contains(&account.account_id.as_str());
+    let is_active = active_id == Some(account.account_id.as_str());
+    let requires_action = gemini_account_requires_action(account);
+    let action_support =
+        account_action_support(config, ProviderId::Gemini, account.account_id.as_str());
+    let can_reauthenticate = enabled
+        && requires_action
+        && action_support
+            .as_ref()
+            .is_some_and(|support| support.can_reauthenticate);
+    let account_id = account.account_id.clone();
+    let mut title_row = row![account_label_text(&account.label, 14)]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+    if is_active {
+        title_row = title_row.push(badge_with_tooltip(
+            active_badge(enabled),
+            fl!("badge-active-tooltip"),
+        ));
+    }
+    let mut selector_body = cosmic::iced::widget::column![title_row]
+        .spacing(6)
+        .width(Length::Fill);
+    if requires_action {
+        selector_body = selector_body.push(
+            row![badge_with_tooltip(
+                if enabled {
+                    badge_warning(fl!("badge-login-required"))
+                } else {
+                    badge_warning_soft(fl!("badge-login-required"))
+                },
+                fl!("badge-login-required-tooltip"),
+            )]
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        );
+    }
+    let selector_content = container(selector_body)
+        .padding([10, 12])
+        .width(Length::Fill);
+
+    let selector = widget::button::custom(selector_content)
+        .class(account_row_button_class(is_selected))
+        .width(Length::Fill)
+        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
+            ProviderId::Gemini,
+            account_id.clone(),
+        )));
+
+    let can_delete = action_support.is_some_and(|support| support.can_delete);
+    let delete_press =
+        (enabled && can_delete).then_some(Message::DeleteGeminiAccount(account_id.clone()));
+    let mut actions = row![account_selected_marker(is_selected, enabled)]
+        .spacing(0)
+        .align_y(Alignment::Center);
+    if can_reauthenticate {
+        actions = actions.push(account_action_icon_button(
+            "view-refresh-symbolic",
+            fl!("gemini-account-reauth-tooltip"),
+            Some(Message::ReauthenticateGeminiAccount(account_id)),
+        ));
+    }
+    actions = actions.push(account_action_icon_button(
+        "edit-delete-symbolic",
+        fl!("account-delete-tooltip"),
+        delete_press,
+    ));
+
+    Element::from(account_row_container(
+        selector.into(),
+        actions.into(),
+        is_selected,
+        enabled,
+        requires_action,
+    ))
+}
+
 pub(super) fn account_selector_list<'a>(
     rows: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
@@ -510,6 +595,10 @@ fn codex_account_requires_action(account: &ProviderAccountRuntimeState) -> bool 
     account.provider == ProviderId::Codex && account.auth_state == AuthState::ActionRequired
 }
 
+fn gemini_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
+    account.provider == ProviderId::Gemini && account.auth_state == AuthState::ActionRequired
+}
+
 fn account_action_support(
     config: &Config,
     provider: ProviderId,
@@ -725,6 +814,15 @@ mod tests {
             ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
         account.auth_state = AuthState::ActionRequired;
         assert!(codex_account_requires_action(&account));
+    }
+
+    #[test]
+    fn gemini_row_requires_action_when_auth_state_demands_it() {
+        let mut account =
+            ProviderAccountRuntimeState::empty(ProviderId::Gemini, "gemini-1", "Gemini account");
+        account.auth_state = AuthState::ActionRequired;
+        assert!(gemini_account_requires_action(&account));
+        assert!(!codex_account_requires_action(&account));
     }
 
     #[test]

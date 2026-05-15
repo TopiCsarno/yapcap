@@ -36,6 +36,12 @@ impl From<CursorError> for AppError {
     }
 }
 
+impl From<GeminiError> for AppError {
+    fn from(value: GeminiError) -> Self {
+        Self::Provider(ProviderError::Gemini(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -72,13 +78,18 @@ impl AppError {
 
     #[must_use]
     pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::Provider(ProviderError::Claude(e)) if e.is_rate_limited())
+        match self {
+            Self::Provider(ProviderError::Claude(e)) => e.is_rate_limited(),
+            Self::Provider(ProviderError::Gemini(e)) => e.is_rate_limited(),
+            _ => false,
+        }
     }
 
     #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Gemini(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -130,6 +141,8 @@ pub enum ProviderError {
     Claude(#[from] ClaudeError),
     #[error(transparent)]
     Cursor(#[from] CursorError),
+    #[error(transparent)]
+    Gemini(#[from] GeminiError),
 }
 
 impl ProviderError {
@@ -139,6 +152,7 @@ impl ProviderError {
             Self::Codex(error) => error.is_network_unavailable(),
             Self::Claude(error) => error.is_network_unavailable(),
             Self::Cursor(error) => error.is_network_unavailable(),
+            Self::Gemini(error) => error.is_network_unavailable(),
         }
     }
 
@@ -148,6 +162,7 @@ impl ProviderError {
             Self::Codex(error) => error.requires_user_action(),
             Self::Claude(error) => error.requires_user_action(),
             Self::Cursor(error) => error.requires_user_action(),
+            Self::Gemini(error) => error.requires_user_action(),
         }
     }
 
@@ -157,6 +172,7 @@ impl ProviderError {
             Self::Claude(error) => error.is_transient(),
             Self::Codex(error) => error.is_transient(),
             Self::Cursor(_) => false,
+            Self::Gemini(error) => error.is_transient(),
         }
     }
 }
@@ -396,6 +412,90 @@ impl CursorError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GeminiError {
+    #[error("gemini token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("gemini token refresh returned HTTP {status}")]
+    TokenRefreshHttp { status: u16 },
+    #[error("failed to decode gemini token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("failed to parse gemini token refresh response: {0}")]
+    TokenRefreshParse(String),
+    #[error("Rate limited by Gemini{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("Gemini login required")]
+    Unauthorized,
+    #[error("gemini code-assist request failed")]
+    LoadCodeAssistRequest(#[source] reqwest::Error),
+    #[error("gemini loadCodeAssist returned HTTP {status}")]
+    LoadCodeAssistHttp { status: u16 },
+    #[error("failed to parse gemini loadCodeAssist response: {0}")]
+    LoadCodeAssistParse(String),
+    #[error("gemini retrieveUserQuota request failed")]
+    QuotaRequest(#[source] reqwest::Error),
+    #[error("gemini retrieveUserQuota returned HTTP {status}")]
+    QuotaHttp { status: u16 },
+    #[error("failed to parse gemini retrieveUserQuota response: {0}")]
+    QuotaParse(String),
+    #[error("Gemini response had no usage windows")]
+    NoUsageData,
+    #[error(
+        "Gemini account has no Code Assist project. Run `gemini` once to let Google auto-provision a project, then retry."
+    )]
+    NoCloudaicompanionProject,
+    #[error("failed to read Gemini account storage: {0}")]
+    AccountStorage(String),
+}
+
+impl GeminiError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        if let Self::TokenRefreshHttp { status } = self {
+            return (400..500).contains(status) && *status != 429;
+        }
+        matches!(self, Self::Unauthorized)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            Self::TokenRefreshHttp { status }
+            | Self::LoadCodeAssistHttp { status }
+            | Self::QuotaHttp { status } => *status == 429 || *status >= 500,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +580,39 @@ mod tests {
     #[test]
     fn codex_cli_errors_do_not_require_user_action_by_default() {
         let err = CodexError::NoUsageData;
+        assert!(!err.requires_user_action());
+    }
+
+    #[test]
+    fn gemini_refresh_auth_failures_require_user_action() {
+        for status in [400, 401, 403] {
+            let err = AppError::Provider(ProviderError::Gemini(GeminiError::TokenRefreshHttp {
+                status,
+            }));
+            assert!(err.requires_user_action());
+            assert!(!err.is_transient());
+        }
+    }
+
+    #[test]
+    fn gemini_refresh_rate_limit_and_server_errors_are_transient() {
+        for status in [429, 500, 503] {
+            let err = AppError::Provider(ProviderError::Gemini(GeminiError::TokenRefreshHttp {
+                status,
+            }));
+            assert!(!err.requires_user_action());
+            assert!(err.is_transient());
+        }
+    }
+
+    #[test]
+    fn gemini_rate_limited_routes_retry_after_through_app_error() {
+        let err = AppError::Provider(ProviderError::Gemini(GeminiError::RateLimited {
+            retry_after_secs: Some(42),
+        }));
+        assert!(err.is_rate_limited());
+        assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
+        assert!(err.is_transient());
         assert!(!err.requires_user_action());
     }
 }

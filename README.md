@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, and Cursor.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, and Gemini.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -23,10 +23,11 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 
 ## Highlights
 
-- **Three providers**
+- **Four providers**
     - **Codex** — 5h/weekly windows + credits
     - **Claude Code** — session/weekly/extra usage
     - **Cursor** — plan usage + billing cycle end
+    - **Gemini** — Pro / Flash / Lite quota bars (OAuth accounts only)
 - **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
 - **Active badge** — YapCap reads your local Codex and Claude Code session state to mark which account is currently active in the host CLI.
 - **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
@@ -201,7 +202,15 @@ Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/
 
 - COSMIC only. No GNOME, KDE, or tray fallback.
 - No historical charts, notifications, or cost analytics.
-- Three providers only for now.
+- Four providers only for now.
+- **Gemini OAuth only.** YapCap meters Gemini accounts authenticated via Google OAuth.
+  API-key (`selectedAuthType: gemini-api-key`) and Vertex AI (`selectedAuthType:
+  vertex-ai`) gemini-cli configurations are not supported — switch the account to
+  OAuth with `gemini auth login` to use YapCap.
+- **One Gemini project per account.** YapCap displays the single
+  `cloudaicompanionProject` returned by Google's `loadCodeAssist` for each
+  account. Users with multiple paid GCP projects see whichever project Google
+  selects, not all of them.
 
 ## License
 

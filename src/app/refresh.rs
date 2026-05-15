@@ -39,6 +39,10 @@ fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
         provider.system_active_account_id =
             registry::claude_system_active_account_id(&config.claude_managed_accounts);
     }
+    if let Some(provider) = state.provider_mut(ProviderId::Gemini) {
+        provider.system_active_account_id =
+            registry::gemini_system_active_account_id(&config.gemini_managed_accounts);
+    }
 }
 
 pub fn refresh_provider_task(

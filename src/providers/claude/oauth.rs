@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error;
 
-pub(super) const TOKEN_ENDPOINT: &str = "https://console.anthropic.com/v1/oauth/token";
+pub(super) const TOKEN_ENDPOINT: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

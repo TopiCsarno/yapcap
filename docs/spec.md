@@ -49,7 +49,7 @@ read_when:
 | Provider | Primary | Fallback |
 | --- | --- | --- |
 | Codex | Active Codex account resolved from YapCap-owned `metadata.json`/`tokens.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` before expiry or once after 401/403 |
-| Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://console.anthropic.com/v1/oauth/token` (`grant_type=refresh_token`) |
+| Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://platform.claude.com/v1/oauth/token` (`grant_type=refresh_token`) |
 | Cursor | Active Cursor account resolved from YapCap-owned `cursor-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | — |
 | Gemini | Active Gemini account resolved from YapCap-owned `gemini-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | OAuth refresh-token grant against `oauth2.googleapis.com/token` before expiry or once after a `loadCodeAssist` / `retrieveUserQuota` 401 |
 | Copilot | Active GitHub Copilot account resolved from YapCap-owned `copilot-accounts/<id>/` (`metadata.json`, `tokens.json`) | None; token is long-lived and re-auth is user-driven after revocation |
@@ -304,7 +304,7 @@ Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 - `Authorization: Bearer <access_token>` (current access token from account `tokens.json`)
 - `anthropic-beta: oauth-2025-04-20`
 - Token must carry scope `user:profile`; otherwise `MissingProfileScope` is returned before the request.
-- Before the request, YapCap preflights token expiry. If `expires_at` is within five minutes, YapCap calls `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token`, writes updated tokens to account storage (and updates metadata when the response includes identity fields), then continues with the fresh access token and performs exactly one usage request in that cycle.
+- Before the request, YapCap preflights token expiry. If `expires_at` is within five minutes, YapCap calls `POST https://platform.claude.com/v1/oauth/token` with `grant_type=refresh_token`, writes updated tokens to account storage (and updates metadata when the response includes identity fields), then continues with the fresh access token and performs exactly one usage request in that cycle.
 - If the usage endpoint returns HTTP 401, YapCap attempts one token refresh via the same OAuth token endpoint, persists new tokens when that succeeds, and retries the usage request once immediately with the fresh access token. If the retry also returns 401, the cycle ends as unauthorized without another refresh attempt.
 
 Response shape:
@@ -322,7 +322,7 @@ Claude usage windows are partially tolerant because the endpoint can return null
 
 Usage fallback: none. Claude usage is fetched only through the OAuth usage endpoint.
 
-All routine access-token refresh uses `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token` and the stored refresh token. The Claude CLI is not involved.
+All routine access-token refresh uses `POST https://platform.claude.com/v1/oauth/token` with `grant_type=refresh_token` and the stored refresh token. The Claude CLI is not involved.
 
 HTTP 429 surfaces as `ClaudeError::RateLimited { retry_after_secs: Option<u64> }`, is marked transient, and displays the message "Rate limited by Claude — will retry automatically", optionally appended with "(retry in Xm)" when a `Retry-After` header is present. Token refresh HTTP 4xx errors other than 429 are permanent re-auth failures (`requires_user_action = true`).
 

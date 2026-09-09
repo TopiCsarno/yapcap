@@ -43,6 +43,7 @@ pub(super) fn subscription() -> Subscription<Message> {
                     codex_auth = %targets.codex_auth.display(),
                     claude_json = %targets.claude_json.display(),
                     gemini_accounts = %targets.gemini_accounts.display(),
+                    grok_auth = %targets.grok_auth.display(),
                     opencode_auth = %targets.opencode_auth.display(),
                     "host CLI auth inotify watches could not be installed"
                 );
@@ -69,6 +70,8 @@ struct WatchTargets {
     gemini_accounts: std::path::PathBuf,
     gemini_dir: std::path::PathBuf,
     gemini_settings: std::path::PathBuf,
+    grok_auth: std::path::PathBuf,
+    grok_dir: std::path::PathBuf,
     opencode_auth: std::path::PathBuf,
     opencode_dir: std::path::PathBuf,
 }
@@ -82,6 +85,8 @@ impl WatchTargets {
         let gemini_dir = home.join(".gemini");
         let gemini_accounts = gemini_dir.join("google_accounts.json");
         let gemini_settings = gemini_dir.join("settings.json");
+        let grok_dir = home.join(".grok");
+        let grok_auth = grok_dir.join("auth.json");
         let default_opencode_dir = home.join(".local/share/opencode");
         let opencode_auth = crate::providers::opencode_auth::auth_path()
             .unwrap_or_else(|| default_opencode_dir.join("auth.json"));
@@ -98,6 +103,8 @@ impl WatchTargets {
             gemini_accounts,
             gemini_dir,
             gemini_settings,
+            grok_auth,
+            grok_dir,
             opencode_auth,
             opencode_dir,
         }
@@ -121,6 +128,12 @@ fn install_watches(watcher: &mut RecommendedWatcher, targets: &WatchTargets) -> 
     }
     if targets.gemini_dir.is_dir() {
         installed |= install_watch(watcher, &targets.gemini_dir);
+    }
+
+    if targets.grok_auth.exists() {
+        installed |= install_watch(watcher, &targets.grok_auth);
+    } else if targets.grok_dir.is_dir() {
+        installed |= install_watch(watcher, &targets.grok_dir);
     }
 
     if targets.opencode_dir.is_dir() {
@@ -154,10 +167,12 @@ fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
             || p == &targets.claude_json
             || p == &targets.gemini_accounts
             || p == &targets.gemini_settings
+            || p == &targets.grok_auth
             || p == &targets.opencode_auth
             || codex_auth_in_dir_event(p, &targets.codex_auth)
             || claude_json_in_home_event(p, &targets.home, &targets.claude_json)
             || gemini_accounts_in_dir_event(p, &targets.gemini_accounts)
+            || grok_auth_in_dir_event(p, &targets.grok_auth)
             || opencode_auth_in_dir_event(p, &targets.opencode_auth)
             || detection_marker_in_home_event(p, &targets.home)
             || detection_marker_in_config_event(p, &targets.config_dir)
@@ -188,6 +203,11 @@ fn gemini_accounts_in_dir_event(path: &Path, gemini_accounts: &Path) -> bool {
         && path.parent().map(Path::to_path_buf) == gemini_accounts.parent().map(Path::to_path_buf)
 }
 
+fn grok_auth_in_dir_event(path: &Path, grok_auth: &Path) -> bool {
+    path.file_name() == Some(OsStr::new("auth.json"))
+        && path.parent().map(Path::to_path_buf) == grok_auth.parent().map(Path::to_path_buf)
+}
+
 fn opencode_auth_in_dir_event(path: &Path, opencode_auth: &Path) -> bool {
     path.file_name() == Some(OsStr::new("auth.json"))
         && path.parent().map(Path::to_path_buf) == opencode_auth.parent().map(Path::to_path_buf)
@@ -196,7 +216,7 @@ fn opencode_auth_in_dir_event(path: &Path, opencode_auth: &Path) -> bool {
 fn detection_marker_in_home_event(path: &Path, home: &Path) -> bool {
     matches!(
         path.file_name().and_then(OsStr::to_str),
-        Some(".codex" | ".claude" | ".claude.json" | ".copilot" | ".mmx")
+        Some(".codex" | ".claude" | ".claude.json" | ".copilot" | ".mmx" | ".grok")
     ) && path.parent() == Some(home)
 }
 
@@ -327,11 +347,36 @@ mod tests {
     }
 
     #[test]
+    fn grok_auth_in_dir_event_matches_only_auth_json_in_dot_grok() {
+        let home = PathBuf::from("/home/u");
+        let grok_auth = home.join(".grok").join("auth.json");
+        assert!(grok_auth_in_dir_event(
+            &home.join(".grok").join("auth.json"),
+            &grok_auth
+        ));
+        assert!(!grok_auth_in_dir_event(
+            &home.join(".grok").join("other.json"),
+            &grok_auth
+        ));
+        assert!(!grok_auth_in_dir_event(
+            &home.join(".cache").join("auth.json"),
+            &grok_auth
+        ));
+    }
+
+    #[test]
     fn detection_event_matches_home_marker_paths() {
         let home = PathBuf::from("/home/u");
         let targets = WatchTargets::for_home(&home);
 
-        for marker in [".codex", ".claude", ".claude.json", ".copilot", ".mmx"] {
+        for marker in [
+            ".codex",
+            ".claude",
+            ".claude.json",
+            ".copilot",
+            ".mmx",
+            ".grok",
+        ] {
             let event = Event::new(EventKind::Create(notify::event::CreateKind::Any))
                 .add_path(home.join(marker));
             assert!(event_targets_cli_auth(&event, &targets), "{marker}");

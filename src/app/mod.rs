@@ -46,6 +46,7 @@ use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLogin
 use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus};
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
+use crate::providers::grok::{self, GrokLoginEvent, GrokLoginState, GrokLoginStatus};
 use crate::providers::kimi::{
     self,
     login::{KimiLoginEvent, KimiLoginState},
@@ -132,6 +133,8 @@ pub struct AppModel {
     antigravity_login_handle: Option<Handle>,
     opencode_go_login: Option<OpenCodeGoLoginState>,
     opencode_go_login_handle: Option<Handle>,
+    pub grok_login: Option<GrokLoginState>,
+    pub grok_login_handle: Option<Handle>,
 }
 
 impl Drop for AppModel {
@@ -193,6 +196,8 @@ pub enum Message {
     StartLogin(ProviderId),
     ImportFromOpenCode(ProviderId, Option<String>),
     RestoreFromOpenCode(ProviderId, String),
+    ImportFromGrok(Option<String>),
+    RestoreFromGrok(String),
     CancelLogin(ProviderId),
     LoginEvent(ProviderId, Box<login::LoginEventKind>),
     StartCursorScan,
@@ -311,6 +316,8 @@ impl cosmic::Application for AppModel {
             antigravity_login_handle: None,
             opencode_go_login: None,
             opencode_go_login_handle: None,
+            grok_login: None,
+            grok_login_handle: None,
         };
         tracing::info!(
             pid = app.process_info.pid,
@@ -393,6 +400,7 @@ impl cosmic::Application for AppModel {
                 kimi: self.kimi_login.as_ref(),
                 antigravity: self.antigravity_login.as_ref(),
                 opencode_go: self.opencode_go_login.as_ref(),
+                grok: self.grok_login.as_ref(),
             },
             popup_view::DetailSelection {
                 provider: self.selected_provider,
@@ -558,6 +566,12 @@ impl AppModel {
             Message::RestoreFromOpenCode(provider, account_id) => {
                 return Some(session::restore_from_opencode(self, provider, account_id));
             }
+            Message::ImportFromGrok(target_account_id) => {
+                return Some(session::import_from_grok(self, target_account_id));
+            }
+            Message::RestoreFromGrok(account_id) => {
+                return Some(session::restore_from_grok(self, account_id));
+            }
             Message::CancelLogin(provider) => session::cancel_login(self, provider),
             Message::LoginEvent(provider, kind) => {
                 return Some(match (provider, *kind) {
@@ -584,6 +598,9 @@ impl AppModel {
                     }
                     (ProviderId::OpenCodeGo, login::LoginEventKind::OpenCodeGo(event)) => {
                         login::OpenCodeGoLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Grok, login::LoginEventKind::Grok(event)) => {
+                        login::GrokLoginFlow::on_event(self, event)
                     }
                     _ => Task::none(),
                 });

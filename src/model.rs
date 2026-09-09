@@ -18,10 +18,11 @@ pub enum ProviderId {
     Minimax,
     Kimi,
     OpenCodeGo,
+    Grok,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Codex,
         Self::Claude,
         Self::Cursor,
@@ -31,6 +32,7 @@ impl ProviderId {
         Self::Minimax,
         Self::Kimi,
         Self::OpenCodeGo,
+        Self::Grok,
     ];
 
     #[must_use]
@@ -45,6 +47,7 @@ impl ProviderId {
             Self::Minimax => "Minimax",
             Self::Kimi => "Kimi",
             Self::OpenCodeGo => "OpenCode Go",
+            Self::Grok => "Grok",
         }
     }
 }
@@ -353,6 +356,12 @@ mod tests {
     fn kimi_provider_id_has_label_and_is_enumerated() {
         assert_eq!(ProviderId::Kimi.label(), "Kimi");
         assert!(ProviderId::ALL.contains(&ProviderId::Kimi));
+    }
+
+    #[test]
+    fn grok_provider_id_has_label_and_is_enumerated() {
+        assert_eq!(ProviderId::Grok.label(), "Grok");
+        assert!(ProviderId::ALL.contains(&ProviderId::Grok));
     }
 
     fn window(label: &str) -> UsageWindow {

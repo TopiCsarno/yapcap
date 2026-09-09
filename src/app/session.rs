@@ -44,6 +44,7 @@ pub(super) fn start_login(app: &mut AppModel, provider: ProviderId) -> Task<Mess
         ProviderId::Kimi => login::start_login::<login::KimiLoginFlow>(app),
         ProviderId::Antigravity => login::start_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::start_login::<login::OpenCodeGoLoginFlow>(app),
+        ProviderId::Grok => login::start_login::<login::GrokLoginFlow>(app),
         ProviderId::Cursor => Task::none(),
     }
 }
@@ -72,6 +73,19 @@ pub(super) fn restore_from_opencode(
     import_from_opencode(app, provider, Some(account_id))
 }
 
+pub(super) fn import_from_grok(
+    app: &mut AppModel,
+    target_account_id: Option<String>,
+) -> Task<Message> {
+    login::start_with::<login::GrokLoginFlow>(app, move |config| {
+        crate::providers::grok::prepare_host_import(config, target_account_id)
+    })
+}
+
+pub(super) fn restore_from_grok(app: &mut AppModel, account_id: String) -> Task<Message> {
+    import_from_grok(app, Some(account_id))
+}
+
 pub(super) fn cancel_login(app: &mut AppModel, provider: ProviderId) {
     match provider {
         ProviderId::Codex => login::cancel_login::<login::CodexLoginFlow>(app),
@@ -82,6 +96,7 @@ pub(super) fn cancel_login(app: &mut AppModel, provider: ProviderId) {
         ProviderId::Kimi => login::cancel_login::<login::KimiLoginFlow>(app),
         ProviderId::Antigravity => login::cancel_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::cancel_login::<login::OpenCodeGoLoginFlow>(app),
+        ProviderId::Grok => login::cancel_login::<login::GrokLoginFlow>(app),
         ProviderId::Cursor => {}
     }
 }
@@ -104,6 +119,7 @@ pub(super) fn reauthenticate(
         ProviderId::OpenCodeGo => {
             login::reauthenticate::<login::OpenCodeGoLoginFlow>(app, account_id)
         }
+        ProviderId::Grok => login::reauthenticate::<login::GrokLoginFlow>(app, account_id),
         ProviderId::Cursor => app.reauthenticate_cursor_account(account_id),
     }
 }
@@ -127,7 +143,8 @@ pub(super) fn sync_metadata_after_refresh(app: &mut AppModel, provider: Provider
         | ProviderId::Minimax
         | ProviderId::Kimi
         | ProviderId::Antigravity
-        | ProviderId::OpenCodeGo => {}
+        | ProviderId::OpenCodeGo
+        | ProviderId::Grok => {}
     }
 }
 

@@ -5,8 +5,8 @@ mod rows;
 use self::empty::empty_accounts_state;
 use self::login_controls::{
     antigravity_login_controls, claude_login_controls, codex_login_controls,
-    copilot_login_controls, cursor_scan_controls, gemini_login_controls, kimi_login_controls,
-    minimax_login_controls, opencode_go_login_controls,
+    copilot_login_controls, cursor_scan_controls, gemini_login_controls, grok_login_controls,
+    kimi_login_controls, minimax_login_controls, opencode_go_login_controls,
 };
 use self::rows::{
     AccountRowPosition, account_action_container, account_selector_list, account_settings_row,
@@ -121,6 +121,15 @@ pub(super) fn provider_settings_view<'a>(
             opencode_go_login_controls(logins.opencode_go, enabled),
             logins.opencode_go.is_some(),
         ),
+        ProviderLoginKind::Grok => {
+            let host_import_available = crate::providers::grok::account::host_auth_file_path()
+                .and_then(|path| crate::providers::grok::account::read_host_credentials(&path))
+                .is_some();
+            (
+                grok_login_controls(logins.grok, host_import_available, enabled),
+                logins.grok.is_some(),
+            )
+        }
     };
     let selection_warning = registry::selection_required_message(provider_id);
     let accounts_section = account_settings_section(AccountSettingsContext {

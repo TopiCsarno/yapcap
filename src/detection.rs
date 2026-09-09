@@ -40,6 +40,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
     const MINIMAX: [Marker; 1] = [dir(".mmx")];
     const KIMI: [Marker; 0] = [];
     const OPENCODE_GO: [Marker; 1] = [file(".local/share/opencode/auth.json")];
+    const GROK: [Marker; 2] = [dir(".grok"), file(".grok/auth.json")];
     match provider {
         ProviderId::Codex => &CODEX,
         ProviderId::Claude => &CLAUDE,
@@ -50,6 +51,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
         ProviderId::Minimax => &MINIMAX,
         ProviderId::Kimi => &KIMI,
         ProviderId::OpenCodeGo => &OPENCODE_GO,
+        ProviderId::Grok => &GROK,
     }
 }
 
@@ -275,6 +277,7 @@ mod tests {
         touch(home.path(), ".copilot");
         touch(home.path(), ".config/Antigravity");
         touch(home.path(), ".mmx");
+        touch(home.path(), ".grok");
         let snapshot = detect(home.path());
         for provider in ProviderId::ALL {
             assert!(
@@ -293,5 +296,23 @@ mod tests {
         assert!(snapshot.detected(ProviderId::Codex));
         assert!(snapshot.detected(ProviderId::Gemini));
         assert!(!snapshot.detected(ProviderId::Claude));
+    }
+
+    #[test]
+    fn detects_grok_from_directory() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".grok")).unwrap();
+        let snapshot = detect(home.path());
+        assert!(snapshot.detected(ProviderId::Grok));
+    }
+
+    #[test]
+    fn detects_grok_from_auth_file() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".grok");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("auth.json"), "{}").unwrap();
+        let snapshot = detect(home.path());
+        assert!(snapshot.detected(ProviderId::Grok));
     }
 }

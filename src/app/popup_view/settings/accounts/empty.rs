@@ -103,11 +103,38 @@ pub(super) fn empty_accounts_state(
     supports_opencode_import: bool,
     enabled: bool,
 ) -> Element<'static, Message> {
+    let (label, icon, msg) = if provider == ProviderId::Grok {
+        let host_available = crate::providers::grok::account::host_auth_file_path()
+            .and_then(|p| crate::providers::grok::account::read_host_credentials(&p))
+            .is_some();
+        if host_available {
+            (
+                fl!("import-from-grok"),
+                widget::icon::from_name("document-import-symbolic")
+                    .icon()
+                    .size(18)
+                    .into(),
+                Message::ImportFromGrok(None),
+            )
+        } else {
+            (
+                fl!("account-add"),
+                widget::text("+").size(20).into(),
+                Message::StartLogin(ProviderId::Grok),
+            )
+        }
+    } else {
+        (
+            fl!("account-add"),
+            widget::text("+").size(20).into(),
+            account_add_message(provider, add_action),
+        )
+    };
     let add_button = empty_account_button(
-        fl!("account-add"),
-        widget::text("+").size(20).into(),
+        label,
+        icon,
         empty_account_button_class(true, enabled),
-        enabled.then(|| account_add_message(provider, add_action)),
+        enabled.then_some(msg),
     );
     let mut actions = cosmic::iced::widget::column![add_button]
         .spacing(8)

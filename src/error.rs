@@ -73,6 +73,12 @@ impl From<OpenCodeGoError> for AppError {
     }
 }
 
+impl From<GrokError> for AppError {
+    fn from(value: GrokError) -> Self {
+        Self::Provider(ProviderError::Grok(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -119,6 +125,7 @@ impl AppError {
             Self::Provider(ProviderError::Kimi(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::OpenCodeGo(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Grok(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -156,6 +163,8 @@ pub enum ProviderError {
     Antigravity(#[from] AntigravityError),
     #[error(transparent)]
     OpenCodeGo(#[from] OpenCodeGoError),
+    #[error(transparent)]
+    Grok(#[from] GrokError),
 }
 
 impl ProviderError {
@@ -171,6 +180,7 @@ impl ProviderError {
             Self::Kimi(error) => error.is_network_unavailable(),
             Self::Antigravity(error) => error.is_network_unavailable(),
             Self::OpenCodeGo(error) => error.is_network_unavailable(),
+            Self::Grok(error) => error.is_network_unavailable(),
         }
     }
 
@@ -186,6 +196,7 @@ impl ProviderError {
             Self::Kimi(error) => error.requires_user_action(),
             Self::Antigravity(error) => error.requires_user_action(),
             Self::OpenCodeGo(error) => error.requires_user_action(),
+            Self::Grok(error) => error.requires_user_action(),
         }
     }
 
@@ -201,6 +212,7 @@ impl ProviderError {
             Self::Kimi(error) => error.is_transient(),
             Self::Antigravity(error) => error.is_transient(),
             Self::OpenCodeGo(error) => error.is_transient(),
+            Self::Grok(error) => error.is_transient(),
         }
     }
 }
@@ -812,6 +824,94 @@ impl OpenCodeGoError {
     }
 }
 
+#[derive(Debug, Error)]
+#[allow(dead_code)]
+pub enum GrokError {
+    #[error("failed to read Grok account storage: {0}")]
+    AccountStorage(String),
+    #[error("Grok credentials are missing; restore from ~/.grok/auth.json or sign in again")]
+    CredentialsMissing,
+    #[error("invalid grok bearer header")]
+    InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("grok usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Grok login required")]
+    Unauthorized,
+    #[error("Rate limited by Grok{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("grok token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("grok token refresh returned HTTP {status}")]
+    TokenRefreshHttp { status: u16 },
+    #[error("failed to decode grok token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("failed to parse grok token refresh response: {0}")]
+    TokenRefreshParse(String),
+    #[error("grok usage endpoint returned HTTP {status}")]
+    UsageEndpoint {
+        status: u16,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[error("failed to decode grok usage response")]
+    DecodeUsage(#[source] serde_json::Error),
+    #[error("Grok response had no usage windows")]
+    NoUsageData,
+    #[error("invalid grok reset timestamp {value}")]
+    InvalidResetTimestamp {
+        value: String,
+        #[source]
+        source: chrono::ParseError,
+    },
+    #[error("grok token refresh not available")]
+    RefreshUnavailable,
+}
+
+impl GrokError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) | Self::TokenRefreshRequest(source) => {
+                request_could_not_reach_network(source)
+            }
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        if let Self::TokenRefreshHttp { status } = self {
+            return (400..500).contains(status) && *status != 429;
+        }
+        matches!(
+            self,
+            Self::CredentialsMissing | Self::Unauthorized | Self::RefreshUnavailable
+        )
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::UsageRequest(source) | Self::TokenRefreshRequest(source) => {
+                request_could_not_reach_network(source)
+            }
+            Self::TokenRefreshHttp { status } => *status == 429 || *status >= 500,
+            Self::UsageEndpoint { status, .. } => *status == 429 || *status >= 500,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,5 +1047,42 @@ mod tests {
         assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
         assert!(err.is_transient());
         assert!(!err.requires_user_action());
+    }
+
+    #[test]
+    fn grok_rate_limit_routes_retry_after_through_app_error() {
+        let err = AppError::Provider(ProviderError::Grok(GrokError::RateLimited {
+            retry_after_secs: Some(42),
+        }));
+        assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
+        assert!(err.is_transient());
+        assert!(!err.requires_user_action());
+    }
+
+    #[test]
+    fn grok_refresh_auth_failures_require_user_action() {
+        for status in [400, 401, 403] {
+            let err =
+                AppError::Provider(ProviderError::Grok(GrokError::TokenRefreshHttp { status }));
+            assert!(err.requires_user_action());
+            assert!(!err.is_transient());
+        }
+    }
+
+    #[test]
+    fn grok_refresh_rate_limit_and_server_errors_are_transient() {
+        for status in [429, 500, 503] {
+            let err =
+                AppError::Provider(ProviderError::Grok(GrokError::TokenRefreshHttp { status }));
+            assert!(!err.requires_user_action());
+            assert!(err.is_transient());
+        }
+    }
+
+    #[test]
+    fn grok_unauthorized_and_credentials_missing_require_user_action() {
+        assert!(AppError::from(GrokError::Unauthorized).requires_user_action());
+        assert!(AppError::from(GrokError::CredentialsMissing).requires_user_action());
+        assert!(AppError::from(GrokError::RefreshUnavailable).requires_user_action());
     }
 }

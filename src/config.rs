@@ -42,6 +42,8 @@ pub struct Config {
     pub antigravity_enablement: ProviderEnablement,
     #[serde(default)]
     pub opencode_go_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub grok_enablement: ProviderEnablement,
     pub selected_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub selected_claude_account_ids: Vec<String>,
@@ -72,6 +74,10 @@ pub struct Config {
     pub selected_opencode_go_account_ids: Vec<String>,
     #[serde(default)]
     pub opencode_go_managed_accounts: Vec<ManagedOpenCodeGoAccountConfig>,
+    #[serde(default)]
+    pub selected_grok_account_ids: Vec<String>,
+    #[serde(default)]
+    pub grok_managed_accounts: Vec<ManagedGrokAccountConfig>,
     pub log_level: String,
 }
 
@@ -93,6 +99,7 @@ impl Default for Config {
             kimi_enablement: ProviderEnablement::Auto,
             antigravity_enablement: ProviderEnablement::Auto,
             opencode_go_enablement: ProviderEnablement::Auto,
+            grok_enablement: ProviderEnablement::Auto,
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
             selected_claude_account_ids: Vec::new(),
@@ -111,6 +118,8 @@ impl Default for Config {
             antigravity_managed_accounts: Vec::new(),
             selected_opencode_go_account_ids: Vec::new(),
             opencode_go_managed_accounts: Vec::new(),
+            selected_grok_account_ids: Vec::new(),
+            grok_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -141,6 +150,7 @@ impl Config {
             ProviderId::Kimi => self.kimi_enablement,
             ProviderId::Antigravity => self.antigravity_enablement,
             ProviderId::OpenCodeGo => self.opencode_go_enablement,
+            ProviderId::Grok => self.grok_enablement,
         }
     }
 
@@ -156,6 +166,7 @@ impl Config {
             ProviderId::Kimi => &self.selected_kimi_account_ids,
             ProviderId::Antigravity => &self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &self.selected_opencode_go_account_ids,
+            ProviderId::Grok => &self.selected_grok_account_ids,
         }
     }
 
@@ -170,6 +181,7 @@ impl Config {
             ProviderId::Kimi => &mut self.selected_kimi_account_ids,
             ProviderId::Antigravity => &mut self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &mut self.selected_opencode_go_account_ids,
+            ProviderId::Grok => &mut self.selected_grok_account_ids,
         }
     }
 
@@ -223,6 +235,7 @@ fn provider_enabled_key(provider: ProviderId) -> &'static str {
         ProviderId::Kimi => "kimi_enabled",
         ProviderId::Antigravity => "antigravity_enabled",
         ProviderId::OpenCodeGo => "opencode_go_enabled",
+        ProviderId::Grok => "grok_enabled",
     }
 }
 
@@ -237,6 +250,7 @@ fn provider_enablement_key(provider: ProviderId) -> &'static str {
         ProviderId::Kimi => "kimi_enablement",
         ProviderId::Antigravity => "antigravity_enablement",
         ProviderId::OpenCodeGo => "opencode_go_enablement",
+        ProviderId::Grok => "grok_enablement",
     }
 }
 
@@ -251,6 +265,7 @@ fn provider_enablement_mut(config: &mut Config, provider: ProviderId) -> &mut Pr
         ProviderId::Kimi => &mut config.kimi_enablement,
         ProviderId::Antigravity => &mut config.antigravity_enablement,
         ProviderId::OpenCodeGo => &mut config.opencode_go_enablement,
+        ProviderId::Grok => &mut config.grok_enablement,
     }
 }
 
@@ -411,6 +426,20 @@ pub struct ManagedOpenCodeGoAccountConfig {
     pub last_authenticated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedGrokAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub config_dir: PathBuf,
+    pub email: Option<String>,
+    pub provider_account_id: Option<String>,
+    pub team_id: Option<String>,
+    pub plan: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
 fn deserialize_cursor_email<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -440,6 +469,8 @@ pub struct AppPaths {
     pub kimi_accounts_dir: PathBuf,
     pub antigravity_accounts_dir: PathBuf,
     pub opencode_go_accounts_dir: PathBuf,
+    #[allow(dead_code)]
+    pub grok_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -499,6 +530,9 @@ pub fn write_changed_config_entries(
         antigravity_managed_accounts,
         selected_opencode_go_account_ids,
         opencode_go_managed_accounts,
+        grok_enablement,
+        selected_grok_account_ids,
+        grok_managed_accounts,
         log_level,
     } = new;
 
@@ -525,6 +559,7 @@ pub fn write_changed_config_entries(
     set_changed!(kimi_enablement);
     set_changed!(antigravity_enablement);
     set_changed!(opencode_go_enablement);
+    set_changed!(grok_enablement);
     set_changed!(selected_codex_account_ids);
     set_changed!(codex_managed_accounts);
     set_changed!(selected_claude_account_ids);
@@ -543,6 +578,8 @@ pub fn write_changed_config_entries(
     set_changed!(antigravity_managed_accounts);
     set_changed!(selected_opencode_go_account_ids);
     set_changed!(opencode_go_managed_accounts);
+    set_changed!(selected_grok_account_ids);
+    set_changed!(grok_managed_accounts);
     set_changed!(log_level);
 
     tx.commit()
@@ -658,6 +695,12 @@ pub fn managed_antigravity_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+#[allow(dead_code)]
+pub fn managed_grok_account_dir(account_id: &str) -> PathBuf {
+    paths().grok_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -672,6 +715,7 @@ pub fn paths() -> AppPaths {
     let kimi_accounts_dir = state_dir.join("kimi-accounts");
     let antigravity_accounts_dir = state_dir.join("antigravity-accounts");
     let opencode_go_accounts_dir = state_dir.join("opencode-go-accounts");
+    let grok_accounts_dir = state_dir.join("grok-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         cache_dir,
@@ -685,6 +729,7 @@ pub fn paths() -> AppPaths {
         kimi_accounts_dir,
         antigravity_accounts_dir,
         opencode_go_accounts_dir,
+        grok_accounts_dir,
         log_dir,
     }
 }
@@ -831,6 +876,7 @@ mod tests {
         assert!(config.minimax_managed_accounts.is_empty());
         assert!(config.kimi_managed_accounts.is_empty());
         assert!(config.antigravity_managed_accounts.is_empty());
+        assert!(config.grok_managed_accounts.is_empty());
     }
 
     #[test]
@@ -1026,5 +1072,40 @@ mod tests {
         let mut env = crate::test_support::test_env();
         env.remove("FLATPAK_ID");
         assert_eq!(host_user_home_dir(), dirs::home_dir());
+    }
+
+    #[test]
+    fn grok_accounts_dir_is_configured_under_state_root() {
+        let p = paths();
+        assert!(
+            p.grok_accounts_dir
+                .ends_with(std::path::Path::new("yapcap/grok-accounts")),
+            "unexpected grok_accounts_dir: {}",
+            p.grok_accounts_dir.display()
+        );
+    }
+
+    #[test]
+    fn grok_managed_account_config_roundtrips() {
+        let id = "grok-test-1";
+        let dir = managed_grok_account_dir(id);
+        assert_eq!(dir, paths().grok_accounts_dir.join(id));
+
+        let now = Utc::now();
+        let account = ManagedGrokAccountConfig {
+            id: id.to_string(),
+            label: "xai-user".to_string(),
+            config_dir: dir,
+            email: Some("user@example.com".to_string()),
+            provider_account_id: Some("user-123".to_string()),
+            team_id: Some("team-456".to_string()),
+            plan: Some("Premium+".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+        let serialized = serde_json::to_string(&account).unwrap();
+        let deserialized: ManagedGrokAccountConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(account, deserialized);
     }
 }

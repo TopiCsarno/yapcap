@@ -40,6 +40,9 @@ impl Config {
             "opencode_go_enablement" => {
                 self.opencode_go_enablement = update.opencode_go_enablement;
             }
+            "grok_enablement" => {
+                self.grok_enablement = update.grok_enablement;
+            }
             "log_level" => self.log_level.clone_from(&update.log_level),
             _ => return false,
         }
@@ -104,6 +107,12 @@ impl Config {
             "opencode_go_managed_accounts" => {
                 self.opencode_go_managed_accounts = update.opencode_go_managed_accounts.clone();
             }
+            "selected_grok_account_ids" => {
+                self.selected_grok_account_ids = update.selected_grok_account_ids.clone();
+            }
+            "grok_managed_accounts" => {
+                self.grok_managed_accounts = update.grok_managed_accounts.clone();
+            }
             _ => {}
         }
     }
@@ -113,8 +122,8 @@ impl Config {
 mod tests {
     use super::*;
     use crate::config::{
-        ManagedKimiAccountConfig, ManagedMinimaxAccountConfig, ManagedOpenCodeGoAccountConfig,
-        ProviderEnablement,
+        ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
+        ManagedOpenCodeGoAccountConfig, ProviderEnablement,
     };
     use chrono::Utc;
 
@@ -215,6 +224,43 @@ mod tests {
         assert_eq!(config.opencode_go_enablement, ProviderEnablement::Enabled);
         assert_eq!(config.selected_opencode_go_account_ids, ["go-1"]);
         assert_eq!(config.opencode_go_managed_accounts[0].id, "go-1");
+        assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
+    }
+
+    #[test]
+    fn applies_grok_watcher_keys_without_replacing_unrelated_configuration() {
+        let mut config = Config::default();
+        let now = Utc::now();
+        let update = Config {
+            grok_enablement: ProviderEnablement::Enabled,
+            selected_grok_account_ids: vec!["grok-1".to_string()],
+            grok_managed_accounts: vec![ManagedGrokAccountConfig {
+                id: "grok-1".to_string(),
+                label: "Grok User".to_string(),
+                config_dir: std::path::PathBuf::from("/tmp/grok-1"),
+                email: Some("grok@example.com".to_string()),
+                provider_account_id: Some("user-grok".to_string()),
+                team_id: None,
+                plan: Some("SuperGrok".to_string()),
+                created_at: now,
+                updated_at: now,
+                last_authenticated_at: None,
+            }],
+            ..Config::default()
+        };
+
+        config.apply_watcher_update(
+            update,
+            &[
+                "grok_enablement",
+                "selected_grok_account_ids",
+                "grok_managed_accounts",
+            ],
+        );
+
+        assert_eq!(config.grok_enablement, ProviderEnablement::Enabled);
+        assert_eq!(config.selected_grok_account_ids, ["grok-1"]);
+        assert_eq!(config.grok_managed_accounts[0].id, "grok-1");
         assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
     }
 

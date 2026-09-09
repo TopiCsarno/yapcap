@@ -5,6 +5,7 @@ use super::super::super::{
     account_import_button, fl, row, widget,
 };
 use crate::app::login::{KimiLoginFlow, LoginFlow, MinimaxLoginFlow, OpenCodeGoLoginFlow};
+use crate::providers::grok::{GrokLoginState, GrokLoginStatus};
 use crate::providers::kimi::login::{KimiLoginEvent, KimiLoginState, KimiLoginStatus};
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
 use crate::providers::opencode_go::login::{
@@ -733,5 +734,75 @@ fn opencode_go_login_status(login: &OpenCodeGoLoginState) -> String {
             .error
             .clone()
             .unwrap_or_else(|| fl!("opencode-go-login-failed")),
+    }
+}
+
+pub(super) fn grok_login_controls(
+    login: Option<&GrokLoginState>,
+    host_import_available: bool,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        let mut controls = cosmic::iced::widget::column![account_add_button(
+            fl!("account-add"),
+            enabled.then_some(Message::StartLogin(crate::model::ProviderId::Grok)),
+        )]
+        .spacing(8)
+        .width(Length::Fill);
+        if host_import_available {
+            controls = controls.push(account_import_button(
+                fl!("import-from-grok"),
+                enabled.then_some(Message::ImportFromGrok(None)),
+            ));
+        }
+        return controls.into();
+    };
+
+    let mut content =
+        cosmic::iced::widget::column![widget::text(grok_login_status(login)).size(13)]
+            .spacing(10)
+            .width(Length::Fill);
+
+    if login.status == GrokLoginStatus::Running && !login.importing_from_host_cli {
+        content = content.push(widget::text(fl!("account-browser-login-hint")).size(12));
+    }
+
+    if login.status == GrokLoginStatus::Running
+        && let Some(url) = &login.login_url
+    {
+        content = content.push(
+            widget::button::standard(fl!("open-browser"))
+                .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
+        );
+    }
+
+    if login.status == GrokLoginStatus::Running {
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Grok)),
+        ));
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Grok))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Grok))
+                ),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn grok_login_status(login: &GrokLoginState) -> String {
+    match login.status {
+        GrokLoginStatus::Running => fl!("grok-login-running"),
+        GrokLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("grok-login-failed")),
     }
 }

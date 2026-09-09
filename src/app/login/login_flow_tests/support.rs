@@ -1,7 +1,7 @@
 use crate::app::AppModel;
 use crate::config::{
     Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
-    ManagedCopilotAccountConfig, ManagedGeminiAccountConfig,
+    ManagedCopilotAccountConfig, ManagedGeminiAccountConfig, ManagedGrokAccountConfig,
 };
 use crate::model::ProviderId;
 use crate::providers::cursor::CursorScanState;
@@ -49,6 +49,8 @@ pub(super) fn test_app() -> AppModel {
         antigravity_login_handle: None,
         opencode_go_login: None,
         opencode_go_login_handle: None,
+        grok_login: None,
+        grok_login_handle: None,
     }
 }
 
@@ -126,6 +128,21 @@ pub(super) fn copilot_account(id: &str, login: &str) -> ManagedCopilotAccountCon
         label: login.to_string(),
         github_user_id: 1,
         login: login.to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: Some(Utc::now()),
+    }
+}
+
+pub(super) fn grok_account(id: &str) -> ManagedGrokAccountConfig {
+    ManagedGrokAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        config_dir: PathBuf::from(format!("/tmp/yapcap/grok/{id}")),
+        email: Some(format!("{id}@example.com")),
+        provider_account_id: Some(format!("uid-{id}")),
+        team_id: None,
+        plan: Some("SuperGrok".to_string()),
         created_at: Utc::now(),
         updated_at: Utc::now(),
         last_authenticated_at: Some(Utc::now()),

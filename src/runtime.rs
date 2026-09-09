@@ -566,6 +566,19 @@ mod tests {
     }
 
     #[test]
+    fn load_initial_state_includes_grok_in_canonical_order() {
+        let config = Config::default();
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            None,
+        );
+        assert!(state.provider(ProviderId::Grok).is_some());
+        let last_provider = state.providers.last().map(|p| p.provider);
+        assert_eq!(last_provider, Some(ProviderId::Grok));
+    }
+
+    #[test]
     fn load_initial_state_reorders_stale_shared_runtime_into_canonical_order() {
         let config = Config::default();
         let mut shared_state = AppState::empty();

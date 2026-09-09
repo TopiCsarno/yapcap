@@ -56,6 +56,12 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::OpenCodeGo, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/opencode-go-reversed.svg")
         }
+        (ProviderId::Grok, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/grok.svg")
+        }
+        (ProviderId::Grok, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/grok-reversed.svg")
+        }
     };
 
     icon::from_svg_bytes(bytes)

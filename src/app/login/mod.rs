@@ -3,20 +3,16 @@ mod legacy;
 
 pub(crate) use flows::{
     AntigravityLoginFlow, ClaudeLoginFlow, CodexLoginFlow, CopilotLoginFlow, GeminiLoginFlow,
-    KimiLoginFlow, MinimaxLoginFlow, OpenCodeGoLoginFlow,
+    GrokLoginFlow, KimiLoginFlow, MinimaxLoginFlow, OpenCodeGoLoginFlow,
 };
 
 use super::{
     AntigravityLoginEvent, AppModel, ClaudeLoginEvent, CodexLoginEvent, Config, CopilotLoginEvent,
-    GeminiLoginEvent, Handle, KimiLoginEvent, Message, MinimaxLoginEvent, OpenCodeGoLoginEvent,
-    ProviderId, Task, runtime,
+    GeminiLoginEvent, GrokLoginEvent, Handle, KimiLoginEvent, Message, MinimaxLoginEvent,
+    OpenCodeGoLoginEvent, ProviderId, Task, runtime,
 };
 use crate::shared_state::RefreshRequestReason;
 
-/// One login mechanism (PKCE browser flow, paste-code flow, device flow, or
-/// API-key form) implemented once per provider. `start_login`/`cancel_login`/
-/// `reauthenticate` below are generic over this trait so the dispatch logic
-/// in `handle_message_task` doesn't need a bespoke copy per provider.
 pub(crate) trait LoginFlow: Sized {
     type State: Clone;
     type Event: Send + 'static;
@@ -215,8 +211,6 @@ fn log_login_state_clear_ignored(process_id: &str, provider: ProviderId) {
     );
 }
 
-/// One generic shape for the five previously-disjoint per-provider login
-/// event enums; carried by `Message::LoginEvent(ProviderId, LoginEventKind)`.
 #[derive(Debug, Clone)]
 pub(crate) enum LoginEventKind {
     Codex(CodexLoginEvent),
@@ -227,6 +221,7 @@ pub(crate) enum LoginEventKind {
     Minimax(MinimaxLoginEvent),
     Antigravity(AntigravityLoginEvent),
     OpenCodeGo(OpenCodeGoLoginEvent),
+    Grok(GrokLoginEvent),
 }
 
 #[cfg(test)]

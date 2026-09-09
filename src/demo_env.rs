@@ -3,8 +3,8 @@
 use crate::config::{
     Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
     ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
-    ManagedKimiAccountConfig, ManagedMinimaxAccountConfig, ManagedOpenCodeGoAccountConfig,
-    ProviderEnablement, ProviderVisibilityMode, paths,
+    ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
+    ManagedOpenCodeGoAccountConfig, ProviderEnablement, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -30,6 +30,7 @@ const KIMI_PRIMARY_ID: &str = "yapcap-demo:kimi-primary";
 const ANTIGRAVITY_PRIMARY_ID: &str = "yapcap-demo:antigravity-primary";
 const ANTIGRAVITY_FREE_ID: &str = "yapcap-demo:antigravity-free";
 const OPENCODE_GO_ID: &str = "yapcap-demo:opencode-go";
+const GROK_PRIMARY_ID: &str = "yapcap-demo:grok-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -66,6 +67,7 @@ pub fn apply_config(config: &mut Config) {
     config.kimi_enablement = ProviderEnablement::Enabled;
     config.antigravity_enablement = ProviderEnablement::Enabled;
     config.opencode_go_enablement = ProviderEnablement::Enabled;
+    config.grok_enablement = ProviderEnablement::Enabled;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
@@ -76,6 +78,7 @@ pub fn apply_config(config: &mut Config) {
     config.kimi_managed_accounts = demo_kimi_accounts();
     config.antigravity_managed_accounts = demo_antigravity_accounts();
     config.opencode_go_managed_accounts = demo_opencode_go_accounts();
+    config.grok_managed_accounts = demo_grok_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -88,6 +91,7 @@ pub fn apply_config(config: &mut Config) {
     config.selected_kimi_account_ids = vec![KIMI_PRIMARY_ID.to_string()];
     config.selected_antigravity_account_ids = vec![ANTIGRAVITY_PRIMARY_ID.to_string()];
     config.selected_opencode_go_account_ids = vec![OPENCODE_GO_ID.to_string()];
+    config.selected_grok_account_ids = vec![GROK_PRIMARY_ID.to_string()];
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -113,6 +117,8 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.opencode_go_managed_accounts, |account| {
         &account.id
     });
+    changed |= strip_ids(&mut config.selected_grok_account_ids);
+    changed |= retain_len_changed(&mut config.grok_managed_accounts, |account| &account.id);
     changed
 }
 
@@ -181,15 +187,18 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::Kimi => return None,
         ProviderId::Antigravity => return None,
         ProviderId::OpenCodeGo => return None,
+        ProviderId::Grok => return None,
     };
     Some(id.to_string())
 }
 
 fn demo_source(provider: ProviderId) -> String {
     match provider {
-        ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
-            "OAuth".to_string()
-        }
+        ProviderId::Codex
+        | ProviderId::Claude
+        | ProviderId::Gemini
+        | ProviderId::Copilot
+        | ProviderId::Grok => "OAuth".to_string(),
         ProviderId::Cursor => "Managed Account".to_string(),
         ProviderId::Minimax => "API Key".to_string(),
         ProviderId::Kimi => "API Key".to_string(),
@@ -363,6 +372,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 auth_state: AuthState::Ready,
                 error: None,
                 snapshot: snapshot_opencode_go(),
+            },
+        )],
+        ProviderId::Grok => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: GROK_PRIMARY_ID,
+                label: "SuperGrok",
+                last_success_at: now - Duration::minutes(2),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_grok(),
             },
         )],
     }
@@ -775,6 +796,22 @@ fn demo_opencode_go_accounts() -> Vec<ManagedOpenCodeGoAccountConfig> {
     }]
 }
 
+fn demo_grok_accounts() -> Vec<ManagedGrokAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedGrokAccountConfig {
+        id: GROK_PRIMARY_ID.to_string(),
+        label: "SuperGrok".to_string(),
+        config_dir: demo_root().join("grok-primary"),
+        email: Some("grok@example.com".to_string()),
+        provider_account_id: Some("grok-user-1".to_string()),
+        team_id: None,
+        plan: Some("SuperGrok".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
 fn snapshot_minimax_primary() -> UsageSnapshot {
     let now = Utc::now();
     let interval_reset = now + Duration::hours(3);
@@ -894,6 +931,33 @@ fn snapshot_opencode_go() -> UsageSnapshot {
             account_id: None,
             plan: Some("Go".to_string()),
             display_name: Some("OpenCode Go".to_string()),
+        },
+    }
+}
+
+fn snapshot_grok() -> UsageSnapshot {
+    let now = Utc::now();
+    let weekly_reset = now + Duration::days(4);
+    UsageSnapshot {
+        provider: ProviderId::Grok,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "Weekly".to_string(),
+            used_percent: 46.0,
+            reset_at: Some(weekly_reset),
+            window_seconds: Some(7 * 24 * 60 * 60),
+            reset_description: Some(weekly_reset.to_rfc3339()),
+            group: None,
+        }],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("grok@example.com".to_string()),
+            account_id: Some("grok-user-1".to_string()),
+            plan: Some("SuperGrok".to_string()),
+            display_name: Some("Grok User".to_string()),
         },
     }
 }
@@ -1310,6 +1374,7 @@ mod tests {
                     .iter()
                     .map(|a| &a.id)
                     .collect(),
+                ProviderId::Grok => config.grok_managed_accounts.iter().map(|a| &a.id).collect(),
             };
             for id in selected {
                 assert!(
@@ -1702,5 +1767,14 @@ mod tests {
         assert!((cost.used - 8.5).abs() < f64::EPSILON);
         assert_eq!(cost.limit, Some(20.0));
         assert_eq!(cost.units, "EUR");
+    }
+
+    #[test]
+    fn grok_demo_seeds_one_account_with_usage_windows() {
+        let snapshot = snapshot_grok();
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("SuperGrok"));
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].label, "Weekly");
+        assert!((snapshot.windows[0].used_percent - 46.0).abs() < f32::EPSILON);
     }
 }

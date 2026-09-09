@@ -39,6 +39,42 @@ fn providers_expose_expected_capabilities() {
             requires_auth_prompt_on_auth_failure: false,
         }
     );
+    assert_eq!(
+        capabilities(ProviderId::Grok),
+        ProviderCapabilities {
+            supports_background_status_refresh: false,
+            requires_auth_prompt_on_auth_failure: false,
+        }
+    );
+}
+
+#[test]
+fn grok_provider_registered_and_discovers_accounts() {
+    let empty_config = Config::default();
+    let descriptors = discover_accounts(ProviderId::Grok, &empty_config);
+    assert!(descriptors.is_empty());
+    assert!(!capabilities(ProviderId::Grok).supports_background_status_refresh);
+
+    let mut config = Config::default();
+    config
+        .grok_managed_accounts
+        .push(crate::config::ManagedGrokAccountConfig {
+            id: "grok-1".to_string(),
+            label: "Grok User".to_string(),
+            email: Some("grok@example.com".to_string()),
+            config_dir: std::path::PathBuf::from("/tmp/grok-1"),
+            provider_account_id: Some("user-1".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            last_authenticated_at: None,
+        });
+    let descriptors = discover_accounts(ProviderId::Grok, &config);
+    assert_eq!(descriptors.len(), 1);
+    assert_eq!(descriptors[0].account_id, "grok-1");
+    assert_eq!(descriptors[0].label, "Grok User");
+    assert_eq!(login_kind(ProviderId::Grok), ProviderLoginKind::Grok);
 }
 
 #[test]
@@ -74,8 +110,8 @@ fn host_aware_providers_resolve_system_active_account_id() {
     };
     use crate::config::{
         ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-        ManagedGeminiAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
-        ManagedOpenCodeGoAccountConfig, paths,
+        ManagedGeminiAccountConfig, ManagedGrokAccountConfig, ManagedKimiAccountConfig,
+        ManagedMinimaxAccountConfig, ManagedOpenCodeGoAccountConfig, paths,
     };
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -187,6 +223,14 @@ fn host_aware_providers_resolve_system_active_account_id() {
         )
         .unwrap();
 
+    let grok_dir = home.join(".grok");
+    fs::create_dir_all(&grok_dir).unwrap();
+    fs::write(
+        grok_dir.join("auth.json"),
+        r#"{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828":{"key":"grok-token","user_id":"grok-user"}}"#,
+    )
+    .unwrap();
+
     let config = Config {
         codex_managed_accounts: vec![ManagedCodexAccountConfig {
             id: "codex-1".to_string(),
@@ -259,6 +303,18 @@ fn host_aware_providers_resolve_system_active_account_id() {
             updated_at: Utc::now(),
             last_authenticated_at: None,
         }],
+        grok_managed_accounts: vec![ManagedGrokAccountConfig {
+            id: "grok-1".to_string(),
+            label: "Grok".to_string(),
+            config_dir: paths().grok_accounts_dir.join("grok-1"),
+            email: Some("grok@example.com".to_string()),
+            provider_account_id: Some("grok-user".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_authenticated_at: None,
+        }],
         ..Config::default()
     };
 
@@ -271,6 +327,7 @@ fn host_aware_providers_resolve_system_active_account_id() {
         (ProviderId::Minimax, true),
         (ProviderId::Kimi, true),
         (ProviderId::OpenCodeGo, true),
+        (ProviderId::Grok, true),
     ];
     for (provider, expect_some) in expectations {
         let result = system_active_account_id(provider, &config);
@@ -288,6 +345,14 @@ fn host_aware_providers_resolve_system_active_account_id() {
             .provider(ProviderId::Cursor)
             .and_then(|provider| provider.system_active_account_id.as_deref()),
         Some("cursor-managed:cursor-1")
+    );
+
+    reconcile_provider_accounts(ProviderId::Grok, &config, &mut state);
+    assert_eq!(
+        state
+            .provider(ProviderId::Grok)
+            .and_then(|provider| provider.system_active_account_id.as_deref()),
+        Some("grok-1")
     );
 }
 
@@ -340,14 +405,17 @@ fn every_provider_descriptor_declares_supported_account_actions() {
     use crate::config::{
         ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
         ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
-        ManagedKimiAccountConfig, ManagedMinimaxAccountConfig, ManagedOpenCodeGoAccountConfig,
-        paths,
+        ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
+        ManagedOpenCodeGoAccountConfig, paths,
     };
     use crate::providers::opencode_auth::{OPENCODE_AUTH_CONTENT_ENV, OPENCODE_AUTH_PATH_ENV};
     use std::path::PathBuf;
 
     let mut env = crate::test_support::test_env();
     let opencode_root = tempfile::tempdir().unwrap();
+    let home = opencode_root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    env.set("HOME", &home);
     env.remove(OPENCODE_AUTH_CONTENT_ENV);
     env.set(
         OPENCODE_AUTH_PATH_ENV,
@@ -490,6 +558,18 @@ fn every_provider_descriptor_declares_supported_account_actions() {
             updated_at: now,
             last_authenticated_at: None,
         }],
+        grok_managed_accounts: vec![ManagedGrokAccountConfig {
+            id: "grok-1".to_string(),
+            label: "Grok account".to_string(),
+            config_dir: PathBuf::from("/tmp/grok-1"),
+            email: Some("grok@example.com".to_string()),
+            provider_account_id: Some("grok-sub".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: None,
+        }],
         ..Config::default()
     };
 
@@ -549,6 +629,13 @@ fn every_provider_descriptor_declares_supported_account_actions() {
         ),
         (
             ProviderId::OpenCodeGo,
+            vec![
+                ProviderAccountAction::Delete,
+                ProviderAccountAction::Reauthenticate,
+            ],
+        ),
+        (
+            ProviderId::Grok,
             vec![
                 ProviderAccountAction::Delete,
                 ProviderAccountAction::Reauthenticate,
@@ -666,4 +753,112 @@ fn copilot_recovery_prefers_opencode_restore_when_available() {
             ProviderAccountAction::RestoreFromOpenCode,
         ]
     );
+}
+
+#[test]
+fn grok_recovery_offers_host_restore_when_available() {
+    let mut env = crate::test_support::test_env();
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let grok_dir = home.join(".grok");
+    std::fs::create_dir_all(&grok_dir).unwrap();
+    env.set("HOME", &home);
+    env.remove("FLATPAK_ID");
+
+    std::fs::write(
+        grok_dir.join("auth.json"),
+        r#"{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828":{"key":"token","user_id":"uid"}}"#,
+    )
+    .unwrap();
+
+    let now = chrono::Utc::now();
+    let config = Config {
+        grok_managed_accounts: vec![crate::config::ManagedGrokAccountConfig {
+            id: "grok-1".to_string(),
+            label: "Grok account".to_string(),
+            config_dir: std::path::PathBuf::from("/tmp/grok-1"),
+            email: Some("grok@example.com".to_string()),
+            provider_account_id: Some("uid".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: None,
+        }],
+        ..Config::default()
+    };
+
+    let account = discover_accounts(ProviderId::Grok, &config)
+        .pop()
+        .expect("Grok account should be discovered");
+    assert_eq!(
+        account.actions,
+        vec![
+            ProviderAccountAction::Delete,
+            ProviderAccountAction::Reauthenticate,
+            ProviderAccountAction::RestoreFromGrok,
+        ]
+    );
+}
+
+#[test]
+fn grok_delete_account_removes_from_config_and_storage() {
+    use crate::account_storage::{
+        NewProviderAccount, ProviderAccountStorage, ProviderAccountTokens,
+    };
+
+    let mut env = crate::test_support::test_env();
+    let temp = tempfile::tempdir().unwrap();
+    let state = temp.path().join("state");
+    env.set("XDG_STATE_HOME", &state);
+
+    let storage = ProviderAccountStorage::new(crate::config::paths().grok_accounts_dir);
+    storage
+        .create_account(NewProviderAccount {
+            provider: ProviderId::Grok,
+            email: "grok@example.com".to_string(),
+            provider_account_id: Some("uid".to_string()),
+            organization_id: None,
+            organization_name: None,
+            tokens: ProviderAccountTokens {
+                access_token: "a".to_string(),
+                refresh_token: "r".to_string(),
+                expires_at: chrono::Utc::now(),
+                scope: vec![],
+                token_id: None,
+            },
+            snapshot: None,
+        })
+        .unwrap();
+
+    let now = chrono::Utc::now();
+    let mut config = Config {
+        grok_managed_accounts: vec![crate::config::ManagedGrokAccountConfig {
+            id: "grok-to-delete".to_string(),
+            label: "Grok account".to_string(),
+            config_dir: std::path::PathBuf::from("/tmp/grok"),
+            email: Some("grok@example.com".to_string()),
+            provider_account_id: Some("uid".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: None,
+        }],
+        selected_grok_account_ids: vec!["grok-to-delete".to_string()],
+        ..Config::default()
+    };
+
+    assert!(delete_account(
+        ProviderId::Grok,
+        "grok-to-delete",
+        &mut config
+    ));
+    assert!(config.grok_managed_accounts.is_empty());
+    assert!(config.selected_grok_account_ids.is_empty());
+    assert!(!delete_account(
+        ProviderId::Grok,
+        "nonexistent",
+        &mut config
+    ));
 }

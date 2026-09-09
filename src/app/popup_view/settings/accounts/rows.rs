@@ -58,6 +58,12 @@ pub(super) fn account_settings_row(
         enabled,
         account.status.as_ref(),
     );
+    let can_restore_from_grok = action_available(
+        account,
+        ProviderAccountAction::RestoreFromGrok,
+        enabled,
+        account.status.as_ref(),
+    );
     let can_rescan = action_available(
         account,
         ProviderAccountAction::Rescan,
@@ -124,6 +130,13 @@ pub(super) fn account_settings_row(
             "document-import-symbolic",
             fl!("restore-from-opencode"),
             Some(Message::RestoreFromOpenCode(provider, account_id.clone())),
+        ));
+    }
+    if can_restore_from_grok {
+        actions = actions.push(account_action_icon_button(
+            "document-import-symbolic",
+            fl!("restore-from-grok"),
+            Some(Message::RestoreFromGrok(account_id.clone())),
         ));
     }
     if can_rescan {
@@ -226,6 +239,7 @@ fn action_available(
     match action {
         ProviderAccountAction::Delete => true,
         ProviderAccountAction::RestoreFromOpenCode
+        | ProviderAccountAction::RestoreFromGrok
         | ProviderAccountAction::Reauthenticate
         | ProviderAccountAction::Rescan => {
             enabled && status.is_some_and(|status| status.reauth_eligible)

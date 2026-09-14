@@ -14,41 +14,83 @@ impl AppModel {
         &mut self,
         refresh_result: ProviderRefreshResult,
     ) -> Task<Message> {
-        let ProviderRefreshResult { provider, accounts } = refresh_result;
+        let ProviderRefreshResult {
+            batch_token,
+            account_id,
+            provider,
+            accounts,
+        } = refresh_result;
         let refreshed_provider = provider.provider;
-        let refreshed_selected_ids = provider.selected_account_ids.clone();
+        let Some(batch_index) = self.refresh_batches.iter().position(|batch| {
+            batch.provider == refreshed_provider
+                && batch.token == batch_token
+                && batch.pending_account_ids.contains(&account_id)
+        }) else {
+            return Task::none();
+        };
+        let was_selected = self
+            .state
+            .provider(refreshed_provider)
+            .is_some_and(|entry| entry.selected_account_ids.contains(&account_id));
+        let discovered = registry::discover_accounts(refreshed_provider, &self.config);
+        let account_is_current = discovered
+            .iter()
+            .any(|account| account.account_id == account_id);
+        let accepted_accounts = accounts
+            .into_iter()
+            .filter(|account| account.account_id == account_id && account_is_current)
+            .collect::<Vec<_>>();
         tracing::info!(
             process_id = %self.process_info.id,
             owner_status = self.owner_status(),
             provider = refreshed_provider.label(),
-            account_count = accounts.len(),
+            account_count = accepted_accounts.len(),
             "provider refresh finished"
         );
-        self.state.upsert_provider(provider);
-        for account in accounts {
+        for account in accepted_accounts {
             self.state.upsert_account(account);
         }
-        super::session::sync_metadata_after_refresh(self, refreshed_provider);
-        if self.config.selected_account_ids(refreshed_provider) != refreshed_selected_ids.as_slice()
-        {
-            self.write_config(|new_config| {
-                new_config
-                    .selected_account_ids_mut(refreshed_provider)
-                    .clone_from(&refreshed_selected_ids);
-            });
+        if was_selected && let Some(current) = self.state.provider_mut(refreshed_provider) {
+            current.account_status = provider.account_status;
+            current.error = provider.error;
         }
+        self.refresh_batches[batch_index]
+            .pending_account_ids
+            .retain(|pending_id| pending_id != &account_id);
+        let final_slot = self.refresh_batches[batch_index]
+            .pending_account_ids
+            .is_empty();
+        if !final_slot {
+            self.persist_runtime_if_owner("provider_refresh_account_finished");
+            self.sync_panel_suggested_bounds();
+            return Task::none();
+        }
+        let batch = self.refresh_batches.remove(batch_index);
+        self.state.finish_provider_refresh(refreshed_provider);
+        super::session::sync_metadata_after_refresh(self, refreshed_provider);
         self.persist_runtime_if_owner("provider_refresh_finished");
-        self.consume_shared_refresh_request(refreshed_provider);
+        if batch.request.is_some_and(|request| {
+            self.shared_control
+                .requests
+                .iter()
+                .any(|current| current == &request)
+        }) {
+            self.consume_shared_refresh_request(refreshed_provider);
+        }
         self.selected_provider = select_provider(self.selected_provider, &self.state);
         self.sync_panel_suggested_bounds();
+        let next_refresh = self.schedule_shared_control_refreshes();
         if refreshed_provider == ProviderId::Cursor {
-            return refresh_provider_account_statuses_task(
-                &self.config,
-                &self.state,
-                ProviderId::Cursor,
-            );
+            return Task::batch([
+                next_refresh,
+                refresh_provider_account_statuses_task(
+                    &self.config,
+                    &self.state,
+                    ProviderId::Cursor,
+                ),
+            ]);
         }
-        Task::none()
+        next_refresh
     }
 
     pub(super) fn consume_shared_refresh_request(&mut self, provider: ProviderId) {
@@ -133,7 +175,7 @@ impl AppModel {
     }
 
     pub(super) fn sync_panel_suggested_bounds(&mut self) {
-        let (w, h) = panel_button_size(&self.core, &self.state, self.config.panel_icon_style);
+        let (w, h) = panel_button_size(&self.core, &self.state, &self.config);
         self.core.applet.suggested_bounds = Some(Size::new(w, h));
     }
 
@@ -181,7 +223,7 @@ impl AppModel {
     }
 
     fn request_refresh_for_selected_provider(&mut self, provider: ProviderId) -> Task<Message> {
-        if !super::selected_account_refresh_due(&self.config, &self.state, provider) {
+        if !super::provider_refresh_due(&self.config, &self.state, provider) {
             return Task::none();
         }
         self.request_provider_refresh(provider, RefreshRequestReason::ProviderSelected)
@@ -323,6 +365,9 @@ impl AppModel {
         self.write_config(|new_config| {
             new_config.set_provider_enabled(provider, enabled);
             new_config.selected_provider = selected_provider;
+            if !enabled {
+                new_config.panel_account_ids_mut(provider).clear();
+            }
         });
         tracing::info!(
             process_id = %self.process_info.id,
@@ -332,6 +377,11 @@ impl AppModel {
             selected_provider = self.selected_provider.label(),
             "provider enabled setting changed"
         );
+        let termination = if enabled {
+            Task::none()
+        } else {
+            self.terminate_refresh_batch(provider)
+        };
         runtime::reconcile_provider(&self.config, &self.detection, &mut self.state, provider);
         self.sync_panel_suggested_bounds();
         if enabled
@@ -340,10 +390,13 @@ impl AppModel {
                 .provider(provider)
                 .is_some_and(|entry| entry.account_status == AccountSelectionStatus::Ready)
         {
-            return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
+            return Task::batch([
+                termination,
+                self.request_provider_refresh(provider, RefreshRequestReason::AccountAction),
+            ]);
         }
         self.persist_runtime_if_owner("provider_setting_changed");
-        Task::none()
+        termination
     }
 
     pub(super) fn set_refresh_interval(&mut self, interval_seconds: u64) -> Task<Message> {
@@ -443,12 +496,12 @@ impl AppModel {
         self.sync_panel_suggested_bounds();
     }
 
-    pub(super) fn on_config_update(&mut self, update: Config, keys: &[&str]) {
+    pub(super) fn on_config_update(&mut self, update: Config, keys: &[&str]) -> Task<Message> {
         let mut config = self.config.clone();
         config.apply_watcher_update(update, keys);
         demo_env::apply_config(&mut config);
         if config == self.config {
-            return;
+            return Task::none();
         }
         tracing::info!(
             process_id = %self.process_info.id,
@@ -462,10 +515,21 @@ impl AppModel {
         );
         self.config = config;
         runtime::reconcile_state(&self.config, &self.detection, &mut self.state);
+        let mut termination_tasks = Vec::new();
+        for provider in ProviderId::ALL {
+            if !self
+                .state
+                .provider(provider)
+                .is_some_and(|entry| entry.enabled)
+            {
+                termination_tasks.push(self.terminate_refresh_batch(provider));
+            }
+        }
         demo_env::apply(&self.config, &mut self.state);
         self.selected_provider = select_provider(self.config.selected_provider, &self.state);
         self.persist_runtime_if_owner("external_config_update");
         self.sync_panel_suggested_bounds();
+        Task::batch(termination_tasks)
     }
 
     pub(super) fn on_shared_runtime_update(
@@ -475,6 +539,7 @@ impl AppModel {
         let mut next_state = shared_runtime.app_state;
         runtime::reconcile_shared_state(&self.config, &self.detection, &mut next_state);
         demo_env::apply(&self.config, &mut next_state);
+        self.restore_refresh_batch_markers(&mut next_state);
         if self.state == next_state {
             return;
         }
@@ -492,6 +557,36 @@ impl AppModel {
         self.state = next_state;
         self.selected_provider = select_provider(self.config.selected_provider, &self.state);
         self.sync_panel_suggested_bounds();
+    }
+
+    pub(super) fn handle_toggle_account_panel_flag(
+        &mut self,
+        provider: ProviderId,
+        account_id: &str,
+    ) -> Task<Message> {
+        if !self
+            .state
+            .provider(provider)
+            .is_some_and(|entry| entry.enabled)
+        {
+            return Task::none();
+        }
+        if !self.write_config(|new_config| {
+            registry::toggle_account_panel_flag(provider, new_config, account_id);
+        }) {
+            return Task::none();
+        }
+        self.sync_panel_suggested_bounds();
+        if self
+            .config
+            .panel_account_ids(provider)
+            .iter()
+            .any(|id| id == account_id)
+        {
+            self.request_provider_refresh(provider, RefreshRequestReason::AccountAction)
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn toggle_account_selection(

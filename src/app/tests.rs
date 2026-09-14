@@ -1,8 +1,7 @@
 use super::applet::{
     AppletBarLayout, applet_bar_layout, applet_bar_width, applet_button_size,
     applet_fallback_button_size, applet_percent_cell_alignment, applet_percent_cell_width,
-    applet_percent_text, panel_button_size, panel_fallback_active, select_provider,
-    selected_provider_bar_layout,
+    applet_percent_text, panel_button_size, panel_cells, select_provider,
 };
 use super::popup_view::{
     account_page_next, account_page_previous, clamp_account_page, pager_account_label,
@@ -63,11 +62,16 @@ fn popup_size_limits_allow_tall_account_details() {
 fn owner_tick_runs_automatic_refresh() {
     let owner = refresh_owner("owner-tick");
     let mut app = test_app(Some(owner));
-    ready_selected_provider(&mut app.state, ProviderId::Codex);
+    ready_configured_copilot_provider(&mut app);
 
     let _task = app.handle_message(Message::Tick);
 
-    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
 }
 
 #[test]
@@ -186,15 +190,20 @@ fn refresh_now_excludes_disabled_providers_from_requests() {
 fn owner_observing_shared_control_runs_requested_refresh() {
     let owner = refresh_owner("owner-request");
     let mut app = test_app(Some(owner));
-    ready_selected_provider(&mut app.state, ProviderId::Codex);
+    ready_configured_copilot_provider(&mut app);
 
     let task = app.handle_message(Message::UpdateSharedControl(
-        Box::new(control_request(ProviderId::Codex)),
+        Box::new(control_request(ProviderId::Copilot)),
         vec!["requests"],
     ));
 
     assert!(task.units() > 0);
-    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
 }
 
 #[test]
@@ -349,14 +358,14 @@ fn owner_refresh_now_processes_new_shared_control_snapshot() {
     let _guard = crate::test_support::env_lock();
     let owner = refresh_owner("owner-refresh-now-new-control");
     let mut app = test_app(Some(owner));
-    ready_selected_provider(&mut app.state, ProviderId::Cursor);
+    ready_configured_copilot_provider(&mut app);
 
     let task = app.handle_message(Message::RefreshNow);
 
     assert!(task.units() > 0);
     assert!(
         app.state
-            .provider(ProviderId::Cursor)
+            .provider(ProviderId::Copilot)
             .unwrap()
             .is_refreshing
     );
@@ -366,7 +375,16 @@ fn owner_refresh_now_processes_new_shared_control_snapshot() {
 fn provider_refresh_completion_consumes_shared_control_request() {
     let owner = refresh_owner("owner-consume-request");
     let mut app = test_app(Some(owner));
+    ready_configured_copilot_provider(&mut app);
     app.shared_control = control_request(ProviderId::Codex);
+    app.refresh_batches.push(super::ProviderRefreshBatch {
+        provider: ProviderId::Codex,
+        token: 1,
+        started_at: Utc::now(),
+        pending_account_ids: vec!["default".to_string()],
+        request: app.shared_control.requests.first().cloned(),
+    });
+    app.state.begin_provider_refresh(ProviderId::Codex);
     let provider = ProviderRuntimeState {
         provider: ProviderId::Codex,
         enabled: true,
@@ -382,12 +400,315 @@ fn provider_refresh_completion_consumes_shared_control_request() {
 
     let _task = app.handle_message(Message::ProviderRefreshed(Box::new(
         crate::runtime::ProviderRefreshResult {
+            batch_token: 1,
+            account_id: "default".to_string(),
             provider,
             accounts: Vec::new(),
         },
     )));
 
     assert!(app.shared_control.requests.is_empty());
+}
+
+#[test]
+fn refresh_outcomes_merge_without_reverting_newer_radio_selection() {
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    begin_test_batch(&mut app, 1, &["a", "b"]);
+
+    let _ = app.handle_message(Message::ToggleAccountSelection(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app,
+        1,
+        "a",
+        "refreshed-a",
+    ))));
+    assert_eq!(app.config.selected_copilot_account_ids, ["b"]);
+    assert_eq!(
+        app.state
+            .active_account(ProviderId::Copilot)
+            .unwrap()
+            .account_id,
+        "b"
+    );
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app,
+        1,
+        "b",
+        "refreshed-b",
+    ))));
+    assert_eq!(app.config.selected_copilot_account_ids, ["b"]);
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "a").unwrap().label,
+        "refreshed-a"
+    );
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "b").unwrap().label,
+        "refreshed-b"
+    );
+    assert!(
+        !app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn reverse_refresh_outcomes_preserve_newer_radio_selection() {
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    begin_test_batch(&mut app, 1, &["a", "b"]);
+
+    let _ = app.handle_message(Message::ToggleAccountSelection(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app,
+        1,
+        "b",
+        "refreshed-b",
+    ))));
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app,
+        1,
+        "a",
+        "refreshed-a",
+    ))));
+
+    assert_eq!(app.config.selected_copilot_account_ids, ["b"]);
+    assert_eq!(
+        app.state
+            .active_account(ProviderId::Copilot)
+            .unwrap()
+            .account_id,
+        "b"
+    );
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "a").unwrap().label,
+        "refreshed-a"
+    );
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "b").unwrap().label,
+        "refreshed-b"
+    );
+}
+
+#[test]
+fn refresh_batch_ignores_duplicate_and_stale_outcomes() {
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    begin_test_batch(&mut app, 1, &["a", "b"]);
+    let started_at = app
+        .state
+        .provider(ProviderId::Copilot)
+        .unwrap()
+        .refresh_started_at;
+
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app, 1, "a", "first",
+    ))));
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app,
+        1,
+        "a",
+        "duplicate",
+    ))));
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "a").unwrap().label,
+        "first"
+    );
+    assert_eq!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .refresh_started_at,
+        started_at
+    );
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+
+    app.state.finish_provider_refresh(ProviderId::Copilot);
+    let _ = app.terminate_refresh_batch(ProviderId::Copilot);
+    begin_test_batch(&mut app, 2, &["b"]);
+    let _ = app.handle_message(Message::ProviderRefreshed(Box::new(refresh_result(
+        &app, 1, "b", "late",
+    ))));
+    assert_eq!(
+        app.state.account(ProviderId::Copilot, "b").unwrap().label,
+        "b"
+    );
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn owner_shared_runtime_update_restores_local_batch_marker_and_blocks_rescheduling() {
+    let owner = refresh_owner("owner-local-batch-marker");
+    let mut app = test_app(Some(owner));
+    ready_two_copilot_accounts(&mut app);
+    begin_test_batch(&mut app, 1, &["a", "b"]);
+    let started_at = app
+        .state
+        .provider(ProviderId::Copilot)
+        .unwrap()
+        .refresh_started_at;
+    let mut incoming = app.state.clone();
+    incoming
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .is_refreshing = false;
+    incoming
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .refresh_started_at = None;
+
+    let _ = app.handle_message(Message::UpdateSharedRuntime(
+        Box::new(SharedRuntimeState::new(incoming, 1)),
+        vec!["app_state"],
+    ));
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(control_request(ProviderId::Copilot)),
+        vec!["requests"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+    assert_eq!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .refresh_started_at,
+        started_at
+    );
+    assert_eq!(app.refresh_batches.len(), 1);
+    assert_eq!(app.shared_control.requests.len(), 1);
+}
+
+#[test]
+fn flagged_candidate_refreshes_when_radio_state_is_login_required() {
+    let owner = refresh_owner("flagged-login-required-refresh");
+    let mut app = test_app(Some(owner));
+    ready_two_copilot_accounts(&mut app);
+    app.config.panel_copilot_account_ids = vec!["b".to_string()];
+    app.state
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .account_status = AccountSelectionStatus::LoginRequired;
+
+    let task = app.automatic_refresh_task();
+
+    assert_eq!(task.units(), 2);
+    assert_eq!(app.refresh_batches[0].pending_account_ids, ["a", "b"]);
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn empty_selection_is_adopted_before_refresh_outcomes() {
+    let _env = crate::test_support::test_env();
+    let owner = refresh_owner("empty-selection-refresh");
+    let mut app = test_app(Some(owner));
+    app.config.copilot_enablement = crate::config::ProviderEnablement::Enabled;
+    app.config.copilot_managed_accounts =
+        vec![copilot_account("a", "a"), copilot_account("b", "b")];
+    app.config.panel_copilot_account_ids = vec!["a".to_string(), "b".to_string()];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+    assert_eq!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .account_status,
+        AccountSelectionStatus::SelectionRequired
+    );
+
+    let task = app.automatic_refresh_task();
+
+    assert!(task.units() > 0);
+    assert_eq!(app.config.selected_copilot_account_ids, ["a"]);
+    assert_eq!(app.refresh_batches[0].pending_account_ids, ["a", "b"]);
+}
+
+#[test]
+fn singleton_account_is_adopted_before_dispatch() {
+    let _env = crate::test_support::test_env();
+    let owner = refresh_owner("singleton-selection-refresh");
+    let mut app = test_app(Some(owner));
+    app.config.copilot_enablement = crate::config::ProviderEnablement::Enabled;
+    app.config.copilot_managed_accounts = vec![copilot_account("only", "only")];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+    app.config.selected_copilot_account_ids.clear();
+    app.state
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .selected_account_ids
+        .clear();
+    app.state
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .account_status = AccountSelectionStatus::SelectionRequired;
+
+    let task = app.automatic_refresh_task();
+
+    assert!(task.units() > 0);
+    assert_eq!(app.config.selected_copilot_account_ids, ["only"]);
+    assert_eq!(app.refresh_batches[0].pending_account_ids, ["only"]);
+}
+
+#[test]
+fn action_required_flag_does_not_make_a_fresh_selected_account_due() {
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    app.config.panel_copilot_account_ids = vec!["b".to_string()];
+    let selected = app
+        .state
+        .provider_accounts
+        .iter_mut()
+        .find(|account| account.provider == ProviderId::Copilot && account.account_id == "a")
+        .unwrap();
+    selected.last_success_at = Some(Utc::now());
+    let flagged = app
+        .state
+        .provider_accounts
+        .iter_mut()
+        .find(|account| account.provider == ProviderId::Copilot && account.account_id == "b")
+        .unwrap();
+    flagged.auth_state = crate::model::AuthState::ActionRequired;
+    flagged.last_success_at = None;
+
+    assert!(!super::provider_refresh_due(
+        &app.config,
+        &app.state,
+        ProviderId::Copilot
+    ));
 }
 
 #[test]
@@ -512,13 +833,13 @@ fn partial_config_update_preserves_locally_written_account() {
         ..Config::default()
     };
 
-    app.on_config_update(partial_watcher_config, &["selected_codex_account_ids"]);
+    let _ = app.on_config_update(partial_watcher_config, &["selected_codex_account_ids"]);
 
     assert_eq!(app.config.codex_managed_accounts.len(), 1);
 }
 
 #[test]
-fn selecting_stale_enabled_provider_writes_provider_selected_request() {
+fn selecting_stale_enabled_provider_without_configured_account_consumes_request() {
     let _env = crate::test_support::test_env();
     let mut app = test_app(None);
     ready_selected_provider(&mut app.state, ProviderId::Claude);
@@ -529,10 +850,7 @@ fn selecting_stale_enabled_provider_writes_provider_selected_request() {
     assert_eq!(task.units(), 0);
     assert_eq!(app.config.selected_provider, ProviderId::Claude);
     assert_eq!(app.selected_provider, ProviderId::Claude);
-    assert_eq!(app.shared_control.requests.len(), 1);
-    let request = &app.shared_control.requests[0];
-    assert_eq!(request.provider, ProviderId::Claude);
-    assert_eq!(request.reason, RefreshRequestReason::ProviderSelected);
+    assert!(app.shared_control.requests.is_empty());
 }
 
 #[test]
@@ -631,6 +949,181 @@ fn cursor_reauthentication_starts_local_rescan() {
 
     assert!(task.units() > 0);
     assert!(matches!(app.cursor_scan, CursorScanState::Scanning));
+}
+
+#[test]
+fn panel_flag_message_changes_only_flags_and_resyncs_bounds() {
+    let _env = crate::test_support::test_env();
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    let original_config = app.config.clone();
+    let original_state = app.state.clone();
+
+    let task = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+
+    let mut flagged_config = original_config.clone();
+    flagged_config.panel_copilot_account_ids = vec!["b".to_string()];
+    assert_eq!(app.config, flagged_config);
+    assert_eq!(app.state, original_state);
+    assert_eq!(task.units(), 0);
+    let (width, height) = panel_button_size(&app.core, &app.state, &app.config);
+    assert_eq!(
+        app.core.applet.suggested_bounds,
+        Some(cosmic::iced::Size::new(width, height))
+    );
+    assert_eq!(app.shared_control.requests.len(), 1);
+    assert_eq!(app.shared_control.requests[0].provider, ProviderId::Copilot);
+    assert_eq!(
+        app.shared_control.requests[0].reason,
+        RefreshRequestReason::AccountAction
+    );
+    let requested = app.shared_control.clone();
+    app.core.applet.suggested_bounds = None;
+
+    let task = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+
+    assert_eq!(app.config, original_config);
+    assert_eq!(app.state, original_state);
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.shared_control, requested);
+    let (width, height) = applet_fallback_button_size(&app.core);
+    assert_eq!(
+        app.core.applet.suggested_bounds,
+        Some(cosmic::iced::Size::new(width, height))
+    );
+}
+
+#[test]
+fn panel_flag_message_requests_batch_safe_owner_refresh() {
+    let _env = crate::test_support::test_env();
+    let owner = refresh_owner("panel-flag-owner");
+    let mut app = test_app(Some(owner));
+    ready_two_copilot_accounts(&mut app);
+
+    let task = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+
+    assert!(task.units() > 0);
+    assert_eq!(app.config.panel_copilot_account_ids, ["b"]);
+    assert_eq!(app.config.selected_copilot_account_ids, ["a"]);
+    assert_eq!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .selected_account_ids,
+        ["a"]
+    );
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+    assert_eq!(app.refresh_batches.len(), 1);
+    assert_eq!(app.refresh_batches[0].pending_account_ids, ["a", "b"]);
+    let requested = app.shared_control.clone();
+
+    let task = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert!(app.config.panel_copilot_account_ids.is_empty());
+    assert_eq!(app.shared_control, requested);
+    assert_eq!(app.refresh_batches[0].pending_account_ids, ["a", "b"]);
+}
+
+#[test]
+fn panel_flag_message_preserves_demo_radio_selection() {
+    let mut env = crate::test_support::test_env();
+    env.set("YAPCAP_DEMO", "1");
+    let mut app = test_app(None);
+    crate::demo_env::apply_config(&mut app.config);
+    crate::demo_env::apply(&app.config, &mut app.state);
+    let selected_ids = app.config.selected_codex_account_ids.clone();
+    let state = app.state.clone();
+    let mut expected_flags = app.config.panel_codex_account_ids.clone();
+    expected_flags.push("yapcap-demo:codex-free".to_string());
+
+    let _ = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Codex,
+        "yapcap-demo:codex-free".to_string(),
+    ));
+
+    assert_eq!(app.config.panel_codex_account_ids, expected_flags);
+    assert_eq!(app.config.selected_codex_account_ids, selected_ids);
+    assert_eq!(app.state, state);
+}
+
+#[test]
+fn panel_flag_message_does_not_select_when_non_owner_selection_is_empty() {
+    let _env = crate::test_support::test_env();
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    app.config.selected_copilot_account_ids.clear();
+    app.state
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .selected_account_ids
+        .clear();
+
+    let _ = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+
+    assert_eq!(app.config.panel_copilot_account_ids, ["b"]);
+    assert!(app.config.selected_copilot_account_ids.is_empty());
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .selected_account_ids
+            .is_empty()
+    );
+    assert_eq!(
+        app.shared_control.requests[0].reason,
+        RefreshRequestReason::AccountAction
+    );
+}
+
+#[test]
+fn panel_flag_disable_clears_flags_and_reenable_does_not_restore_them() {
+    let _env = crate::test_support::test_env();
+    let mut app = test_app(None);
+    ready_two_copilot_accounts(&mut app);
+    app.config.panel_copilot_account_ids = vec!["a".to_string(), "b".to_string()];
+    app.config.panel_codex_account_ids = vec!["codex-1".to_string()];
+
+    let _ = app.handle_message(Message::SetProviderEnabled(ProviderId::Copilot, false));
+
+    assert!(app.config.panel_copilot_account_ids.is_empty());
+    assert_eq!(app.config.panel_codex_account_ids, ["codex-1"]);
+    assert!(!app.state.provider(ProviderId::Copilot).unwrap().enabled);
+    let disabled_config = app.config.clone();
+    let task = app.handle_message(Message::ToggleAccountPanelFlag(
+        ProviderId::Copilot,
+        "b".to_string(),
+    ));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.config, disabled_config);
+    assert!(app.shared_control.requests.is_empty());
+
+    let _ = app.handle_message(Message::SetProviderEnabled(ProviderId::Copilot, true));
+
+    assert!(app.state.provider(ProviderId::Copilot).unwrap().enabled);
+    assert!(app.config.panel_copilot_account_ids.is_empty());
+    assert_eq!(app.config.panel_codex_account_ids, ["codex-1"]);
+    assert_eq!(app.config.selected_copilot_account_ids, ["a"]);
 }
 
 #[test]
@@ -760,6 +1253,10 @@ fn applet_button_size_uses_panel_icon_style() {
 #[test]
 fn panel_button_size_stays_fixed_with_multiple_stored_accounts() {
     let core = cosmic::Core::default();
+    let mut config = Config {
+        panel_codex_account_ids: vec!["codex-1".to_string()],
+        ..Config::default()
+    };
     let mut one_account = AppState::empty();
     one_account.upsert_account(ProviderAccountRuntimeState::empty(
         ProviderId::Codex,
@@ -779,22 +1276,36 @@ fn panel_button_size_stays_fixed_with_multiple_stored_accounts() {
         PanelIconStyle::LogoAndPercent,
         PanelIconStyle::PercentOnly,
     ] {
+        config.panel_icon_style = style;
         assert_eq!(
-            panel_button_size(&core, &one_account, style),
-            panel_button_size(&core, &two_accounts, style)
+            panel_button_size(&core, &one_account, &config),
+            panel_button_size(&core, &two_accounts, &config)
+        );
+        assert_eq!(
+            panel_button_size(&core, &one_account, &config),
+            applet_button_size(&core, style)
         );
     }
 }
 
 #[test]
-fn panel_fallback_is_active_when_no_provider_has_accounts() {
+fn panel_cells_skip_unknown_flagged_accounts() {
     let state = AppState::empty();
+    let config = Config {
+        panel_codex_account_ids: vec!["unknown".to_string()],
+        ..Config::default()
+    };
 
-    assert!(panel_fallback_active(&state));
+    assert!(panel_cells(&state, &config).is_empty());
+    let core = cosmic::Core::default();
+    assert_eq!(
+        panel_button_size(&core, &state, &config),
+        applet_fallback_button_size(&core)
+    );
 }
 
 #[test]
-fn panel_fallback_clears_when_an_enabled_provider_has_an_account() {
+fn panel_cells_require_flags_even_when_accounts_are_selected() {
     let mut state = AppState::empty();
     state.upsert_account(ProviderAccountRuntimeState::empty(
         ProviderId::Codex,
@@ -802,11 +1313,26 @@ fn panel_fallback_clears_when_an_enabled_provider_has_an_account() {
         "Codex",
     ));
 
-    assert!(!panel_fallback_active(&state));
+    state
+        .provider_mut(ProviderId::Codex)
+        .unwrap()
+        .selected_account_ids = vec!["codex-1".to_string()];
+    let mut config = Config::default();
+    assert!(panel_cells(&state, &config).is_empty());
+    let core = cosmic::Core::default();
+    assert_eq!(
+        panel_button_size(&core, &state, &config),
+        applet_fallback_button_size(&core)
+    );
+
+    config.panel_codex_account_ids = vec!["codex-1".to_string()];
+    let cells = panel_cells(&state, &config);
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].layout, AppletBarLayout::two_bar(0.0, 0.0));
 }
 
 #[test]
-fn panel_fallback_stays_active_when_only_disabled_providers_have_accounts() {
+fn panel_cells_skip_disabled_providers() {
     let mut state = AppState::empty();
     state.upsert_provider(ProviderRuntimeState::disabled(ProviderId::Codex));
     state.upsert_account(ProviderAccountRuntimeState::empty(
@@ -815,17 +1341,96 @@ fn panel_fallback_stays_active_when_only_disabled_providers_have_accounts() {
         "Codex",
     ));
 
-    assert!(panel_fallback_active(&state));
+    let config = Config {
+        panel_codex_account_ids: vec!["codex-1".to_string()],
+        ..Config::default()
+    };
+    assert!(panel_cells(&state, &config).is_empty());
 }
 
 #[test]
-fn panel_fallback_stays_active_when_all_providers_are_disabled() {
+fn panel_cells_follow_provider_and_account_order_not_flag_order() {
     let mut state = AppState::empty();
-    for provider in &mut state.providers {
-        provider.enabled = false;
+    let mut config = Config::default();
+    for provider in ProviderId::ALL.into_iter().rev() {
+        for id in ["second", "first"] {
+            state.upsert_account(ProviderAccountRuntimeState::empty(provider, id, id));
+        }
+        *config.panel_account_ids_mut(provider) = vec![
+            "first".to_string(),
+            "unknown".to_string(),
+            "second".to_string(),
+            "first".to_string(),
+        ];
     }
 
-    assert!(panel_fallback_active(&state));
+    let cells = panel_cells(&state, &config);
+    let identities = cells
+        .iter()
+        .map(|cell| (cell.account.provider, cell.account.account_id.as_str()))
+        .collect::<Vec<_>>();
+    let expected = ProviderId::ALL
+        .into_iter()
+        .flat_map(|provider| [(provider, "second"), (provider, "first")])
+        .collect::<Vec<_>>();
+    assert_eq!(identities, expected);
+}
+
+#[test]
+fn panel_button_size_grows_with_flagged_accounts() {
+    let core = cosmic::Core::default();
+    let state = state_with_account_percents(&[30.0, 60.0, 90.0]);
+    let (major, minor) = core.applet.suggested_padding(false);
+    let padding = f32::from(
+        2 * if core.applet.is_horizontal() {
+            major
+        } else {
+            minor
+        },
+    );
+    for style in [
+        PanelIconStyle::LogoAndBars,
+        PanelIconStyle::BarsOnly,
+        PanelIconStyle::LogoAndPercent,
+        PanelIconStyle::PercentOnly,
+    ] {
+        let mut config = Config {
+            panel_icon_style: style,
+            ..Config::default()
+        };
+        let (single_width, height) = applet_button_size(&core, style);
+        let step = single_width - padding + super::APPLET_CELL_SPACING;
+        let mut expected_width = single_width;
+        for id in ["codex-0", "codex-1", "codex-2"] {
+            config.panel_codex_account_ids.push(id.to_string());
+            assert_eq!(
+                panel_button_size(&core, &state, &config),
+                (expected_width, height)
+            );
+            expected_width += step;
+        }
+    }
+}
+
+#[test]
+fn panel_suggested_bounds_track_flagged_cells_and_empty_fallback() {
+    let mut app = test_app(None);
+    app.state = state_with_account_percents(&[30.0, 60.0]);
+    app.config.panel_codex_account_ids = vec!["codex-0".to_string(), "codex-1".to_string()];
+    app.sync_panel_suggested_bounds();
+    let (width, height) = panel_button_size(&app.core, &app.state, &app.config);
+    assert_eq!(
+        app.core.applet.suggested_bounds,
+        Some(cosmic::iced::Size::new(width, height))
+    );
+
+    app.config.panel_codex_account_ids.clear();
+    app.sync_panel_suggested_bounds();
+    let (width, height) = applet_fallback_button_size(&app.core);
+    assert_eq!(
+        app.core.applet.suggested_bounds,
+        Some(cosmic::iced::Size::new(width, height))
+    );
 }
 
 #[test]
@@ -983,7 +1588,7 @@ fn applet_percent_text_uses_one_decimal_through_100_percent() {
 }
 
 #[test]
-fn selected_provider_bar_layout_uses_first_panel_window() {
+fn panel_cells_use_first_panel_window_and_global_amount_format() {
     let mut state = AppState::empty();
     let mut account = ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex");
     account.snapshot = Some(UsageSnapshot {
@@ -1020,13 +1625,17 @@ fn selected_provider_bar_layout_uses_first_panel_window() {
         .selected_account_ids = vec!["codex-1".to_string()];
     state.upsert_account(account);
 
-    let percents_used =
-        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used);
+    let mut config = Config {
+        panel_codex_account_ids: vec!["codex-1".to_string()],
+        usage_amount_format: UsageAmountFormat::Used,
+        ..Config::default()
+    };
+    let percents_used = panel_cells(&state, &config)[0].layout;
     assert_eq!(percents_used.primary, 86.5);
     assert_eq!(percents_used.secondary, Some(42.0));
 
-    let percents_left =
-        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Left);
+    config.usage_amount_format = UsageAmountFormat::Left;
+    let percents_left = panel_cells(&state, &config)[0].layout;
     assert_eq!(percents_left.primary, 13.5);
 }
 
@@ -1060,12 +1669,60 @@ fn applet_bar_layout_preserves_single_bar_shape() {
 }
 
 #[test]
-fn selected_provider_bar_layout_uses_only_the_active_account() {
+fn panel_cells_use_each_flagged_account_without_changing_popup_selection() {
     let state = state_with_account_percents(&[30.0, 90.0]);
+    let config = Config {
+        panel_codex_account_ids: vec!["codex-1".to_string(), "codex-0".to_string()],
+        usage_amount_format: UsageAmountFormat::Used,
+        ..Config::default()
+    };
 
-    let layout = selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used);
+    let cells = panel_cells(&state, &config);
 
-    assert_eq!(layout.primary, 30.0);
+    assert_eq!(cells[0].layout.primary, 30.0);
+    assert_eq!(cells[1].layout.primary, 90.0);
+    assert_eq!(
+        state.active_account(ProviderId::Codex).unwrap().account_id,
+        "codex-0"
+    );
+}
+
+#[test]
+fn panel_cells_fall_back_to_each_providers_legacy_snapshot() {
+    let mut state = state_with_account_percents(&[30.0, 90.0]);
+    let legacy = state.provider_accounts[1].snapshot.take();
+    state
+        .provider_mut(ProviderId::Codex)
+        .unwrap()
+        .legacy_display_snapshot = legacy;
+    let mut other_legacy = state.provider_accounts[0].snapshot.clone().unwrap();
+    other_legacy.provider = ProviderId::Minimax;
+    other_legacy.windows[0].used_percent = 60.0;
+    state
+        .provider_mut(ProviderId::Minimax)
+        .unwrap()
+        .legacy_display_snapshot = Some(other_legacy);
+    state.upsert_account(ProviderAccountRuntimeState::empty(
+        ProviderId::Minimax,
+        "minimax-0",
+        "Minimax",
+    ));
+    let config = Config {
+        panel_codex_account_ids: vec!["codex-0".to_string(), "codex-1".to_string()],
+        panel_minimax_account_ids: vec!["minimax-0".to_string()],
+        usage_amount_format: UsageAmountFormat::Used,
+        ..Config::default()
+    };
+
+    let cells = panel_cells(&state, &config);
+
+    assert_eq!(
+        cells
+            .iter()
+            .map(|cell| cell.layout.primary)
+            .collect::<Vec<_>>(),
+        [30.0, 90.0, 60.0]
+    );
 }
 
 fn state_with_account_percents(percents: &[f32]) -> AppState {
@@ -1130,6 +1787,8 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
             lock_path,
         },
         refresh_owner,
+        refresh_batches: Vec::new(),
+        next_refresh_batch_token: 1,
         codex_login: None,
         codex_login_handle: None,
         claude_login: None,
@@ -1167,6 +1826,55 @@ fn ready_selected_provider(state: &mut AppState, provider: ProviderId) {
     let entry = state.provider_mut(provider).unwrap();
     entry.account_status = AccountSelectionStatus::Ready;
     entry.selected_account_ids = vec!["default".to_string()];
+}
+
+fn ready_configured_copilot_provider(app: &mut AppModel) {
+    app.config.copilot_enablement = crate::config::ProviderEnablement::Enabled;
+    app.config.copilot_managed_accounts = vec![copilot_account("default", "octocat")];
+    app.config.selected_copilot_account_ids = vec!["default".to_string()];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+}
+
+fn ready_two_copilot_accounts(app: &mut AppModel) {
+    app.config.copilot_enablement = crate::config::ProviderEnablement::Enabled;
+    app.config.copilot_managed_accounts =
+        vec![copilot_account("a", "a"), copilot_account("b", "b")];
+    app.config.selected_copilot_account_ids = vec!["a".to_string()];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+}
+
+fn begin_test_batch(app: &mut AppModel, token: u64, account_ids: &[&str]) {
+    let started_at = app
+        .state
+        .begin_provider_refresh(ProviderId::Copilot)
+        .unwrap();
+    app.refresh_batches.push(super::ProviderRefreshBatch {
+        provider: ProviderId::Copilot,
+        token,
+        started_at,
+        pending_account_ids: account_ids.iter().map(|id| (*id).to_string()).collect(),
+        request: None,
+    });
+}
+
+fn refresh_result(
+    app: &AppModel,
+    token: u64,
+    account_id: &str,
+    label: &str,
+) -> crate::runtime::ProviderRefreshResult {
+    let mut account = app
+        .state
+        .account(ProviderId::Copilot, account_id)
+        .unwrap()
+        .clone();
+    account.label = label.to_string();
+    crate::runtime::ProviderRefreshResult {
+        batch_token: token,
+        account_id: account_id.to_string(),
+        provider: app.state.provider(ProviderId::Copilot).unwrap().clone(),
+        accounts: vec![account],
+    }
 }
 
 fn selected_account_without_usage(state: &mut AppState, provider: ProviderId) {

@@ -47,41 +47,63 @@ pub struct Config {
     #[serde(default)]
     pub grok_enablement: ProviderEnablement,
     pub selected_codex_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub selected_claude_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_claude_account_ids: Vec<String>,
     pub claude_managed_accounts: Vec<ManagedClaudeAccountConfig>,
     pub selected_cursor_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_cursor_account_ids: Vec<String>,
     pub cursor_managed_accounts: Vec<ManagedCursorAccountConfig>,
     #[serde(default)]
     pub selected_gemini_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_gemini_account_ids: Vec<String>,
     #[serde(default)]
     pub gemini_managed_accounts: Vec<ManagedGeminiAccountConfig>,
     #[serde(default)]
     pub selected_copilot_account_ids: Vec<String>,
     #[serde(default)]
+    pub panel_copilot_account_ids: Vec<String>,
+    #[serde(default)]
     pub copilot_managed_accounts: Vec<ManagedCopilotAccountConfig>,
     #[serde(default)]
     pub selected_minimax_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_minimax_account_ids: Vec<String>,
     #[serde(default)]
     pub minimax_managed_accounts: Vec<ManagedMinimaxAccountConfig>,
     #[serde(default)]
     pub selected_zai_account_ids: Vec<String>,
     #[serde(default)]
+    pub panel_zai_account_ids: Vec<String>,
+    #[serde(default)]
     pub zai_managed_accounts: Vec<ManagedZaiAccountConfig>,
     #[serde(default)]
     pub selected_kimi_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_kimi_account_ids: Vec<String>,
     #[serde(default)]
     pub kimi_managed_accounts: Vec<ManagedKimiAccountConfig>,
     #[serde(default)]
     pub selected_antigravity_account_ids: Vec<String>,
     #[serde(default)]
+    pub panel_antigravity_account_ids: Vec<String>,
+    #[serde(default)]
     pub antigravity_managed_accounts: Vec<ManagedAntigravityAccountConfig>,
     #[serde(default)]
     pub selected_opencode_go_account_ids: Vec<String>,
     #[serde(default)]
+    pub panel_opencode_go_account_ids: Vec<String>,
+    #[serde(default)]
     pub opencode_go_managed_accounts: Vec<ManagedOpenCodeGoAccountConfig>,
     #[serde(default)]
     pub selected_grok_account_ids: Vec<String>,
+    #[serde(default)]
+    pub panel_grok_account_ids: Vec<String>,
     #[serde(default)]
     pub grok_managed_accounts: Vec<ManagedGrokAccountConfig>,
     pub log_level: String,
@@ -108,26 +130,37 @@ impl Default for Config {
             opencode_go_enablement: ProviderEnablement::Auto,
             grok_enablement: ProviderEnablement::Auto,
             selected_codex_account_ids: Vec::new(),
+            panel_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
             selected_claude_account_ids: Vec::new(),
+            panel_claude_account_ids: Vec::new(),
             claude_managed_accounts: Vec::new(),
             selected_cursor_account_ids: Vec::new(),
+            panel_cursor_account_ids: Vec::new(),
             cursor_managed_accounts: Vec::new(),
             selected_gemini_account_ids: Vec::new(),
+            panel_gemini_account_ids: Vec::new(),
             gemini_managed_accounts: Vec::new(),
             selected_copilot_account_ids: Vec::new(),
+            panel_copilot_account_ids: Vec::new(),
             copilot_managed_accounts: Vec::new(),
             selected_minimax_account_ids: Vec::new(),
+            panel_minimax_account_ids: Vec::new(),
             minimax_managed_accounts: Vec::new(),
             selected_zai_account_ids: Vec::new(),
+            panel_zai_account_ids: Vec::new(),
             zai_managed_accounts: Vec::new(),
             selected_kimi_account_ids: Vec::new(),
+            panel_kimi_account_ids: Vec::new(),
             kimi_managed_accounts: Vec::new(),
             selected_antigravity_account_ids: Vec::new(),
+            panel_antigravity_account_ids: Vec::new(),
             antigravity_managed_accounts: Vec::new(),
             selected_opencode_go_account_ids: Vec::new(),
+            panel_opencode_go_account_ids: Vec::new(),
             opencode_go_managed_accounts: Vec::new(),
             selected_grok_account_ids: Vec::new(),
+            panel_grok_account_ids: Vec::new(),
             grok_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
@@ -197,6 +230,39 @@ impl Config {
         }
     }
 
+    #[must_use]
+    pub fn panel_account_ids(&self, provider: ProviderId) -> &[String] {
+        match provider {
+            ProviderId::Codex => &self.panel_codex_account_ids,
+            ProviderId::Claude => &self.panel_claude_account_ids,
+            ProviderId::Cursor => &self.panel_cursor_account_ids,
+            ProviderId::Gemini => &self.panel_gemini_account_ids,
+            ProviderId::Copilot => &self.panel_copilot_account_ids,
+            ProviderId::Minimax => &self.panel_minimax_account_ids,
+            ProviderId::Zai => &self.panel_zai_account_ids,
+            ProviderId::Kimi => &self.panel_kimi_account_ids,
+            ProviderId::Antigravity => &self.panel_antigravity_account_ids,
+            ProviderId::OpenCodeGo => &self.panel_opencode_go_account_ids,
+            ProviderId::Grok => &self.panel_grok_account_ids,
+        }
+    }
+
+    pub fn panel_account_ids_mut(&mut self, provider: ProviderId) -> &mut Vec<String> {
+        match provider {
+            ProviderId::Codex => &mut self.panel_codex_account_ids,
+            ProviderId::Claude => &mut self.panel_claude_account_ids,
+            ProviderId::Cursor => &mut self.panel_cursor_account_ids,
+            ProviderId::Gemini => &mut self.panel_gemini_account_ids,
+            ProviderId::Copilot => &mut self.panel_copilot_account_ids,
+            ProviderId::Minimax => &mut self.panel_minimax_account_ids,
+            ProviderId::Zai => &mut self.panel_zai_account_ids,
+            ProviderId::Kimi => &mut self.panel_kimi_account_ids,
+            ProviderId::Antigravity => &mut self.panel_antigravity_account_ids,
+            ProviderId::OpenCodeGo => &mut self.panel_opencode_go_account_ids,
+            ProviderId::Grok => &mut self.panel_grok_account_ids,
+        }
+    }
+
     pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> bool {
         let enablement = provider_enablement_mut(self, provider);
         let explicit = if enabled {
@@ -236,6 +302,25 @@ pub fn migrate_provider_enablement(context: &cosmic_config::Config, config: &mut
     migrated
 }
 
+pub fn migrate_panel_account_flags(context: &cosmic_config::Config, config: &mut Config) -> bool {
+    let mut migrated = false;
+    for provider in ProviderId::ALL {
+        let key = panel_account_ids_key(provider);
+        if !matches!(
+            context.get::<Vec<String>>(key),
+            Err(cosmic_config::Error::NotFound | cosmic_config::Error::NoConfigDirectory)
+        ) {
+            continue;
+        }
+        let account_ids = config.selected_account_ids(provider).to_vec();
+        if context.set(key, account_ids.clone()).is_ok() {
+            *config.panel_account_ids_mut(provider) = account_ids;
+            migrated = true;
+        }
+    }
+    migrated
+}
+
 fn provider_enabled_key(provider: ProviderId) -> &'static str {
     match provider {
         ProviderId::Codex => "codex_enabled",
@@ -265,6 +350,22 @@ fn provider_enablement_key(provider: ProviderId) -> &'static str {
         ProviderId::Antigravity => "antigravity_enablement",
         ProviderId::OpenCodeGo => "opencode_go_enablement",
         ProviderId::Grok => "grok_enablement",
+    }
+}
+
+fn panel_account_ids_key(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::Codex => "panel_codex_account_ids",
+        ProviderId::Claude => "panel_claude_account_ids",
+        ProviderId::Cursor => "panel_cursor_account_ids",
+        ProviderId::Gemini => "panel_gemini_account_ids",
+        ProviderId::Copilot => "panel_copilot_account_ids",
+        ProviderId::Minimax => "panel_minimax_account_ids",
+        ProviderId::Zai => "panel_zai_account_ids",
+        ProviderId::Kimi => "panel_kimi_account_ids",
+        ProviderId::Antigravity => "panel_antigravity_account_ids",
+        ProviderId::OpenCodeGo => "panel_opencode_go_account_ids",
+        ProviderId::Grok => "panel_grok_account_ids",
     }
 }
 
@@ -540,27 +641,38 @@ pub fn write_changed_config_entries(
         antigravity_enablement,
         opencode_go_enablement,
         selected_codex_account_ids,
+        panel_codex_account_ids,
         codex_managed_accounts,
         selected_claude_account_ids,
+        panel_claude_account_ids,
         claude_managed_accounts,
         selected_cursor_account_ids,
+        panel_cursor_account_ids,
         cursor_managed_accounts,
         selected_gemini_account_ids,
+        panel_gemini_account_ids,
         gemini_managed_accounts,
         selected_copilot_account_ids,
+        panel_copilot_account_ids,
         copilot_managed_accounts,
         selected_minimax_account_ids,
+        panel_minimax_account_ids,
         minimax_managed_accounts,
         selected_zai_account_ids,
+        panel_zai_account_ids,
         zai_managed_accounts,
         selected_kimi_account_ids,
+        panel_kimi_account_ids,
         kimi_managed_accounts,
         selected_antigravity_account_ids,
+        panel_antigravity_account_ids,
         antigravity_managed_accounts,
         selected_opencode_go_account_ids,
+        panel_opencode_go_account_ids,
         opencode_go_managed_accounts,
         grok_enablement,
         selected_grok_account_ids,
+        panel_grok_account_ids,
         grok_managed_accounts,
         log_level,
     } = new;
@@ -591,26 +703,37 @@ pub fn write_changed_config_entries(
     set_changed!(opencode_go_enablement);
     set_changed!(grok_enablement);
     set_changed!(selected_codex_account_ids);
+    set_changed!(panel_codex_account_ids);
     set_changed!(codex_managed_accounts);
     set_changed!(selected_claude_account_ids);
+    set_changed!(panel_claude_account_ids);
     set_changed!(claude_managed_accounts);
     set_changed!(selected_cursor_account_ids);
+    set_changed!(panel_cursor_account_ids);
     set_changed!(cursor_managed_accounts);
     set_changed!(selected_gemini_account_ids);
+    set_changed!(panel_gemini_account_ids);
     set_changed!(gemini_managed_accounts);
     set_changed!(selected_copilot_account_ids);
+    set_changed!(panel_copilot_account_ids);
     set_changed!(copilot_managed_accounts);
     set_changed!(selected_minimax_account_ids);
+    set_changed!(panel_minimax_account_ids);
     set_changed!(minimax_managed_accounts);
     set_changed!(selected_zai_account_ids);
+    set_changed!(panel_zai_account_ids);
     set_changed!(zai_managed_accounts);
     set_changed!(selected_kimi_account_ids);
+    set_changed!(panel_kimi_account_ids);
     set_changed!(kimi_managed_accounts);
     set_changed!(selected_antigravity_account_ids);
+    set_changed!(panel_antigravity_account_ids);
     set_changed!(antigravity_managed_accounts);
     set_changed!(selected_opencode_go_account_ids);
+    set_changed!(panel_opencode_go_account_ids);
     set_changed!(opencode_go_managed_accounts);
     set_changed!(selected_grok_account_ids);
+    set_changed!(panel_grok_account_ids);
     set_changed!(grok_managed_accounts);
     set_changed!(log_level);
 
@@ -830,6 +953,47 @@ mod tests {
     }
 
     #[test]
+    fn panel_account_flags_migrate_selected_ids_when_keys_are_absent() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let mut config = Config {
+            selected_codex_account_ids: vec!["codex-selected".to_string()],
+            ..Config::default()
+        };
+
+        assert!(migrate_panel_account_flags(&ctx, &mut config));
+        assert_eq!(config.panel_codex_account_ids, ["codex-selected"]);
+        assert_eq!(
+            ctx.get::<Vec<String>>("panel_codex_account_ids").unwrap(),
+            ["codex-selected"]
+        );
+        for provider in ProviderId::ALL {
+            assert_eq!(
+                ctx.get::<Vec<String>>(panel_account_ids_key(provider))
+                    .unwrap(),
+                config.panel_account_ids(provider)
+            );
+        }
+    }
+
+    #[test]
+    fn panel_account_flags_migration_preserves_present_empty_lists() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let mut config = Config::default();
+        assert!(migrate_panel_account_flags(&ctx, &mut config));
+
+        config.selected_codex_account_ids = vec!["codex-selected".to_string()];
+        config.panel_codex_account_ids.clear();
+
+        assert!(!migrate_panel_account_flags(&ctx, &mut config));
+        assert!(config.panel_codex_account_ids.is_empty());
+        assert!(
+            ctx.get::<Vec<String>>("panel_codex_account_ids")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn write_changed_config_entries_persists_only_changed_fields() {
         let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
         let old = Config::default();
@@ -843,6 +1007,7 @@ mod tests {
         new.refresh_interval_seconds = old.refresh_interval_seconds + 60;
         new.kimi_enablement = ProviderEnablement::Enabled;
         new.selected_kimi_account_ids = vec!["kimi-test".to_string()];
+        new.panel_kimi_account_ids = vec!["kimi-panel-test".to_string()];
         new.zai_enablement = ProviderEnablement::Enabled;
         new.selected_zai_account_ids = vec!["zai-test".to_string()];
         let now = Utc::now();
@@ -927,6 +1092,21 @@ mod tests {
         assert_eq!(config.zai_enablement, ProviderEnablement::Auto);
         assert!(config.selected_zai_account_ids.is_empty());
         assert!(config.zai_managed_accounts.is_empty());
+    }
+
+    #[test]
+    fn missing_panel_account_ids_default_for_existing_config() {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for provider in ProviderId::ALL {
+            object.remove(panel_account_ids_key(provider));
+        }
+
+        let config: Config = serde_json::from_value(value).unwrap();
+
+        for provider in ProviderId::ALL {
+            assert!(config.panel_account_ids(provider).is_empty());
+        }
     }
 
     #[test]

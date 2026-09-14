@@ -97,6 +97,11 @@ pub fn apply_config(config: &mut Config) {
     config.selected_opencode_go_account_ids = vec![OPENCODE_GO_ID.to_string()];
     config.selected_grok_account_ids = vec![GROK_PRIMARY_ID.to_string()];
     config.selected_zai_account_ids = vec![ZAI_PRIMARY_ID.to_string()];
+
+    for provider in ProviderId::ALL {
+        let selected_ids = config.selected_account_ids(provider).to_vec();
+        *config.panel_account_ids_mut(provider) = selected_ids;
+    }
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -126,6 +131,9 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.grok_managed_accounts, |account| &account.id);
     changed |= strip_ids(&mut config.selected_zai_account_ids);
     changed |= retain_len_changed(&mut config.zai_managed_accounts, |account| &account.id);
+    for provider in ProviderId::ALL {
+        changed |= strip_ids(config.panel_account_ids_mut(provider));
+    }
     changed
 }
 
@@ -1377,6 +1385,12 @@ mod tests {
         assert_eq!(config.selected_zai_account_ids.len(), 1);
         for provider in ProviderId::ALL {
             assert_eq!(
+                config.panel_account_ids(provider),
+                config.selected_account_ids(provider)
+            );
+        }
+        for provider in ProviderId::ALL {
+            assert_eq!(
                 config.provider_enablement(provider),
                 ProviderEnablement::Enabled
             );
@@ -1418,6 +1432,7 @@ mod tests {
                 "{} should have demo accounts selected",
                 provider.label()
             );
+            assert_eq!(config.panel_account_ids(provider), selected);
             let managed_ids: Vec<&String> = match provider {
                 ProviderId::Codex => config
                     .codex_managed_accounts
@@ -1820,6 +1835,7 @@ mod tests {
     fn strip_leaked_state_removes_zai_demo_ids() {
         let mut config = Config {
             selected_zai_account_ids: vec![ZAI_PRIMARY_ID.to_string(), "real-zai".to_string()],
+            panel_zai_account_ids: vec![ZAI_PRIMARY_ID.to_string(), "real-zai".to_string()],
             zai_managed_accounts: demo_zai_accounts(),
             ..Config::default()
         };
@@ -1829,6 +1845,7 @@ mod tests {
             config.selected_zai_account_ids,
             vec!["real-zai".to_string()]
         );
+        assert_eq!(config.panel_zai_account_ids, vec!["real-zai".to_string()]);
         assert!(config.zai_managed_accounts.is_empty());
     }
 

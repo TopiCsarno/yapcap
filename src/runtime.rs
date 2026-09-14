@@ -22,6 +22,8 @@ const DEBUG_OFFLINE_PROXY: &str = "http://127.0.0.1:9";
 
 #[derive(Debug, Clone)]
 pub struct ProviderRefreshResult {
+    pub batch_token: u64,
+    pub account_id: String,
     pub provider: ProviderRuntimeState,
     pub accounts: Vec<ProviderAccountRuntimeState>,
 }
@@ -44,6 +46,10 @@ pub fn load_initial_state(
             AppState::empty()
         }
     };
+    for provider in &mut state.providers {
+        provider.is_refreshing = false;
+        provider.refresh_started_at = None;
+    }
     reconcile_state(config, detection, &mut state);
     state
 }
@@ -142,7 +148,7 @@ pub(crate) const REFRESH_STALE_AFTER_SECS: i64 = 60;
 
 const STALE_REFRESH_MESSAGE: &str = "Refresh timed out";
 
-pub fn resolve_stale_refreshes(state: &mut AppState) -> bool {
+pub fn resolve_stale_refreshes(state: &mut AppState) -> Vec<ProviderId> {
     let now = Utc::now();
     let stale = chrono::Duration::seconds(REFRESH_STALE_AFTER_SECS);
     let mut stale_providers = Vec::new();
@@ -177,7 +183,10 @@ pub fn resolve_stale_refreshes(state: &mut AppState) -> bool {
             account.retry_after = Some(now + chrono::Duration::seconds(backoff.cast_signed()));
         }
     }
-    !stale_providers.is_empty()
+    stale_providers
+        .into_iter()
+        .map(|(provider, _)| provider)
+        .collect()
 }
 
 pub(crate) fn classify_auth_state(error: &AppError) -> AuthState {
@@ -196,15 +205,26 @@ pub async fn refresh_provider_account_statuses(
     providers::registry::refresh_account_statuses(provider, config, previous_accounts).await
 }
 
-pub async fn refresh_account(
-    config: Config,
-    provider: ProviderId,
-    enabled: bool,
-    account_id: String,
-    previous: Option<ProviderRuntimeState>,
-    previous_accounts: Vec<ProviderAccountRuntimeState>,
-    process: Option<RefreshProcessContext>,
-) -> ProviderRefreshResult {
+pub struct RefreshAccountInput {
+    pub provider: ProviderId,
+    pub enabled: bool,
+    pub account_id: String,
+    pub batch_token: u64,
+    pub previous: Option<ProviderRuntimeState>,
+    pub previous_accounts: Vec<ProviderAccountRuntimeState>,
+    pub process: Option<RefreshProcessContext>,
+}
+
+pub async fn refresh_account(config: Config, input: RefreshAccountInput) -> ProviderRefreshResult {
+    let RefreshAccountInput {
+        provider,
+        enabled,
+        account_id,
+        batch_token,
+        previous,
+        previous_accounts,
+        process,
+    } = input;
     tracing::info!(
         process_id = process
             .as_ref()
@@ -221,12 +241,14 @@ pub async fn refresh_account(
     let client = http_client();
     let accounts = providers::registry::discover_accounts(provider, &config);
 
-    let Some(account) = accounts
-        .iter()
-        .find(|a| a.account_id == account_id)
-        .or_else(|| accounts.first())
-    else {
-        return no_provider_accounts(provider, enabled, previous.as_ref());
+    let Some(account) = accounts.iter().find(|a| a.account_id == account_id) else {
+        return no_provider_accounts(
+            provider,
+            account_id,
+            batch_token,
+            enabled,
+            previous.as_ref(),
+        );
     };
 
     let account = account.clone();
@@ -250,16 +272,28 @@ pub async fn refresh_account(
         },
     )
     .await
+    .with_batch(batch_token)
 }
 
 fn no_provider_accounts(
     provider: ProviderId,
+    account_id: String,
+    batch_token: u64,
     enabled: bool,
     previous: Option<&ProviderRuntimeState>,
 ) -> ProviderRefreshResult {
     ProviderRefreshResult {
+        batch_token,
+        account_id,
         provider: not_ready_provider(provider, enabled, previous),
         accounts: Vec::new(),
+    }
+}
+
+impl ProviderRefreshResult {
+    fn with_batch(mut self, batch_token: u64) -> Self {
+        self.batch_token = batch_token;
+        self
     }
 }
 
@@ -302,6 +336,8 @@ where
             "provider refresh skipped because provider is disabled"
         );
         return ProviderRefreshResult {
+            batch_token: 0,
+            account_id,
             provider: ProviderRuntimeState::disabled(provider),
             accounts: Vec::new(),
         };
@@ -312,10 +348,8 @@ where
         .unwrap_or_else(|| ProviderRuntimeState::empty(provider));
     state.provider = provider;
     state.enabled = true;
-    state.is_refreshing = true;
-    if !state.selected_account_ids.contains(&account_id) {
-        state.selected_account_ids.push(account_id.clone());
-    }
+    state.is_refreshing = false;
+    state.refresh_started_at = None;
     state.account_status = AccountSelectionStatus::Ready;
     state.error = None;
 
@@ -331,8 +365,6 @@ where
                 source = source_label.as_str(),
                 "provider refresh succeeded"
             );
-            state.is_refreshing = false;
-            state.refresh_started_at = None;
             state.error = None;
             account.health = ProviderHealth::Ok;
             account.auth_state = AuthState::Ready;
@@ -369,8 +401,6 @@ where
                 );
             }
             let user_message = error.user_message();
-            state.is_refreshing = false;
-            state.refresh_started_at = None;
             if providers::registry::auth_error_requires_reauth_prompt(provider)
                 && error.requires_user_action()
             {
@@ -392,6 +422,8 @@ where
     }
 
     ProviderRefreshResult {
+        batch_token: 0,
+        account_id: account.account_id.clone(),
         provider: state,
         accounts: vec![account],
     }
@@ -402,7 +434,7 @@ pub fn reconcile_state(
     detection: &crate::detection::DetectionSnapshot,
     state: &mut AppState,
 ) {
-    reconcile_state_with_refresh(config, detection, state, false);
+    reconcile_state_with_refresh(config, detection, state, true);
 }
 
 pub fn reconcile_shared_state(
@@ -449,8 +481,6 @@ pub fn reconcile_provider(
     providers::registry::reconcile_provider_accounts(provider, config, state);
     if let Some(entry) = state.provider_mut(provider) {
         entry.enabled = crate::provider_enablement::provider_enabled(config, detection, provider);
-        entry.is_refreshing = false;
-        entry.refresh_started_at = None;
         if !entry.enabled {
             entry.account_status = AccountSelectionStatus::Unavailable;
             entry.selected_account_ids = Vec::new();
@@ -755,7 +785,7 @@ mod tests {
     fn resolve_stale_refreshes_resolves_orphaned_refresh() {
         let mut state = state_with_refreshing_provider(None);
 
-        assert!(resolve_stale_refreshes(&mut state));
+        assert_eq!(resolve_stale_refreshes(&mut state), vec![ProviderId::Codex]);
 
         let provider = state.provider(ProviderId::Codex).unwrap();
         assert!(!provider.is_refreshing);
@@ -773,7 +803,7 @@ mod tests {
     fn resolve_stale_refreshes_ignores_fresh_refresh() {
         let mut state = state_with_refreshing_provider(Some(Utc::now()));
 
-        assert!(!resolve_stale_refreshes(&mut state));
+        assert!(resolve_stale_refreshes(&mut state).is_empty());
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
@@ -798,6 +828,46 @@ mod tests {
         assert!(account.last_success_at.is_some());
         assert!(!result.provider.is_refreshing);
         assert!(result.provider.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_provider_does_not_adopt_non_selected_account() {
+        let mut previous = ProviderRuntimeState::empty(ProviderId::Codex);
+        previous.selected_account_ids = vec!["codex-1".to_string()];
+
+        let result = refresh_provider_account(
+            ProviderId::Codex,
+            true,
+            Some(&previous),
+            None,
+            "codex-2".to_string(),
+            "Codex 2".to_string(),
+            async { Ok(("OAuth".to_string(), snapshot())) },
+        )
+        .await;
+
+        assert_eq!(
+            result.provider.selected_account_ids,
+            vec!["codex-1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_provider_does_not_adopt_account_when_selection_is_empty() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Codex);
+
+        let result = refresh_provider_account(
+            ProviderId::Codex,
+            true,
+            Some(&previous),
+            None,
+            "codex-2".to_string(),
+            "Codex 2".to_string(),
+            async { Ok(("OAuth".to_string(), snapshot())) },
+        )
+        .await;
+
+        assert!(result.provider.selected_account_ids.is_empty());
     }
 
     #[tokio::test]
@@ -1059,10 +1129,7 @@ mod tests {
             result.provider.account_status,
             AccountSelectionStatus::LoginRequired
         );
-        assert_eq!(
-            result.provider.selected_account_ids.as_slice(),
-            ["cursor-managed:user@example.com"]
-        );
+        assert!(result.provider.selected_account_ids.is_empty());
         assert_eq!(result.provider.error.as_deref(), Some("Login required"));
         assert_eq!(account.auth_state, AuthState::ActionRequired);
         assert_eq!(account.health, ProviderHealth::Error);

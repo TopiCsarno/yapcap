@@ -55,11 +55,17 @@ impl Config {
             "selected_codex_account_ids" => {
                 self.selected_codex_account_ids = update.selected_codex_account_ids.clone();
             }
+            "panel_codex_account_ids" => {
+                self.panel_codex_account_ids = update.panel_codex_account_ids.clone();
+            }
             "codex_managed_accounts" => {
                 self.codex_managed_accounts = update.codex_managed_accounts.clone();
             }
             "selected_claude_account_ids" => {
                 self.selected_claude_account_ids = update.selected_claude_account_ids.clone();
+            }
+            "panel_claude_account_ids" => {
+                self.panel_claude_account_ids = update.panel_claude_account_ids.clone();
             }
             "claude_managed_accounts" => {
                 self.claude_managed_accounts = update.claude_managed_accounts.clone();
@@ -67,11 +73,17 @@ impl Config {
             "selected_cursor_account_ids" => {
                 self.selected_cursor_account_ids = update.selected_cursor_account_ids.clone();
             }
+            "panel_cursor_account_ids" => {
+                self.panel_cursor_account_ids = update.panel_cursor_account_ids.clone();
+            }
             "cursor_managed_accounts" => {
                 self.cursor_managed_accounts = update.cursor_managed_accounts.clone();
             }
             "selected_gemini_account_ids" => {
                 self.selected_gemini_account_ids = update.selected_gemini_account_ids.clone();
+            }
+            "panel_gemini_account_ids" => {
+                self.panel_gemini_account_ids = update.panel_gemini_account_ids.clone();
             }
             "gemini_managed_accounts" => {
                 self.gemini_managed_accounts = update.gemini_managed_accounts.clone();
@@ -79,11 +91,17 @@ impl Config {
             "selected_copilot_account_ids" => {
                 self.selected_copilot_account_ids = update.selected_copilot_account_ids.clone();
             }
+            "panel_copilot_account_ids" => {
+                self.panel_copilot_account_ids = update.panel_copilot_account_ids.clone();
+            }
             "copilot_managed_accounts" => {
                 self.copilot_managed_accounts = update.copilot_managed_accounts.clone();
             }
             "selected_minimax_account_ids" => {
                 self.selected_minimax_account_ids = update.selected_minimax_account_ids.clone();
+            }
+            "panel_minimax_account_ids" => {
+                self.panel_minimax_account_ids = update.panel_minimax_account_ids.clone();
             }
             "minimax_managed_accounts" => {
                 self.minimax_managed_accounts = update.minimax_managed_accounts.clone();
@@ -91,11 +109,17 @@ impl Config {
             "selected_zai_account_ids" => {
                 self.selected_zai_account_ids = update.selected_zai_account_ids.clone();
             }
+            "panel_zai_account_ids" => {
+                self.panel_zai_account_ids = update.panel_zai_account_ids.clone();
+            }
             "zai_managed_accounts" => {
                 self.zai_managed_accounts = update.zai_managed_accounts.clone();
             }
             "selected_kimi_account_ids" => {
                 self.selected_kimi_account_ids = update.selected_kimi_account_ids.clone();
+            }
+            "panel_kimi_account_ids" => {
+                self.panel_kimi_account_ids = update.panel_kimi_account_ids.clone();
             }
             "kimi_managed_accounts" => {
                 self.kimi_managed_accounts = update.kimi_managed_accounts.clone();
@@ -104,6 +128,9 @@ impl Config {
                 self.selected_antigravity_account_ids =
                     update.selected_antigravity_account_ids.clone();
             }
+            "panel_antigravity_account_ids" => {
+                self.panel_antigravity_account_ids = update.panel_antigravity_account_ids.clone();
+            }
             "antigravity_managed_accounts" => {
                 self.antigravity_managed_accounts = update.antigravity_managed_accounts.clone();
             }
@@ -111,11 +138,17 @@ impl Config {
                 self.selected_opencode_go_account_ids =
                     update.selected_opencode_go_account_ids.clone();
             }
+            "panel_opencode_go_account_ids" => {
+                self.panel_opencode_go_account_ids = update.panel_opencode_go_account_ids.clone();
+            }
             "opencode_go_managed_accounts" => {
                 self.opencode_go_managed_accounts = update.opencode_go_managed_accounts.clone();
             }
             "selected_grok_account_ids" => {
                 self.selected_grok_account_ids = update.selected_grok_account_ids.clone();
+            }
+            "panel_grok_account_ids" => {
+                self.panel_grok_account_ids = update.panel_grok_account_ids.clone();
             }
             "grok_managed_accounts" => {
                 self.grok_managed_accounts = update.grok_managed_accounts.clone();
@@ -208,6 +241,7 @@ mod tests {
             codex_enablement: ProviderEnablement::Disabled,
             zai_enablement: ProviderEnablement::Enabled,
             selected_zai_account_ids: vec!["zai-1".to_string()],
+            panel_zai_account_ids: vec!["zai-panel-1".to_string()],
             zai_managed_accounts: vec![ManagedZaiAccountConfig {
                 id: "zai-1".to_string(),
                 label: "Z.AI Coding Plan".to_string(),
@@ -224,12 +258,14 @@ mod tests {
             &[
                 "zai_enablement",
                 "selected_zai_account_ids",
+                "panel_zai_account_ids",
                 "zai_managed_accounts",
             ],
         );
 
         assert_eq!(config.zai_enablement, ProviderEnablement::Enabled);
         assert_eq!(config.selected_zai_account_ids, ["zai-1"]);
+        assert_eq!(config.panel_zai_account_ids, ["zai-panel-1"]);
         assert_eq!(config.zai_managed_accounts[0].id, "zai-1");
         assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
     }

@@ -34,7 +34,7 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Kimi for Coding** — API key usage tracking with weekly and rate-limit windows
     - **OpenCode Go** — API key usage tracking with 5-hour, weekly, and monthly windows
     - **Grok** — subscription usage shown as a weekly window + available prepaid credits
-- 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time, while the panel remains fixed-width for the active account.
+- 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time, while accounts marked for panel visibility can appear side-by-side as compact panel cells.
 - 🔎 **Automatic discovery** — detected providers appear automatically, provider availability updates live, and an empty setup opens Manage providers. Gemini remains opt-in and must be enabled manually.
 - 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, and OpenCode Go; Cursor scans the local IDE state.
 - 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, and OpenCode Go forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
@@ -183,8 +183,16 @@ just install
 Each provider supports multiple accounts. Select its popup tab and open **Manage accounts** on the account card, or use the setup action when no account has been added yet.
 
 - **Add account** — starts Codex, Claude, Antigravity, Gemini, or Grok browser OAuth, GitHub Copilot device login, Minimax/Z.AI/Kimi/OpenCode Go API-key entry, or Cursor IDE scanning. Claude asks you to paste the browser's authorization code back into YapCap. Grok also offers explicit import from the Grok CLI.
-- **Switch account** — select an account row or use the account card's arrows; the panel and popup follow that selection. This does not switch the host tool's account or its Active badge.
+- **Switch account** — select an account row or use the account card's arrows to change the active account shown in the popup. This does not switch the host tool's account or its Active badge.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
+
+To show accounts in the COSMIC panel, open **Settings → Accounts** and enable
+**Show this account in the panel** for each account you want to display. Each
+marked account appears as a compact cell beside the others. Panel visibility
+is separate from the active account radio selection: the radio selection
+controls the active account and popup, while the per-account toggle controls
+which accounts appear in the panel. If no accounts are selected, the panel
+shows the YapCap app icon.
 
 Codex, Claude, Cursor, Antigravity, and Gemini keep at most one account per provider identity. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username. Minimax, Z.AI, Kimi, and OpenCode Go use unique user-provided labels and reject duplicate API keys.
 

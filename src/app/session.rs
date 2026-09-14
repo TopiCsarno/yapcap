@@ -13,6 +13,7 @@ pub(super) fn delete_account(
         deleted = registry::delete_account(provider, account_id, new_config);
         if deleted {
             registry::sync_selected_ids_with_discoveries(new_config, provider);
+            registry::sync_panel_ids_with_discoveries(new_config, provider);
         }
     });
     if !deleted {
@@ -223,6 +224,22 @@ mod tests {
             let task = delete_account(&mut app, provider, "does-not-exist");
             assert_eq!(task.units(), 0, "{provider:?} should not schedule work");
         }
+    }
+
+    #[test]
+    fn delete_account_prunes_selected_and_panel_ids() {
+        let _env = crate::test_support::test_env();
+        let mut app = test_app();
+        app.config.codex_managed_accounts.push(codex_account());
+        app.config.selected_codex_account_ids = vec!["codex-1".to_string()];
+        app.config.panel_codex_account_ids = vec!["codex-1".to_string()];
+
+        let task = delete_account(&mut app, ProviderId::Codex, "codex-1");
+
+        assert_eq!(task.units(), 0);
+        assert!(app.config.codex_managed_accounts.is_empty());
+        assert!(app.config.selected_codex_account_ids.is_empty());
+        assert!(app.config.panel_codex_account_ids.is_empty());
     }
 
     #[test]

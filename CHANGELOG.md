@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added per-account COSMIC panel visibility, with marked accounts displayed
+  side-by-side as compact panel cells.
 - Added Grok subscription usage tracking with browser OAuth, explicit Grok CLI
   credential import/restore, managed accounts, and host Active matching.
 - Added Z.AI Coding Plan usage tracking with managed API keys, five-hour, weekly,

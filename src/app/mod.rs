@@ -16,16 +16,13 @@ mod tests;
 mod window;
 
 pub(crate) use self::applet::applet_settings;
-use self::applet::{
-    applet_button, applet_fallback_indicator, applet_indicator, panel_button_size,
-    panel_fallback_active, select_provider,
-};
+use self::applet::{applet_button, panel_button_size, panel_indicator, select_provider};
 use self::popup_view::ProviderLoginStates;
 use self::provider_assets::{provider_icon_handle, provider_icon_variant};
 use self::refresh::{
-    RefreshSkipDiagnostics, automatic_refresh_provider_tasks_for_process,
-    refresh_provider_account_statuses_task, refresh_provider_task_for_process,
-    selected_account_refresh_due,
+    eligible_flagged_refresh_account_ids, eligible_refresh_account_ids, provider_refresh_due,
+    reconcile_host_active_accounts, refresh_provider_account_statuses_task,
+    refresh_provider_task_for_process,
 };
 use self::window::{
     format_retry_delay, open_url, update_check_task, update_retry_delay, update_retry_task,
@@ -83,6 +80,7 @@ use std::time::Duration;
 const AUTOMATIC_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
+const APPLET_CELL_SPACING: f32 = 6.0;
 const APPLET_PERCENT_GLYPH_WIDTH: f32 = 7.25;
 const APPLET_PERCENT_CELL_HORIZONTAL_PAD: f32 = 8.0;
 const UPDATE_RETRY_INITIAL_SECS: u64 = 15;
@@ -116,6 +114,8 @@ pub struct AppModel {
     shared_control: SharedControlState,
     process_info: ProcessInfo,
     refresh_owner: Option<RefreshOwner>,
+    refresh_batches: Vec<ProviderRefreshBatch>,
+    next_refresh_batch_token: u64,
     codex_login: Option<CodexLoginState>,
     codex_login_handle: Option<Handle>,
     claude_login: Option<ClaudeLoginState>,
@@ -138,6 +138,15 @@ pub struct AppModel {
     pub grok_login_handle: Option<Handle>,
     zai_login: Option<ZaiLoginState>,
     zai_login_handle: Option<Handle>,
+}
+
+#[derive(Clone)]
+struct ProviderRefreshBatch {
+    provider: ProviderId,
+    token: u64,
+    started_at: chrono::DateTime<Utc>,
+    pending_account_ids: Vec<String>,
+    request: Option<ProviderRefreshRequest>,
 }
 
 impl Drop for AppModel {
@@ -188,6 +197,7 @@ pub enum Message {
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
     ToggleAccountSelection(ProviderId, String),
+    ToggleAccountPanelFlag(ProviderId, String),
     PageProviderAccount(PagerDirection),
     PageProviderViewport(PagerDirection),
     DeleteAccount(ProviderId, String),
@@ -248,6 +258,7 @@ impl cosmic::Application for AppModel {
                     Err((_errors, cfg)) => cfg,
                 };
                 let mut changed = crate::config::migrate_provider_enablement(&ctx, &mut config);
+                changed |= crate::config::migrate_panel_account_flags(&ctx, &mut config);
                 changed |= registry::startup_sync(&mut config);
                 changed |= demo_env::strip_leaked_state(&mut config);
                 if changed {
@@ -283,8 +294,7 @@ impl cosmic::Application for AppModel {
         crate::debug_env::apply(&mut state);
         demo_env::apply(&initial_config, &mut state);
         let selected_provider = select_provider(initial_config.selected_provider, &state);
-        let (applet_width, applet_height) =
-            panel_button_size(&core, &state, initial_config.panel_icon_style);
+        let (applet_width, applet_height) = panel_button_size(&core, &state, &initial_config);
         core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
         let mut app = AppModel {
             core,
@@ -301,6 +311,8 @@ impl cosmic::Application for AppModel {
             shared_control,
             process_info,
             refresh_owner,
+            refresh_batches: Vec::new(),
+            next_refresh_batch_token: 1,
             codex_login: None,
             codex_login_handle: None,
             claude_login: None,
@@ -368,18 +380,8 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let indicator = if panel_fallback_active(&self.state) {
-            applet_fallback_indicator(&self.core)
-        } else {
-            applet_indicator(
-                &self.state,
-                self.selected_provider,
-                self.config.panel_icon_style,
-                self.config.usage_amount_format,
-                &self.core,
-            )
-        };
-        let size = panel_button_size(&self.core, &self.state, self.config.panel_icon_style);
+        let indicator = panel_indicator(&self.state, &self.config, &self.core);
+        let size = panel_button_size(&self.core, &self.state, &self.config);
         let button: Element<'_, Message> = applet_button(&self.core, size, indicator)
             .on_press(Message::TogglePopup)
             .into();
@@ -459,7 +461,7 @@ impl AppModel {
     fn handle_message_task(&mut self, message: Message) -> Option<Task<Message>> {
         match message {
             Message::UpdateConfig(config, keys) => {
-                self.on_config_update(*config, &keys);
+                return Some(self.on_config_update(*config, &keys));
             }
             Message::UpdateSharedRuntime(shared_runtime, keys) => {
                 if keys.is_empty() || keys.contains(&"app_state") {
@@ -552,6 +554,9 @@ impl AppModel {
             }
             Message::ToggleAccountSelection(provider, account_id) => {
                 return Some(self.toggle_account_selection(provider, &account_id));
+            }
+            Message::ToggleAccountPanelFlag(provider, account_id) => {
+                return Some(self.handle_toggle_account_panel_flag(provider, &account_id));
             }
             Message::DeleteAccount(provider, account_id) => {
                 return Some(self.delete_account(provider, &account_id));
@@ -695,15 +700,36 @@ impl AppModel {
     }
 
     fn automatic_refresh_task(&mut self) -> Task<Message> {
-        let refresh_process = self.refresh_task_process();
-        owner_automatic_refresh_task(
-            self.refresh_owner.as_ref(),
-            &self.process_info,
-            self.owner_status(),
-            &self.config,
-            &mut self.state,
-            refresh_process,
-        )
+        if self.refresh_owner.is_none() {
+            return Task::none();
+        }
+        reconcile_host_active_accounts(&self.config, &mut self.state);
+        let stale_providers = runtime::resolve_stale_refreshes(&mut self.state);
+        let mut tasks = stale_providers
+            .iter()
+            .copied()
+            .map(|provider| self.terminate_refresh_batch(provider))
+            .filter(|task| task.units() > 0)
+            .collect::<Vec<_>>();
+        if !stale_providers.is_empty() {
+            self.persist_runtime_if_owner("stale_refresh_resolved");
+        }
+        let due_providers = ProviderId::ALL
+            .into_iter()
+            .filter(|provider| provider_refresh_due(&self.config, &self.state, *provider))
+            .collect::<Vec<_>>();
+        tasks.extend(
+            due_providers
+                .into_iter()
+                .map(|provider| self.schedule_provider_refresh(provider, false, None))
+                .filter(|task| task.units() > 0),
+        );
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            self.persist_runtime_if_owner("automatic_refresh_started");
+            Task::batch(tasks)
+        }
     }
 
     fn handle_refresh_now(&mut self) -> Task<Message> {
@@ -757,20 +783,7 @@ impl AppModel {
             "shared control observed"
         );
         self.shared_control = shared_control;
-        let refresh_process = self.refresh_task_process();
-        let (task, consumed_providers) = owner_shared_control_refresh_task(
-            self.refresh_owner.as_ref(),
-            &self.process_info,
-            self.owner_status(),
-            &self.config,
-            &mut self.state,
-            &self.shared_control,
-            refresh_process,
-        );
-        if !consumed_providers.is_empty() {
-            self.consume_shared_refresh_requests(&consumed_providers);
-        }
-        task
+        self.schedule_shared_control_refreshes()
     }
 
     fn handle_provider_account_statuses_refreshed(
@@ -791,6 +804,172 @@ impl AppModel {
         session::sync_metadata_after_status_refresh(self, provider);
         self.sync_panel_suggested_bounds();
         self.persist_runtime_if_owner("account_status_refresh");
+    }
+
+    fn schedule_shared_control_refreshes(&mut self) -> Task<Message> {
+        if self.refresh_owner.is_none() {
+            return Task::none();
+        }
+        let mut consumed_requests = Vec::new();
+        let tasks = self
+            .shared_control
+            .requests
+            .clone()
+            .into_iter()
+            .filter_map(|request| {
+                let provider = request.provider;
+                if !self
+                    .state
+                    .provider(provider)
+                    .is_some_and(|entry| entry.enabled)
+                {
+                    consumed_requests.push(request);
+                    return None;
+                }
+                if self
+                    .refresh_batches
+                    .iter()
+                    .any(|batch| batch.provider == provider)
+                {
+                    return None;
+                }
+                let force = matches!(
+                    request.reason,
+                    RefreshRequestReason::User | RefreshRequestReason::AccountAction
+                );
+                let adoption_pending = self.config.selected_account_ids(provider).is_empty()
+                    && !eligible_refresh_account_ids(&self.config, provider, &self.state, force)
+                        .is_empty();
+                let task = self.schedule_provider_refresh(provider, force, Some(request.clone()));
+                if task.units() > 0 {
+                    Some(task)
+                } else {
+                    if !adoption_pending {
+                        consumed_requests.push(request);
+                    }
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for request in consumed_requests {
+            self.consume_shared_refresh_request_if_matches(Some(&request));
+        }
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            self.persist_runtime_if_owner("shared_refresh_started");
+            Task::batch(tasks)
+        }
+    }
+
+    fn schedule_provider_refresh(
+        &mut self,
+        provider: ProviderId,
+        force: bool,
+        request: Option<ProviderRefreshRequest>,
+    ) -> Task<Message> {
+        let Some(entry) = self.state.provider(provider) else {
+            return Task::none();
+        };
+        if !entry.enabled
+            || entry.is_refreshing
+            || self
+                .refresh_batches
+                .iter()
+                .any(|batch| batch.provider == provider)
+        {
+            return Task::none();
+        }
+        let mut account_ids =
+            eligible_refresh_account_ids(&self.config, provider, &self.state, force);
+        if account_ids.is_empty() {
+            return Task::none();
+        }
+        if self.config.selected_account_ids(provider).is_empty() {
+            let selected_id = account_ids[0].clone();
+            if !self.write_config(|config| {
+                config.selected_account_ids_mut(provider).push(selected_id);
+            }) {
+                return Task::none();
+            }
+            runtime::reconcile_provider(&self.config, &self.detection, &mut self.state, provider);
+            account_ids = eligible_refresh_account_ids(&self.config, provider, &self.state, force);
+            if account_ids.is_empty() {
+                return Task::none();
+            }
+        }
+        let flagged_ids =
+            eligible_flagged_refresh_account_ids(&self.config, provider, &self.state, force);
+        if !self.state.provider(provider).is_some_and(|entry| {
+            entry.account_status == AccountSelectionStatus::Ready || !flagged_ids.is_empty()
+        }) {
+            return Task::none();
+        }
+        let token = self.next_refresh_batch_token;
+        self.next_refresh_batch_token = self.next_refresh_batch_token.wrapping_add(1).max(1);
+        let Some(started_at) = self.state.begin_provider_refresh(provider) else {
+            return Task::none();
+        };
+        self.refresh_batches.push(ProviderRefreshBatch {
+            provider,
+            token,
+            started_at,
+            pending_account_ids: account_ids.clone(),
+            request,
+        });
+        let process = self.refresh_task_process();
+        refresh_provider_task_for_process(
+            &self.config,
+            &mut self.state,
+            provider,
+            Some(process),
+            force,
+            token,
+            account_ids,
+        )
+    }
+
+    fn terminate_refresh_batch(&mut self, provider: ProviderId) -> Task<Message> {
+        let Some(batch_index) = self
+            .refresh_batches
+            .iter()
+            .position(|batch| batch.provider == provider)
+        else {
+            return Task::none();
+        };
+        let batch = self.refresh_batches.remove(batch_index);
+        self.state.finish_provider_refresh(provider);
+        self.consume_shared_refresh_request_if_matches(batch.request.as_ref());
+        self.schedule_shared_control_refreshes()
+    }
+
+    fn consume_shared_refresh_request_if_matches(
+        &mut self,
+        request: Option<&ProviderRefreshRequest>,
+    ) {
+        let Some(request) = request else {
+            return;
+        };
+        if self
+            .shared_control
+            .requests
+            .iter()
+            .any(|current| current == request)
+        {
+            self.consume_shared_refresh_request(request.provider);
+        }
+    }
+
+    fn restore_refresh_batch_markers(&self, state: &mut AppState) {
+        if self.refresh_owner.is_none() {
+            return;
+        }
+        for batch in &self.refresh_batches {
+            if let Some(provider) = state.provider_mut(batch.provider) {
+                provider.is_refreshing = true;
+                provider.refresh_started_at = Some(batch.started_at);
+            }
+        }
     }
 }
 
@@ -813,141 +992,16 @@ fn startup_task(
     }
 }
 
-fn owner_automatic_refresh_task(
-    refresh_owner: Option<&RefreshOwner>,
-    process_info: &ProcessInfo,
-    owner_status: &'static str,
-    config: &Config,
-    state: &mut AppState,
-    process: RefreshProcessContext,
-) -> Task<Message> {
-    if refresh_owner.is_none() {
-        return Task::none();
-    }
-    if runtime::resolve_stale_refreshes(state) {
-        runtime::persist_state_as(
-            state,
-            "stale_refresh_resolved",
-            Some(SharedStateWriter {
-                process_id: &process_info.id,
-                owner_status,
-            }),
-        );
-    }
-    let task = automatic_refresh_provider_tasks_for_process(config, state, Some(process));
-    if task.units() > 0 {
-        runtime::persist_state_as(
-            state,
-            "automatic_refresh_started",
-            Some(SharedStateWriter {
-                process_id: &process_info.id,
-                owner_status,
-            }),
-        );
-    }
-    task
-}
-
-fn owner_shared_control_refresh_task(
-    refresh_owner: Option<&RefreshOwner>,
-    process_info: &ProcessInfo,
-    owner_status: &'static str,
-    config: &Config,
-    state: &mut AppState,
-    shared_control: &SharedControlState,
-    process: RefreshProcessContext,
-) -> (Task<Message>, Vec<ProviderId>) {
-    if refresh_owner.is_none() {
-        return (Task::none(), Vec::new());
-    }
-
-    let mut consumed_providers = Vec::new();
-    let request_count = shared_control.requests.len();
-    let mut evaluation = SharedRefreshEvaluationLog::from_requests(shared_control);
-    let providers = shared_control
-        .requests
-        .iter()
-        .filter_map(|request| {
-            let force = matches!(
-                request.reason,
-                RefreshRequestReason::User | RefreshRequestReason::AccountAction
-            );
-            if !state
-                .provider(request.provider)
-                .is_some_and(|entry| entry.enabled)
-            {
-                evaluation.record_outcome(request.provider, "disabled");
-                consumed_providers.push(request.provider);
-                return None;
-            }
-            let Some(provider_state) = state.provider(request.provider) else {
-                evaluation.record_outcome(request.provider, "missing_provider_state");
-                return Some((request.provider, force));
-            };
-            if provider_state.is_refreshing {
-                evaluation.record_outcome(request.provider, "already_refreshing");
-                consumed_providers.push(request.provider);
-                return None;
-            }
-            if provider_state.account_status != AccountSelectionStatus::Ready {
-                let diagnostics = RefreshSkipDiagnostics::for_provider(state, request.provider);
-                let skip_reason = diagnostics.not_ready_reason();
-                evaluation.record_outcome(request.provider, skip_reason);
-                consumed_providers.push(request.provider);
-                return None;
-            }
-            Some((request.provider, force))
-        })
-        .collect::<Vec<_>>();
-
-    let tasks = providers
-        .into_iter()
-        .map(|(provider, force)| {
-            refresh_provider_task_for_process(config, state, provider, Some(process.clone()), force)
-        })
-        .filter(|task| task.units() > 0)
-        .collect::<Vec<_>>();
-
-    tracing::info!(
-        process_id = %process_info.id,
-        owner_status,
-        generation = shared_control.generation,
-        request_count,
-        scheduled_provider_count = tasks.len(),
-        skipped_provider_count = consumed_providers.len(),
-        unresolved_provider_count = request_count
-            .saturating_sub(tasks.len())
-            .saturating_sub(consumed_providers.len()),
-        request_reasons = %evaluation.request_reasons(),
-        requesters = %evaluation.requesters(),
-        outcomes = %evaluation.outcomes(),
-        "owner evaluated shared refresh requests"
-    );
-
-    if tasks.is_empty() {
-        (Task::none(), consumed_providers)
-    } else {
-        runtime::persist_state_as(
-            state,
-            "shared_refresh_started",
-            Some(SharedStateWriter {
-                process_id: &process_info.id,
-                owner_status,
-            }),
-        );
-        (Task::batch(tasks), consumed_providers)
-    }
-}
-
+#[cfg(test)]
 #[derive(Default)]
 struct SharedRefreshEvaluationLog {
     user_request_count: usize,
     account_action_request_count: usize,
     provider_selected_request_count: usize,
     requesters: Vec<String>,
-    outcomes: Vec<String>,
 }
 
+#[cfg(test)]
 impl SharedRefreshEvaluationLog {
     fn from_requests(shared_control: &SharedControlState) -> Self {
         let mut summary = Self::default();
@@ -961,56 +1015,15 @@ impl SharedRefreshEvaluationLog {
                 RefreshRequestReason::User => summary.user_request_count += 1,
                 RefreshRequestReason::AccountAction => summary.account_action_request_count += 1,
                 RefreshRequestReason::ProviderSelected => {
-                    summary.provider_selected_request_count += 1;
+                    summary.provider_selected_request_count += 1
                 }
             }
         }
         summary
     }
 
-    fn record_outcome(&mut self, provider: ProviderId, outcome: &str) {
-        self.outcomes
-            .push(format!("{}:{outcome}", provider.label()));
-    }
-
-    fn request_reasons(&self) -> String {
-        let mut reasons = Vec::new();
-        if self.user_request_count > 0 {
-            reasons.push(format!("user:{}", self.user_request_count));
-        }
-        if self.account_action_request_count > 0 {
-            reasons.push(format!(
-                "account_action:{}",
-                self.account_action_request_count
-            ));
-        }
-        if self.provider_selected_request_count > 0 {
-            reasons.push(format!(
-                "provider_selected:{}",
-                self.provider_selected_request_count
-            ));
-        }
-        if reasons.is_empty() {
-            "none".to_string()
-        } else {
-            reasons.join(",")
-        }
-    }
-
     fn requesters(&self) -> String {
-        if self.requesters.is_empty() {
-            "none".to_string()
-        } else {
-            self.requesters.join(",")
-        }
-    }
-
-    fn outcomes(&self) -> String {
-        if self.outcomes.is_empty() {
-            "none".to_string()
-        } else {
-            self.outcomes.join(",")
-        }
+        self.requesters.join(",")
     }
 }
 

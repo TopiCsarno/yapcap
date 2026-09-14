@@ -1,3 +1,9 @@
+mod cells;
+
+#[cfg(test)]
+pub(super) use cells::panel_cells;
+pub(super) use cells::{panel_button_size, panel_indicator};
+
 use super::provider_assets::app_icon_handle;
 use super::{
     APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER, APPLET_ICON_GAP, APPLET_PERCENT_CELL_HORIZONTAL_PAD,
@@ -55,15 +61,15 @@ pub(crate) fn applet_settings() -> cosmic::app::Settings {
     })
     .unwrap_or_default();
     let detection = crate::detection::startup_snapshot(crate::config::host_user_home_dir());
-    let no_enabled_provider_has_selected_accounts = ProviderId::ALL.iter().all(|&p| {
-        !crate::provider_enablement::provider_enabled(&config, &detection, p)
-            || config.selected_account_ids(p).is_empty()
-    });
-    let (width, height) = if no_enabled_provider_has_selected_accounts {
-        applet_fallback_button_size(&preview_core)
-    } else {
-        applet_button_size(&preview_core, config.panel_icon_style)
-    };
+    let cell_count = ProviderId::ALL
+        .into_iter()
+        .filter(|&provider| {
+            crate::provider_enablement::provider_enabled(&config, &detection, provider)
+        })
+        .map(|provider| config.panel_account_ids(provider).len())
+        .sum();
+    let (width, height) =
+        cells::panel_cells_size(&preview_core, config.panel_icon_style, cell_count);
 
     cosmic::app::Settings::default()
         .size(Size::new(width, height))
@@ -80,11 +86,10 @@ pub(crate) fn applet_settings() -> cosmic::app::Settings {
         .transparent(true)
 }
 
-pub(super) fn applet_indicator<'a>(
-    state: &AppState,
-    selected_provider: ProviderId,
+fn applet_indicator<'a>(
+    provider: ProviderId,
+    layout: AppletBarLayout,
     style: PanelIconStyle,
-    usage_amount_format: UsageAmountFormat,
     core: &cosmic::Core,
 ) -> Element<'a, Message> {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
@@ -92,26 +97,23 @@ pub(super) fn applet_indicator<'a>(
     let logo_size_px = compact_px.saturating_sub(8).max(11);
     let logo_size = f32::from(logo_size_px);
     let bar_width = applet_bar_width(suggested_w, suggested_h);
-    let layout = selected_provider_bar_layout(state, selected_provider, usage_amount_format);
     let bars = applet_bar_column(layout, bar_width);
     let percent = account_percent(layout);
 
     match style {
-        PanelIconStyle::LogoAndBars => row![
-            provider_logo(selected_provider, logo_size_px, logo_size),
-            bars,
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into(),
+        PanelIconStyle::LogoAndBars => {
+            row![provider_logo(provider, logo_size_px, logo_size), bars,]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+        }
         PanelIconStyle::BarsOnly => bars,
-        PanelIconStyle::LogoAndPercent => row![
-            provider_logo(selected_provider, logo_size_px, logo_size),
-            percent,
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into(),
+        PanelIconStyle::LogoAndPercent => {
+            row![provider_logo(provider, logo_size_px, logo_size), percent,]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+        }
         PanelIconStyle::PercentOnly => percent,
     }
 }
@@ -126,14 +128,6 @@ pub(super) fn provider_logo<'a>(
         .width(Length::Fixed(logo_size))
         .height(Length::Fixed(logo_size))
         .into()
-}
-
-pub(super) fn panel_fallback_active(state: &AppState) -> bool {
-    !state.provider_accounts.iter().any(|account| {
-        state
-            .provider(account.provider)
-            .is_some_and(|provider| provider.enabled)
-    })
 }
 
 pub(super) fn applet_fallback_indicator<'a>(core: &cosmic::Core) -> Element<'a, Message> {
@@ -158,18 +152,6 @@ pub(super) fn applet_fallback_button_size(core: &cosmic::Core) -> (f32, f32) {
 fn applet_fallback_icon_px(core: &cosmic::Core) -> u16 {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
     suggested_w.min(suggested_h)
-}
-
-pub(super) fn panel_button_size(
-    core: &cosmic::Core,
-    state: &AppState,
-    style: PanelIconStyle,
-) -> (f32, f32) {
-    if panel_fallback_active(state) {
-        applet_fallback_button_size(core)
-    } else {
-        applet_button_size(core, style)
-    }
 }
 
 pub(super) fn applet_button<'a>(
@@ -267,27 +249,6 @@ fn account_percent(layout: AppletBarLayout) -> Element<'static, Message> {
         .width(Length::Fixed(applet_percent_cell_width()))
         .align_x(applet_percent_cell_alignment())
         .into()
-}
-
-pub(super) fn selected_provider_bar_layout(
-    state: &AppState,
-    selected_provider: ProviderId,
-    usage_amount_format: UsageAmountFormat,
-) -> AppletBarLayout {
-    let now = chrono::Utc::now();
-    let snapshot = state
-        .active_account(selected_provider)
-        .and_then(|account| account.snapshot.as_ref())
-        .or_else(|| {
-            state
-                .provider(selected_provider)
-                .and_then(|provider| provider.legacy_display_snapshot.as_ref())
-        });
-    applet_bar_layout(
-        snapshot.and_then(|snapshot| snapshot.applet_windows()),
-        now,
-        usage_amount_format,
-    )
 }
 
 pub(super) fn applet_bar_layout(

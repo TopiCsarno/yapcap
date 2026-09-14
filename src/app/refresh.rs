@@ -83,6 +83,7 @@ pub fn automatic_refresh_provider_tasks(config: &Config, state: &mut AppState) -
     automatic_refresh_provider_tasks_for_process(config, state, None)
 }
 
+#[cfg(test)]
 pub(super) fn automatic_refresh_provider_tasks_for_process(
     config: &Config,
     state: &mut AppState,
@@ -92,12 +93,20 @@ pub(super) fn automatic_refresh_provider_tasks_for_process(
 
     let providers = ProviderId::ALL
         .into_iter()
-        .filter(|provider| selected_account_refresh_due(config, state, *provider))
+        .filter(|provider| provider_refresh_due(config, state, *provider))
         .collect::<Vec<_>>();
     let tasks = providers
         .into_iter()
         .map(|provider| {
-            refresh_provider_task_for_process(config, state, provider, process.clone(), false)
+            refresh_provider_task_for_process(
+                config,
+                state,
+                provider,
+                process.clone(),
+                false,
+                0,
+                eligible_refresh_account_ids(config, provider, state, false),
+            )
         })
         .filter(|task| task.units() > 0)
         .collect::<Vec<_>>();
@@ -109,7 +118,7 @@ pub(super) fn automatic_refresh_provider_tasks_for_process(
     }
 }
 
-fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
+pub(super) fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
     if demo_env::is_active() {
         return;
     }
@@ -121,7 +130,7 @@ fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
     }
 }
 
-pub(super) fn selected_account_refresh_due(
+pub(super) fn provider_refresh_due(
     config: &Config,
     state: &AppState,
     provider: ProviderId,
@@ -130,11 +139,17 @@ pub(super) fn selected_account_refresh_due(
         return false;
     }
     let Some(entry) = state.provider(provider) else {
-        return true;
+        return false;
     };
+    let candidate_ids = eligible_refresh_account_ids(config, provider, state, false);
+    let flagged_ids = eligible_flagged_refresh_account_ids(config, provider, state, false);
+    let singleton_adoption =
+        config.selected_account_ids(provider).is_empty() && candidate_ids.len() == 1;
     if entry.is_refreshing
-        || entry.account_status != crate::model::AccountSelectionStatus::Ready
-        || entry.selected_account_ids.is_empty()
+        || candidate_ids.is_empty()
+        || (entry.account_status != crate::model::AccountSelectionStatus::Ready
+            && flagged_ids.is_empty()
+            && !singleton_adoption)
     {
         return false;
     }
@@ -146,7 +161,7 @@ pub(super) fn selected_account_refresh_due(
             .cast_signed(),
     );
     let now = Utc::now();
-    entry.selected_account_ids.iter().any(|account_id| {
+    candidate_ids.iter().any(|account_id| {
         let Some(account) = state
             .provider_accounts
             .iter()
@@ -154,9 +169,6 @@ pub(super) fn selected_account_refresh_due(
         else {
             return true;
         };
-        if account.is_backing_off() {
-            return false;
-        }
         account
             .last_success_at
             .is_none_or(|last_success_at| now - last_success_at >= interval)
@@ -169,7 +181,8 @@ pub fn refresh_provider_task(
     state: &mut AppState,
     provider: ProviderId,
 ) -> Task<Message> {
-    refresh_provider_task_for_process(config, state, provider, None, false)
+    let account_ids = eligible_refresh_account_ids(config, provider, state, false);
+    refresh_provider_task_for_process(config, state, provider, None, false, 0, account_ids)
 }
 
 pub(super) fn refresh_provider_task_for_process(
@@ -177,7 +190,9 @@ pub(super) fn refresh_provider_task_for_process(
     state: &mut AppState,
     provider: ProviderId,
     process: Option<RefreshProcessContext>,
-    force: bool,
+    _force: bool,
+    batch_token: u64,
+    account_ids: Vec<String>,
 ) -> Task<Message> {
     if demo_env::is_active() {
         return Task::none();
@@ -201,8 +216,7 @@ pub(super) fn refresh_provider_task_for_process(
     let ready = state
         .provider(provider)
         .is_some_and(|entry| entry.account_status == crate::model::AccountSelectionStatus::Ready);
-    if !enabled || !ready || already_refreshing {
-        state.mark_provider_refreshing(provider, enabled);
+    if !enabled || (batch_token == 0 && (!ready || already_refreshing)) {
         let diagnostics = RefreshSkipDiagnostics::for_provider(state, provider);
         if !enabled {
             tracing::info!(
@@ -268,13 +282,6 @@ pub(super) fn refresh_provider_task_for_process(
         }
     }
 
-    let account_ids = account_ids_to_refresh(
-        &config,
-        provider,
-        previous.as_ref(),
-        &previous_accounts,
-        force,
-    );
     if account_ids.is_empty() {
         tracing::info!(
             provider = provider.label(),
@@ -297,8 +304,6 @@ pub(super) fn refresh_provider_task_for_process(
         return Task::none();
     }
 
-    state.mark_provider_refreshing(provider, enabled);
-
     let tasks: Vec<Task<Message>> = account_ids
         .into_iter()
         .map(|account_id| {
@@ -310,12 +315,15 @@ pub(super) fn refresh_provider_task_for_process(
                 async move {
                     runtime::refresh_account(
                         config,
-                        provider,
-                        enabled,
-                        account_id,
-                        previous,
-                        previous_accounts,
-                        process,
+                        runtime::RefreshAccountInput {
+                            provider,
+                            enabled,
+                            account_id,
+                            batch_token,
+                            previous,
+                            previous_accounts,
+                            process,
+                        },
                     )
                     .await
                 },
@@ -370,35 +378,63 @@ pub fn refresh_provider_account_statuses_task(
     )
 }
 
-fn account_ids_to_refresh(
+pub(super) fn eligible_refresh_account_ids(
     config: &Config,
     provider: ProviderId,
-    previous: Option<&crate::model::ProviderRuntimeState>,
-    previous_accounts: &[crate::model::ProviderAccountRuntimeState],
+    state: &AppState,
     force: bool,
 ) -> Vec<String> {
-    let config_ids = config.selected_account_ids(provider);
-    let candidate_ids = if !config_ids.is_empty() {
-        config_ids.to_vec()
-    } else if let Some(prev_id) = previous.and_then(|p| p.selected_account_ids.first()) {
-        vec![prev_id.clone()]
+    let configured_ids = refresh_account_ids(
+        config.selected_account_ids(provider),
+        config.panel_account_ids(provider),
+    );
+    let discovered = registry::discover_accounts(provider, config);
+    let candidate_ids = if !configured_ids.is_empty() {
+        configured_ids
+    } else if discovered.len() == 1 {
+        vec![discovered[0].account_id.clone()]
     } else {
-        registry::discover_accounts(provider, config)
-            .into_iter()
-            .next()
-            .map(|a| vec![a.account_id])
-            .unwrap_or_default()
+        Vec::new()
     };
 
     candidate_ids
         .into_iter()
         .filter(|id| {
-            !previous_accounts.iter().any(|a| {
-                &a.account_id == id
-                    && ((!force && a.is_backing_off()) || a.auth_state == AuthState::ActionRequired)
-            })
+            discovered.iter().any(|account| account.account_id == *id)
+                && !state.accounts_for(provider).iter().any(|a| {
+                    &a.account_id == id
+                        && ((!force && a.is_backing_off())
+                            || a.auth_state == AuthState::ActionRequired)
+                })
         })
         .collect()
+}
+
+pub(super) fn eligible_flagged_refresh_account_ids(
+    config: &Config,
+    provider: ProviderId,
+    state: &AppState,
+    force: bool,
+) -> Vec<String> {
+    let eligible = eligible_refresh_account_ids(config, provider, state, force);
+    config
+        .panel_account_ids(provider)
+        .iter()
+        .filter(|id| eligible.contains(id))
+        .cloned()
+        .collect()
+}
+
+fn refresh_account_ids(selected_ids: &[String], panel_ids: &[String]) -> Vec<String> {
+    selected_ids
+        .iter()
+        .chain(panel_ids)
+        .fold(Vec::new(), |mut ids, account_id| {
+            if !ids.contains(account_id) {
+                ids.push(account_id.clone());
+            }
+            ids
+        })
 }
 
 #[cfg(test)]
@@ -475,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_tasks_mark_enabled_providers_refreshing() {
+    fn refresh_tasks_skip_undiscoverable_default_ids() {
         let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
@@ -486,7 +522,7 @@ mod tests {
         for provider in ProviderId::ALL {
             let entry = state.provider(provider).unwrap();
             assert!(entry.enabled);
-            assert!(entry.is_refreshing);
+            assert!(!entry.is_refreshing);
         }
     }
 
@@ -511,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_refresh_tasks_refresh_missing_selected_account() {
+    fn automatic_refresh_tasks_skip_missing_selected_account() {
         let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
@@ -519,7 +555,7 @@ mod tests {
 
         let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
 
-        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[test]
@@ -548,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_refresh_tasks_refresh_stale_selected_account() {
+    fn automatic_refresh_tasks_skip_undiscoverable_stale_selected_account() {
         let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
@@ -569,7 +605,101 @@ mod tests {
 
         let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
 
-        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn automatic_refresh_tasks_skip_undiscoverable_stale_flagged_account() {
+        let _env = test_env_without_demo();
+        let config = Config {
+            panel_codex_account_ids: vec!["flagged".to_string()],
+            ..Config::default()
+        };
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: Some(Utc::now()),
+            snapshot: None,
+            health: crate::model::ProviderHealth::Ok,
+            auth_state: AuthState::Ready,
+            error: None,
+            retry_after: None,
+            consecutive_failures: 0,
+        });
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "flagged".to_string(),
+            label: "Flagged Codex".to_string(),
+            source_label: None,
+            last_success_at: Some(Utc::now() - chrono::Duration::minutes(10)),
+            snapshot: None,
+            health: crate::model::ProviderHealth::Ok,
+            auth_state: AuthState::Ready,
+            error: None,
+            retry_after: None,
+            consecutive_failures: 0,
+        });
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn automatic_refresh_tasks_skip_when_selected_and_flagged_accounts_are_fresh() {
+        let _env = test_env_without_demo();
+        let config = Config {
+            panel_codex_account_ids: vec!["flagged".to_string()],
+            ..Config::default()
+        };
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        for account_id in ["default", "flagged"] {
+            state.upsert_account(crate::model::ProviderAccountRuntimeState {
+                provider: ProviderId::Codex,
+                account_id: account_id.to_string(),
+                label: account_id.to_string(),
+                source_label: None,
+                last_success_at: Some(Utc::now()),
+                snapshot: None,
+                health: crate::model::ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                retry_after: None,
+                consecutive_failures: 0,
+            });
+        }
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn account_ids_to_refresh_unions_selected_and_flagged_ids_in_order() {
+        let config = Config {
+            selected_codex_account_ids: vec!["selected".to_string(), "duplicate".to_string()],
+            panel_codex_account_ids: vec!["duplicate".to_string(), "flagged".to_string()],
+            ..Config::default()
+        };
+
+        let account_ids = refresh_account_ids(
+            config.selected_account_ids(ProviderId::Codex),
+            config.panel_account_ids(ProviderId::Codex),
+        );
+
+        assert_eq!(
+            account_ids,
+            vec![
+                "selected".to_string(),
+                "duplicate".to_string(),
+                "flagged".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -624,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn forced_refresh_retries_backing_off_account() {
+    fn forced_refresh_skips_undiscoverable_account() {
         let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
@@ -643,15 +773,22 @@ mod tests {
             consecutive_failures: 1,
         });
 
-        let task =
-            refresh_provider_task_for_process(&config, &mut state, ProviderId::Codex, None, true);
+        let task = refresh_provider_task_for_process(
+            &config,
+            &mut state,
+            ProviderId::Codex,
+            None,
+            true,
+            0,
+            Vec::new(),
+        );
 
-        assert!(task.units() > 0);
-        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+        assert_eq!(task.units(), 0);
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[test]
-    fn forced_refresh_retries_opencode_go_entitlement_failure() {
+    fn forced_refresh_skips_undiscoverable_opencode_go_account() {
         let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
@@ -676,11 +813,13 @@ mod tests {
             ProviderId::OpenCodeGo,
             None,
             true,
+            0,
+            Vec::new(),
         );
 
-        assert!(task.units() > 0);
+        assert_eq!(task.units(), 0);
         assert!(
-            state
+            !state
                 .provider(ProviderId::OpenCodeGo)
                 .unwrap()
                 .is_refreshing
@@ -707,8 +846,15 @@ mod tests {
             consecutive_failures: 1,
         });
 
-        let task =
-            refresh_provider_task_for_process(&config, &mut state, ProviderId::Codex, None, true);
+        let task = refresh_provider_task_for_process(
+            &config,
+            &mut state,
+            ProviderId::Codex,
+            None,
+            true,
+            0,
+            Vec::new(),
+        );
 
         assert_eq!(task.units(), 0);
         assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
@@ -720,7 +866,7 @@ mod tests {
         let config = Config::default();
         let mut state = AppState::empty();
         mark_all_ready(&mut state);
-        state.mark_provider_refreshing(ProviderId::Codex, true);
+        state.provider_mut(ProviderId::Codex).unwrap().is_refreshing = true;
 
         let _tasks = refresh_provider_tasks(&config, &mut state);
 

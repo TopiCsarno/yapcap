@@ -40,6 +40,7 @@ pub(super) fn account_settings_row(
     provider: ProviderId,
     account: &ProviderAccountFacts,
     selected_ids: &[&str],
+    panel_flagged: bool,
     active_id: Option<&str>,
     enabled: bool,
     position: AccountRowPosition,
@@ -115,9 +116,12 @@ pub(super) fn account_settings_row(
     let can_delete = account.supports_action(ProviderAccountAction::Delete);
     let delete_press =
         (enabled && can_delete).then_some(Message::DeleteAccount(provider, account_id.clone()));
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
+    let mut actions = row![
+        account_panel_toggler(provider, account_id.clone(), panel_flagged, enabled),
+        account_selected_marker(is_selected, enabled),
+    ]
+    .spacing(0)
+    .align_y(Alignment::Center);
     if can_reauthenticate {
         actions = actions.push(account_action_icon_button(
             "view-refresh-symbolic",
@@ -190,6 +194,28 @@ fn active_badge(enabled: bool) -> Element<'static, Message> {
     } else {
         badge_success_soft(fl!("badge-active"))
     }
+}
+
+fn account_panel_toggler(
+    provider: ProviderId,
+    account_id: String,
+    flagged: bool,
+    enabled: bool,
+) -> Element<'static, Message> {
+    widget::tooltip::tooltip(
+        container(
+            widget::toggler(flagged)
+                .size(18)
+                .width(Length::Shrink)
+                .on_toggle_maybe(enabled.then_some(move |_| {
+                    Message::ToggleAccountPanelFlag(provider, account_id.clone())
+                })),
+        )
+        .padding([4, 6]),
+        widget::text(fl!("account-panel-flag-tooltip")).size(12),
+        widget::tooltip::Position::Top,
+    )
+    .into()
 }
 
 fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Message> {

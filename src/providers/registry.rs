@@ -82,6 +82,15 @@ pub fn toggle_account_selection(provider: ProviderId, config: &mut Config, accou
     }
 }
 
+pub fn toggle_account_panel_flag(provider: ProviderId, config: &mut Config, account_id: &str) {
+    let ids = config.panel_account_ids_mut(provider);
+    if ids.iter().any(|id| id == account_id) {
+        ids.retain(|id| id != account_id);
+    } else {
+        ids.push(account_id.to_string());
+    }
+}
+
 pub fn sync_selected_ids_with_discoveries(config: &mut Config, provider: ProviderId) {
     let valid: Vec<String> = discover_accounts(provider, config)
         .into_iter()
@@ -92,6 +101,15 @@ pub fn sync_selected_ids_with_discoveries(config: &mut Config, provider: Provide
     if ids.is_empty() && valid.len() == 1 {
         ids.push(valid.into_iter().next().unwrap());
     }
+}
+
+pub fn sync_panel_ids_with_discoveries(config: &mut Config, provider: ProviderId) {
+    let valid: Vec<String> = discover_accounts(provider, config)
+        .into_iter()
+        .map(|a| a.account_id)
+        .collect();
+    let ids = config.panel_account_ids_mut(provider);
+    ids.retain(|id| valid.contains(id));
 }
 
 pub async fn fetch_account(

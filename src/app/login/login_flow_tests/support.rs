@@ -31,6 +31,8 @@ pub(super) fn test_app() -> AppModel {
             lock_path,
         },
         refresh_owner: None,
+        refresh_batches: Vec::new(),
+        next_refresh_batch_token: 1,
         codex_login: None,
         codex_login_handle: None,
         claude_login: None,

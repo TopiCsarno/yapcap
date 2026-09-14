@@ -60,6 +60,7 @@ account-add-another = Add another
 account-cancel = Cancel
 account-current-tooltip = Current account
 account-delete-tooltip = Delete account
+account-panel-flag-tooltip = Show this account in the panel
 account-dismiss = Dismiss
 account-select = Select
 account-selected = Selected

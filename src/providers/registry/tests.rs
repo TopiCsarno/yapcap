@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::Config;
+use crate::config::{Config, ManagedGrokAccountConfig};
 use crate::providers::interface::ProviderAccountAction;
 
 #[test]
@@ -122,6 +122,49 @@ fn each_provider_resolves_accounts() {
             "default config should have no accounts for {provider:?}"
         );
     }
+}
+
+#[test]
+fn panel_account_flag_toggle_is_independent_of_selection() {
+    let mut config = Config {
+        selected_grok_account_ids: vec!["selected".to_string()],
+        ..Config::default()
+    };
+
+    toggle_account_panel_flag(ProviderId::Grok, &mut config, "panel-account");
+    assert_eq!(config.panel_grok_account_ids, ["panel-account"]);
+    assert_eq!(config.selected_grok_account_ids, ["selected"]);
+
+    toggle_account_panel_flag(ProviderId::Grok, &mut config, "panel-account");
+    assert!(config.panel_grok_account_ids.is_empty());
+    assert_eq!(config.selected_grok_account_ids, ["selected"]);
+}
+
+#[test]
+fn panel_account_flags_prune_unknown_discoveries_without_selecting() {
+    let now = chrono::Utc::now();
+    let mut config = Config {
+        selected_grok_account_ids: vec!["selected".to_string()],
+        panel_grok_account_ids: vec!["grok-1".to_string(), "missing".to_string()],
+        grok_managed_accounts: vec![ManagedGrokAccountConfig {
+            id: "grok-1".to_string(),
+            label: "Grok User".to_string(),
+            config_dir: std::path::PathBuf::from("/tmp/grok-1"),
+            email: Some("grok@example.com".to_string()),
+            provider_account_id: Some("user-1".to_string()),
+            team_id: None,
+            plan: None,
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: None,
+        }],
+        ..Config::default()
+    };
+
+    sync_panel_ids_with_discoveries(&mut config, ProviderId::Grok);
+
+    assert_eq!(config.panel_grok_account_ids, ["grok-1"]);
+    assert_eq!(config.selected_grok_account_ids, ["selected"]);
 }
 
 #[test]

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::model::{
-    AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState,
-};
+use crate::model::{AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState};
 use chrono::Utc;
 
 impl AppState {
@@ -34,9 +32,18 @@ impl AppState {
     #[must_use]
     pub fn active_account(&self, provider: ProviderId) -> Option<&ProviderAccountRuntimeState> {
         let first_id = self.provider(provider)?.selected_account_ids.first()?;
+        self.account(provider, first_id)
+    }
+
+    #[must_use]
+    pub(super) fn account(
+        &self,
+        provider: ProviderId,
+        account_id: &str,
+    ) -> Option<&ProviderAccountRuntimeState> {
         self.provider_accounts
             .iter()
-            .find(|entry| entry.provider == provider && &entry.account_id == first_id)
+            .find(|entry| entry.provider == provider && entry.account_id == account_id)
     }
 
     #[must_use]
@@ -77,20 +84,24 @@ impl AppState {
         self.updated_at = Utc::now();
     }
 
-    pub fn mark_provider_refreshing(&mut self, provider: ProviderId, enabled: bool) {
-        let mut state = self
-            .provider(provider)
-            .cloned()
-            .unwrap_or_else(|| ProviderRuntimeState::empty(provider));
-        if enabled {
-            state.provider = provider;
-            state.enabled = true;
-            state.is_refreshing = state.account_status == AccountSelectionStatus::Ready;
-            state.refresh_started_at = state.is_refreshing.then(Utc::now);
-        } else {
-            state = ProviderRuntimeState::disabled(provider);
+    pub fn begin_provider_refresh(
+        &mut self,
+        provider: ProviderId,
+    ) -> Option<chrono::DateTime<Utc>> {
+        let state = self.provider_mut(provider)?;
+        if !state.enabled || state.is_refreshing {
+            return None;
         }
-        self.upsert_provider(state);
+        state.is_refreshing = true;
+        state.refresh_started_at = Some(Utc::now());
+        state.refresh_started_at
+    }
+
+    pub fn finish_provider_refresh(&mut self, provider: ProviderId) {
+        if let Some(state) = self.provider_mut(provider) {
+            state.is_refreshing = false;
+            state.refresh_started_at = None;
+        }
     }
 
     pub fn upsert_account(&mut self, account_state: ProviderAccountRuntimeState) {
@@ -111,20 +122,6 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ProviderIdentity, UsageHeadline, UsageSnapshot};
-
-    fn snapshot(provider: ProviderId) -> UsageSnapshot {
-        UsageSnapshot {
-            provider,
-            source: "test".to_string(),
-            updated_at: Utc::now(),
-            headline: UsageHeadline(0),
-            windows: Vec::new(),
-            provider_cost: None,
-            extra_usage: None,
-            identity: ProviderIdentity::default(),
-        }
-    }
 
     #[test]
     fn upsert_provider_replaces_only_matching_provider() {
@@ -169,32 +166,5 @@ mod tests {
         state.upsert_account(account);
 
         assert_eq!(state.updated_at, updated_at);
-    }
-
-    #[test]
-    fn mark_provider_refreshing_preserves_previous_snapshot() {
-        let mut state = AppState::empty();
-        let mut codex = ProviderRuntimeState::empty(ProviderId::Codex);
-        codex.legacy_display_snapshot = Some(snapshot(ProviderId::Codex));
-        codex.account_status = AccountSelectionStatus::Ready;
-        state.upsert_provider(codex);
-
-        state.mark_provider_refreshing(ProviderId::Codex, true);
-
-        let codex = state.provider(ProviderId::Codex).unwrap();
-        assert!(codex.is_refreshing);
-        assert!(codex.legacy_display_snapshot.is_some());
-    }
-
-    #[test]
-    fn mark_provider_refreshing_marks_disabled_provider() {
-        let mut state = AppState::empty();
-
-        state.mark_provider_refreshing(ProviderId::Cursor, false);
-
-        let cursor = state.provider(ProviderId::Cursor).unwrap();
-        assert!(!cursor.enabled);
-        assert!(!cursor.is_refreshing);
-        assert_eq!(cursor.error.as_deref(), Some("Disabled in config"));
     }
 }

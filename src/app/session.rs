@@ -237,6 +237,7 @@ mod tests {
         );
         app.config.codex_managed_accounts.push(codex_account());
         app.config.selected_codex_account_ids = vec!["codex-1".to_string()];
+        super::super::tests::persist_config(&mut app);
         if let Some(provider) = app.state.provider_mut(ProviderId::Codex) {
             provider.selected_account_ids = vec!["codex-1".to_string()];
             provider.legacy_display_snapshot = Some(crate::model::UsageSnapshot {

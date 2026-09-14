@@ -136,7 +136,14 @@ fn apply_login_success(
         account_id,
         "login flow succeeded"
     );
-    let _ = app.write_config(|new_config| apply(new_config));
+    if !app.write_config(|new_config| apply(new_config)) {
+        tracing::warn!(
+            process_id = %app.process_info.id,
+            provider = provider.label(),
+            flow_id,
+            "login result was not persisted to config"
+        );
+    }
     runtime::reconcile_provider(&app.config, &app.detection, &mut app.state, provider);
     runtime::mark_account_reauthenticated(&mut app.state, provider, &account_id);
     app.sync_panel_suggested_bounds();

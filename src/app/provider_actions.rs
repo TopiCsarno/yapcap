@@ -265,12 +265,19 @@ impl AppModel {
     }
 
     pub(super) fn write_config(&mut self, f: impl FnOnce(&mut Config)) -> bool {
-        let mut new_config = self.config.clone();
-        f(&mut new_config);
-        if new_config == self.config {
+        if demo_env::is_active() {
+            let mut new_config = self.config.clone();
+            f(&mut new_config);
+            if new_config != self.config {
+                self.config = new_config;
+            }
             return true;
         }
-        if demo_env::is_active() {
+        let base = crate::config::load_fresh_config(<Self as cosmic::Application>::APP_ID)
+            .unwrap_or_else(|| self.config.clone());
+        let mut new_config = base.clone();
+        f(&mut new_config);
+        if new_config == base {
             self.config = new_config;
             return true;
         }
@@ -290,9 +297,7 @@ impl AppModel {
                 return false;
             }
         };
-        if let Err(error) =
-            crate::config::write_changed_config_entries(&ctx, &self.config, &new_config)
-        {
+        if let Err(error) = crate::config::write_changed_config_entries(&ctx, &base, &new_config) {
             tracing::error!(
                 pid = self.process_info.pid,
                 process_id = %self.process_info.id,

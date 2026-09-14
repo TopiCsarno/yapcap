@@ -328,6 +328,47 @@ mod tests {
     }
 
     #[test]
+    fn apply_login_account_keeps_existing_distinct_account() {
+        let now = Utc::now();
+        let existing = ManagedCodexAccountConfig {
+            id: "codex-a".to_string(),
+            label: "a@example.com".to_string(),
+            codex_home: PathBuf::from("/tmp/codex-a"),
+            email: Some("a@example.com".to_string()),
+            provider_account_id: Some("acct-a".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+        let mut config = Config {
+            codex_managed_accounts: vec![existing],
+            selected_codex_account_ids: vec!["codex-a".to_string()],
+            ..Config::default()
+        };
+        let added = ManagedCodexAccountConfig {
+            id: "codex-b".to_string(),
+            label: "b@example.com".to_string(),
+            codex_home: PathBuf::from("/tmp/codex-b"),
+            email: Some("b@example.com".to_string()),
+            provider_account_id: Some("acct-b".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+
+        apply_login_account(&mut config, added);
+
+        assert_eq!(config.codex_managed_accounts.len(), 2);
+        assert!(
+            config
+                .codex_managed_accounts
+                .iter()
+                .any(|account| account.id == "codex-a")
+        );
+        assert_eq!(config.selected_codex_account_ids, vec!["codex-b"]);
+    }
+
+    #[test]
     fn sync_managed_accounts_removes_legacy_system_selection_without_importing() {
         let _guard = test_support::env_lock();
         let home = temp_dir("codex-import-source");

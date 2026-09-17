@@ -86,6 +86,7 @@ pub(super) fn authorization_url(
         ("code_challenge_method", "S256"),
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
+        ("prompt", "login"),
         ("state", state),
         ("originator", ORIGINATOR),
     ];
@@ -230,6 +231,7 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("id_token_add_organizations=true"));
         assert!(url.contains("codex_cli_simplified_flow=true"));
+        assert!(url.contains("prompt=login"));
         assert!(url.contains("originator=codex_cli_rs"));
         assert!(!url.contains("verifier"));
     }

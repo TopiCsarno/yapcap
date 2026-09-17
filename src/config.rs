@@ -516,6 +516,15 @@ pub fn cosmic_config_context(
     cosmic_config::Config::with_custom_path(app_id, version, test_config_root())
 }
 
+#[must_use]
+pub fn load_fresh_config(app_id: &str) -> Option<Config> {
+    let ctx = cosmic_config_context(app_id, Config::VERSION).ok()?;
+    match Config::get_entry(&ctx) {
+        Ok(config) => Some(config),
+        Err((_errors, config)) => Some(config),
+    }
+}
+
 pub fn write_changed_config_entries(
     context: &cosmic_config::Config,
     old: &Config,

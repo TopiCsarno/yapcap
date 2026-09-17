@@ -31,6 +31,7 @@ use crate::shared_state::{
 };
 use crate::updates::UpdateStatus;
 use chrono::Utc;
+use cosmic::cosmic_config::CosmicConfigEntry as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -518,6 +519,51 @@ fn partial_config_update_preserves_locally_written_account() {
 }
 
 #[test]
+fn write_config_preserves_accounts_written_by_another_process() {
+    let _env = crate::test_support::test_env();
+    let mut app = test_app(None);
+
+    let ctx = crate::config::cosmic_config_context(crate::config::APP_ID, Config::VERSION).unwrap();
+    let other_process = Config {
+        codex_managed_accounts: vec![codex_account("codex-a")],
+        selected_codex_account_ids: vec!["codex-a".to_string()],
+        ..Config::default()
+    };
+    crate::config::write_changed_config_entries(&ctx, &Config::default(), &other_process).unwrap();
+
+    let persisted = app.write_config(|config| {
+        config.codex_managed_accounts.push(codex_account("codex-b"));
+    });
+
+    assert!(persisted);
+    assert!(
+        app.config
+            .codex_managed_accounts
+            .iter()
+            .any(|account| account.id == "codex-a")
+    );
+    assert!(
+        app.config
+            .codex_managed_accounts
+            .iter()
+            .any(|account| account.id == "codex-b")
+    );
+    let reloaded = crate::config::load_fresh_config(crate::config::APP_ID).unwrap();
+    assert!(
+        reloaded
+            .codex_managed_accounts
+            .iter()
+            .any(|account| account.id == "codex-a")
+    );
+    assert!(
+        reloaded
+            .codex_managed_accounts
+            .iter()
+            .any(|account| account.id == "codex-b")
+    );
+}
+
+#[test]
 fn selecting_stale_enabled_provider_writes_provider_selected_request() {
     let _env = crate::test_support::test_env();
     let mut app = test_app(None);
@@ -571,6 +617,7 @@ fn non_owner_account_selection_requests_owner_refresh_without_running_it() {
     let _env = crate::test_support::test_env();
     let mut app = test_app(None);
     app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
+    persist_config(&mut app);
     runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
 
     let task = app.handle_message(Message::ToggleAccountSelection(
@@ -601,6 +648,7 @@ fn owner_account_selection_runs_requested_refresh() {
     let owner = refresh_owner("owner-account-selection");
     let mut app = test_app(Some(owner));
     app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
+    persist_config(&mut app);
     runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
 
     let task = app.handle_message(Message::ToggleAccountSelection(
@@ -878,6 +926,7 @@ fn account_pager_selects_the_next_account() {
         copilot_account("copilot-2", "second"),
     ];
     app.config.selected_copilot_account_ids = vec!["copilot-1".to_string()];
+    persist_config(&mut app);
     runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
     app.state.provider_accounts[1].snapshot = Some(UsageSnapshot {
         provider: ProviderId::Copilot,
@@ -922,6 +971,7 @@ fn provider_switch_restores_the_selected_account_page() {
         copilot_account("copilot-1", "first"),
         copilot_account("copilot-2", "second"),
     ];
+    persist_config(&mut app);
     runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
     let _ = app.page_provider_account(super::PagerDirection::Next);
 
@@ -1105,6 +1155,11 @@ fn state_with_account_percents(percents: &[f32]) -> AppState {
     }
 
     state
+}
+
+pub(super) fn persist_config(app: &mut AppModel) {
+    let config = app.config.clone();
+    app.write_config(|new_config| *new_config = config);
 }
 
 pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
@@ -1493,6 +1548,7 @@ fn delete_account_requests_refresh_for_all_providers() {
             ProviderId::OpenCodeGo | ProviderId::Grok => continue,
         };
 
+        persist_config(&mut app);
         let _task = app.delete_account(provider, &remove_account_id);
 
         assert!(

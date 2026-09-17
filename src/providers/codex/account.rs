@@ -215,11 +215,11 @@ fn same_identity(
     candidate_email: Option<&str>,
     candidate_provider_account_id: Option<&str>,
 ) -> bool {
+    let emails_match =
+        existing_email.map(normalized_email) == candidate_email.map(normalized_email);
     match (existing_provider_account_id, candidate_provider_account_id) {
-        (Some(existing), Some(candidate)) => existing == candidate,
-        (None, None) => {
-            existing_email.map(normalized_email) == candidate_email.map(normalized_email)
-        }
+        (Some(existing), Some(candidate)) => existing == candidate && emails_match,
+        (None, None) => emails_match,
         _ => false,
     }
 }
@@ -325,6 +325,102 @@ mod tests {
                 snapshot: None,
             })
             .unwrap()
+    }
+
+    #[test]
+    fn apply_login_account_keeps_existing_distinct_account() {
+        let now = Utc::now();
+        let existing = ManagedCodexAccountConfig {
+            id: "codex-a".to_string(),
+            label: "a@example.com".to_string(),
+            codex_home: PathBuf::from("/tmp/codex-a"),
+            email: Some("a@example.com".to_string()),
+            provider_account_id: Some("acct-a".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+        let mut config = Config {
+            codex_managed_accounts: vec![existing],
+            selected_codex_account_ids: vec!["codex-a".to_string()],
+            ..Config::default()
+        };
+        let added = ManagedCodexAccountConfig {
+            id: "codex-b".to_string(),
+            label: "b@example.com".to_string(),
+            codex_home: PathBuf::from("/tmp/codex-b"),
+            email: Some("b@example.com".to_string()),
+            provider_account_id: Some("acct-b".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+
+        apply_login_account(&mut config, added);
+
+        assert_eq!(config.codex_managed_accounts.len(), 2);
+        assert!(
+            config
+                .codex_managed_accounts
+                .iter()
+                .any(|account| account.id == "codex-a")
+        );
+        assert_eq!(config.selected_codex_account_ids, vec!["codex-b"]);
+    }
+
+    const WORKSPACE_ACCOUNT_ID: &str = "4b875ef7-32b9-4448-96c2-916edda970c1";
+
+    fn workspace_account(
+        id: &str,
+        email: &str,
+        now: chrono::DateTime<Utc>,
+    ) -> ManagedCodexAccountConfig {
+        ManagedCodexAccountConfig {
+            id: id.to_string(),
+            label: email.to_string(),
+            codex_home: PathBuf::from("/tmp").join(id),
+            email: Some(email.to_string()),
+            provider_account_id: Some(WORKSPACE_ACCOUNT_ID.to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        }
+    }
+
+    #[test]
+    fn shared_workspace_account_id_with_different_emails_stays_separate() {
+        let now = Utc::now();
+        let mut config = Config {
+            codex_managed_accounts: vec![
+                workspace_account("codex-a", "snokun509@example.com", now),
+                workspace_account("codex-b", "sianiparyuna@example.com", now),
+            ],
+            ..Config::default()
+        };
+
+        let changed = dedupe_managed_accounts(&mut config);
+
+        assert!(!changed);
+        assert_eq!(config.codex_managed_accounts.len(), 2);
+    }
+
+    #[test]
+    fn find_matching_account_requires_email_agreement_for_known_account_ids() {
+        let now = Utc::now();
+        let config = Config {
+            codex_managed_accounts: vec![workspace_account("codex-a", "a@example.com", now)],
+            ..Config::default()
+        };
+
+        assert!(
+            find_matching_account(&config, Some("b@example.com"), Some(WORKSPACE_ACCOUNT_ID))
+                .is_none()
+        );
+        assert_eq!(
+            find_matching_account(&config, Some("A@EXAMPLE.COM"), Some(WORKSPACE_ACCOUNT_ID))
+                .map(|account| account.id.as_str()),
+            Some("codex-a")
+        );
     }
 
     #[test]

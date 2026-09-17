@@ -1143,6 +1143,8 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         minimax_login: None,
         minimax_login_handle: None,
         kimi_login: None,
+        synthetic_login: None,
+        synthetic_login_handle: None,
         kimi_login_handle: None,
         antigravity_login: None,
         antigravity_login_handle: None,
@@ -1295,6 +1297,17 @@ fn zai_account(id: &str) -> ManagedZaiAccountConfig {
         id: id.to_string(),
         label: id.to_string(),
         api_key_source: "env:ZAI_API_KEY".to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn synthetic_account(id: &str) -> crate::config::ManagedSyntheticAccountConfig {
+    crate::config::ManagedSyntheticAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        api_key_source: "stored".to_string(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
         last_authenticated_at: None,
@@ -1478,6 +1491,16 @@ fn delete_account_requests_refresh_for_all_providers() {
                     .kimi_managed_accounts
                     .push(kimi_account("remove"));
                 app.config.selected_kimi_account_ids = vec![keep_id.to_string()];
+                "remove".to_string()
+            }
+            ProviderId::Synthetic => {
+                app.config
+                    .synthetic_managed_accounts
+                    .push(synthetic_account(keep_id));
+                app.config
+                    .synthetic_managed_accounts
+                    .push(synthetic_account("remove"));
+                app.config.selected_synthetic_account_ids = vec![keep_id.to_string()];
                 "remove".to_string()
             }
             ProviderId::Antigravity => {

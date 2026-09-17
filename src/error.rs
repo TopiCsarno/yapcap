@@ -67,6 +67,12 @@ impl From<KimiError> for AppError {
     }
 }
 
+impl From<SyntheticError> for AppError {
+    fn from(value: SyntheticError) -> Self {
+        Self::Provider(ProviderError::Synthetic(value))
+    }
+}
+
 impl From<AntigravityError> for AppError {
     fn from(value: AntigravityError) -> Self {
         Self::Provider(ProviderError::Antigravity(value))
@@ -133,6 +139,7 @@ impl AppError {
             Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::OpenCodeGo(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Grok(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Synthetic(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -174,6 +181,8 @@ pub enum ProviderError {
     OpenCodeGo(#[from] OpenCodeGoError),
     #[error(transparent)]
     Grok(#[from] GrokError),
+    #[error(transparent)]
+    Synthetic(#[from] SyntheticError),
 }
 
 impl ProviderError {
@@ -191,6 +200,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_network_unavailable(),
             Self::OpenCodeGo(error) => error.is_network_unavailable(),
             Self::Grok(error) => error.is_network_unavailable(),
+            Self::Synthetic(error) => error.is_network_unavailable(),
         }
     }
 
@@ -208,6 +218,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.requires_user_action(),
             Self::OpenCodeGo(error) => error.requires_user_action(),
             Self::Grok(error) => error.requires_user_action(),
+            Self::Synthetic(error) => error.requires_user_action(),
         }
     }
 
@@ -225,6 +236,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_transient(),
             Self::OpenCodeGo(error) => error.is_transient(),
             Self::Grok(error) => error.is_transient(),
+            Self::Synthetic(error) => error.is_transient(),
         }
     }
 }
@@ -754,6 +766,51 @@ impl KimiError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::RateLimited { .. } => true,
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            Self::UsageHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SyntheticError {
+    #[error("Synthetic login required")]
+    LoginRequired,
+    #[error("Synthetic quota request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Synthetic quota endpoint returned HTTP {status}")]
+    UsageHttp { status: u16 },
+    #[error("Synthetic quota endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode Synthetic quota response")]
+    DecodeUsage(#[source] serde_json::Error),
+    #[error("Synthetic response had no usage windows")]
+    NoUsageData,
+}
+
+impl SyntheticError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        None
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
             Self::UsageRequest(source) => request_could_not_reach_network(source),
             Self::UsageHttp { status } => *status >= 500,
             _ => false,

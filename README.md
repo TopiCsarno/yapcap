@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, Grok, and Synthetic.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -34,11 +34,12 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Kimi for Coding** — API key usage tracking with weekly and rate-limit windows
     - **OpenCode Go** — API key usage tracking with 5-hour, weekly, and monthly windows
     - **Grok** — subscription usage shown as a weekly window + available prepaid credits
+    - **Synthetic** — subscription usage with regenerating 5-hour request and weekly credit windows
 - 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time, while the panel remains fixed-width for the active account.
 - 🔎 **Automatic discovery** — detected providers appear automatically, provider availability updates live, and an empty setup opens Manage providers. Gemini remains opt-in and must be enabled manually.
-- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, and OpenCode Go; Cursor scans the local IDE state.
-- 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, and OpenCode Go forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
-- ✅ **Active badge** — matches the host account for Codex, Claude, Cursor, Gemini, OpenCode Go, and Grok. Minimax and Kimi only mark legacy environment-source accounts when the corresponding environment key is present. Copilot, Antigravity, and Z.AI have no host Active badge.
+- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, OpenCode Go, and Synthetic; Cursor scans the local IDE state.
+- 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, OpenCode Go, and Synthetic forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
+- ✅ **Active badge** — matches the host account for Codex, Claude, Cursor, Gemini, OpenCode Go, and Grok. Minimax and Kimi only mark legacy environment-source accounts when the corresponding environment key is present. Copilot, Antigravity, Z.AI, and Synthetic have no host Active badge.
 - ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times.
 
 ## Screenshots
@@ -182,7 +183,7 @@ just install
 
 Each provider supports multiple accounts. Select its popup tab and open **Manage accounts** on the account card, or use the setup action when no account has been added yet.
 
-- **Add account** — starts Codex, Claude, Antigravity, Gemini, or Grok browser OAuth, GitHub Copilot device login, Minimax/Z.AI/Kimi/OpenCode Go API-key entry, or Cursor IDE scanning. Claude asks you to paste the browser's authorization code back into YapCap. Grok also offers explicit import from the Grok CLI.
+- **Add account** — starts Codex, Claude, Antigravity, Gemini, or Grok browser OAuth, GitHub Copilot device login, Minimax/Z.AI/Kimi/OpenCode Go/Synthetic API-key entry, or Cursor IDE scanning. Claude asks you to paste the browser's authorization code back into YapCap. Grok also offers explicit import from the Grok CLI.
 - **Switch account** — select an account row or use the account card's arrows; the panel and popup follow that selection. This does not switch the host tool's account or its Active badge.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 

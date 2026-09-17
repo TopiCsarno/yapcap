@@ -5,13 +5,17 @@ use super::super::super::{
     account_import_button, fl, row, widget,
 };
 use crate::app::login::{
-    KimiLoginFlow, LoginFlow, MinimaxLoginFlow, OpenCodeGoLoginFlow, ZaiLoginFlow,
+    KimiLoginFlow, LoginFlow, MinimaxLoginFlow, OpenCodeGoLoginFlow, SyntheticLoginFlow,
+    ZaiLoginFlow,
 };
 use crate::providers::grok::{GrokLoginState, GrokLoginStatus};
 use crate::providers::kimi::login::{KimiLoginEvent, KimiLoginState, KimiLoginStatus};
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
 use crate::providers::opencode_go::login::{
     OpenCodeGoLoginEvent, OpenCodeGoLoginState, OpenCodeGoLoginStatus,
+};
+use crate::providers::synthetic::login::{
+    SyntheticLoginEvent, SyntheticLoginState, SyntheticLoginStatus,
 };
 use crate::providers::zai::{ZaiLoginEvent, ZaiLoginState, ZaiLoginStatus};
 
@@ -25,6 +29,10 @@ fn zai_login_message(event: ZaiLoginEvent) -> Message {
 
 fn kimi_login_message(event: KimiLoginEvent) -> Message {
     KimiLoginFlow::wrap_event(event)
+}
+
+fn synthetic_login_message(event: SyntheticLoginEvent) -> Message {
+    SyntheticLoginFlow::wrap_event(event)
 }
 
 fn opencode_go_login_message(event: OpenCodeGoLoginEvent) -> Message {
@@ -725,6 +733,95 @@ fn kimi_login_status(login: &KimiLoginState) -> String {
             .error
             .clone()
             .unwrap_or_else(|| fl!("kimi-login-failed")),
+    }
+}
+
+pub(super) fn synthetic_login_controls(
+    login: Option<&SyntheticLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return account_add_button(
+            fl!("account-add"),
+            enabled.then_some(Message::StartLogin(crate::model::ProviderId::Synthetic)),
+        );
+    };
+
+    let mut content = if let Some(error) = &login.error {
+        cosmic::iced::widget::column![
+            widget::text(synthetic_login_status(login)).size(13),
+            widget::text(error).size(13)
+        ]
+        .spacing(10)
+    } else {
+        cosmic::iced::widget::column![widget::text(synthetic_login_status(login)).size(13)]
+            .spacing(10)
+    };
+
+    content = content.width(Length::Fill);
+
+    if login.status == SyntheticLoginStatus::Editing {
+        content = content.push(widget::text(fl!("synthetic-api-key-placeholder")).size(12));
+        content = content.push(
+            widget::text_input::secure_input(
+                fl!("synthetic-api-key-placeholder"),
+                &login.api_key,
+                Some(synthetic_login_message(
+                    SyntheticLoginEvent::ApiKeyVisibilityToggled,
+                )),
+                !login.api_key_visible,
+            )
+            .on_input(|api_key| {
+                synthetic_login_message(SyntheticLoginEvent::ApiKeyChanged(api_key))
+            })
+            .on_submit(|_| synthetic_login_message(SyntheticLoginEvent::Saved))
+            .width(Length::Fill),
+        );
+        if login.api_key_from_opencode {
+            content = content
+                .push(widget::text(fl!("synthetic-api-key-imported-from-opencode")).size(12));
+        }
+        content = content.push(widget::text(fl!("account-label")).size(12));
+        content = content.push(
+            widget::text_input(fl!("account-label"), &login.label)
+                .on_input(|label| synthetic_login_message(SyntheticLoginEvent::LabelChanged(label)))
+                .width(Length::Fill),
+        );
+        content = content.push(
+            row![
+                widget::button::standard(fl!("account-add")).on_press_maybe(
+                    enabled.then_some(synthetic_login_message(SyntheticLoginEvent::Saved)),
+                ),
+                widget::button::text(fl!("account-cancel")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Synthetic))
+                ),
+            ]
+            .spacing(8),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Synthetic))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Synthetic))
+                ),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn synthetic_login_status(login: &SyntheticLoginState) -> String {
+    match login.status {
+        SyntheticLoginStatus::Editing => fl!("synthetic-login-editing"),
+        SyntheticLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("synthetic-login-failed")),
     }
 }
 

@@ -42,6 +42,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
     const OPENCODE_GO: [Marker; 1] = [file(".local/share/opencode/auth.json")];
     const GROK: [Marker; 2] = [dir(".grok"), file(".grok/auth.json")];
     const ZAI: [Marker; 0] = [];
+    const SYNTHETIC: [Marker; 0] = [];
     match provider {
         ProviderId::Codex => &CODEX,
         ProviderId::Claude => &CLAUDE,
@@ -54,6 +55,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
         ProviderId::OpenCodeGo => &OPENCODE_GO,
         ProviderId::Grok => &GROK,
         ProviderId::Zai => &ZAI,
+        ProviderId::Synthetic => &SYNTHETIC,
     }
 }
 

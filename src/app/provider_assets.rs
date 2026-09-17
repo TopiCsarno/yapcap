@@ -53,6 +53,12 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Kimi, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/kimi-reversed.svg")
         }
+        (ProviderId::Synthetic, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/synthetic.svg")
+        }
+        (ProviderId::Synthetic, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/synthetic-reversed.svg")
+        }
         (ProviderId::Antigravity, _) => {
             include_bytes!("../../resources/providers/antigravity-color.svg")
         }

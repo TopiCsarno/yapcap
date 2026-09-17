@@ -44,6 +44,8 @@ pub(super) fn test_app() -> AppModel {
         minimax_login: None,
         minimax_login_handle: None,
         kimi_login: None,
+        synthetic_login: None,
+        synthetic_login_handle: None,
         kimi_login_handle: None,
         antigravity_login: None,
         antigravity_login_handle: None,

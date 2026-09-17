@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Synthetic subscription usage tracking with API-key managed accounts,
+  regenerating 5-hour request and weekly credit windows, and optional OpenCode
+  key prefill.
 - Added Grok subscription usage tracking with browser OAuth, explicit Grok CLI
   credential import/restore, managed accounts, and host Active matching.
 - Added Z.AI Coding Plan usage tracking with managed API keys, five-hour, weekly,

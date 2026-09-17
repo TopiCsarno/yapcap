@@ -15,4 +15,5 @@ pub mod minimax;
 pub mod opencode_auth;
 pub mod opencode_go;
 pub mod registry;
+pub mod synthetic;
 pub mod zai;

@@ -54,6 +54,10 @@ use crate::providers::kimi::{
 use crate::providers::minimax::{self, MinimaxLoginEvent, MinimaxLoginState};
 use crate::providers::opencode_go::login::{OpenCodeGoLoginEvent, OpenCodeGoLoginState};
 use crate::providers::registry;
+use crate::providers::synthetic::{
+    self,
+    login::{SyntheticLoginEvent, SyntheticLoginState},
+};
 use crate::providers::zai::ZaiLoginState;
 use crate::refresh_owner::{
     self, ProcessInfo, RefreshOwner, RefreshOwnerAttempt, RefreshOwnerWaiter,
@@ -130,6 +134,8 @@ pub struct AppModel {
     minimax_login_handle: Option<Handle>,
     kimi_login: Option<KimiLoginState>,
     kimi_login_handle: Option<Handle>,
+    synthetic_login: Option<SyntheticLoginState>,
+    synthetic_login_handle: Option<Handle>,
     antigravity_login: Option<AntigravityLoginState>,
     antigravity_login_handle: Option<Handle>,
     opencode_go_login: Option<OpenCodeGoLoginState>,
@@ -315,6 +321,8 @@ impl cosmic::Application for AppModel {
             minimax_login_handle: None,
             kimi_login: None,
             kimi_login_handle: None,
+            synthetic_login: None,
+            synthetic_login_handle: None,
             antigravity_login: None,
             antigravity_login_handle: None,
             opencode_go_login: None,
@@ -403,6 +411,7 @@ impl cosmic::Application for AppModel {
                 copilot: self.copilot_login.as_ref(),
                 minimax: self.minimax_login.as_ref(),
                 kimi: self.kimi_login.as_ref(),
+                synthetic: self.synthetic_login.as_ref(),
                 antigravity: self.antigravity_login.as_ref(),
                 opencode_go: self.opencode_go_login.as_ref(),
                 grok: self.grok_login.as_ref(),
@@ -598,6 +607,9 @@ impl AppModel {
                     }
                     (ProviderId::Kimi, login::LoginEventKind::Kimi(event)) => {
                         login::KimiLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Synthetic, login::LoginEventKind::Synthetic(event)) => {
+                        login::SyntheticLoginFlow::on_event(self, event)
                     }
                     (ProviderId::Antigravity, login::LoginEventKind::Antigravity(event)) => {
                         login::AntigravityLoginFlow::on_event(self, event)

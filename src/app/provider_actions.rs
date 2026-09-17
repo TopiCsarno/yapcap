@@ -577,6 +577,7 @@ pub(super) fn popup_route_label(route: PopupRoute) -> &'static str {
             ProviderId::Minimax => "manage_accounts_minimax",
             ProviderId::Zai => "manage_accounts_zai",
             ProviderId::Kimi => "manage_accounts_kimi",
+            ProviderId::Synthetic => "manage_accounts_synthetic",
             ProviderId::Antigravity => "manage_accounts_antigravity",
             ProviderId::OpenCodeGo => "manage_accounts_opencode_go",
             ProviderId::Grok => "manage_accounts_grok",
@@ -620,6 +621,7 @@ fn managed_account_count(config: &Config) -> usize {
         + config.minimax_managed_accounts.len()
         + config.zai_managed_accounts.len()
         + config.kimi_managed_accounts.len()
+        + config.synthetic_managed_accounts.len()
         + config.antigravity_managed_accounts.len()
         + config.opencode_go_managed_accounts.len()
         + config.grok_managed_accounts.len()

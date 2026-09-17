@@ -20,10 +20,11 @@ pub enum ProviderId {
     Kimi,
     OpenCodeGo,
     Grok,
+    Synthetic,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Codex,
         Self::Claude,
         Self::Cursor,
@@ -35,6 +36,7 @@ impl ProviderId {
         Self::Kimi,
         Self::OpenCodeGo,
         Self::Grok,
+        Self::Synthetic,
     ];
 
     #[must_use]
@@ -51,6 +53,7 @@ impl ProviderId {
             Self::Kimi => "Kimi",
             Self::OpenCodeGo => "OpenCode Go",
             Self::Grok => "Grok",
+            Self::Synthetic => "Synthetic",
         }
     }
 }
@@ -82,6 +85,12 @@ pub struct ProviderCost {
     pub used: f64,
     pub limit: Option<f64>,
     pub units: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegenerationTick {
+    pub interval_seconds: i64,
+    pub fraction: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

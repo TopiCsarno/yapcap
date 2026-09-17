@@ -82,6 +82,62 @@ pub fn usage_meter(
 }
 
 #[must_use]
+pub fn refill_meter(
+    window: &UsageWindow,
+    now: DateTime<Utc>,
+    format: UsageAmountFormat,
+    tick: Option<crate::model::RegenerationTick>,
+) -> UsageMeter {
+    UsageMeter {
+        fill_percent: displayed_amount_percent(window, now, format),
+        marker_percent: None,
+        tooltip: full_regeneration_label(window, now, tick)
+            .unwrap_or_else(|| usage_amount_label(window, now, format)),
+    }
+}
+
+#[must_use]
+pub fn full_regeneration_label(
+    window: &UsageWindow,
+    now: DateTime<Utc>,
+    tick: Option<crate::model::RegenerationTick>,
+) -> Option<String> {
+    let used = displayed_percent(window, now);
+    if used <= 0.0 {
+        return Some(fl!("quota-full"));
+    }
+    if let (Some(tick), Some(next_tick_at)) = (tick, window.reset_at)
+        && tick.interval_seconds > 0
+        && (0.0..=1.0).contains(&tick.fraction)
+    {
+        let ticks_needed = (used / 100.0 / tick.fraction).ceil().max(1.0) as i64;
+        let until_next = (next_tick_at - now).num_seconds().max(0);
+        let remaining_full = chrono::Duration::seconds(
+            until_next + (ticks_needed - 1).saturating_mul(tick.interval_seconds),
+        );
+        return Some(format_full_in(remaining_full));
+    }
+    let window_seconds = window.window_seconds.filter(|seconds| *seconds > 0)?;
+    let remaining_full = chrono::Duration::seconds(
+        (f64::from(used) / 100.0 * (window_seconds as f64)).round() as i64,
+    );
+    Some(format_full_in(remaining_full))
+}
+
+fn format_full_in(remaining_full: chrono::Duration) -> String {
+    let days = remaining_full.num_days();
+    let hours = remaining_full.num_hours() % 24;
+    let mins = remaining_full.num_minutes() % 60;
+    if days > 0 {
+        fl!("full-in-days-hours", days = days, hours = hours)
+    } else if hours > 0 {
+        fl!("full-in-hours-minutes", hours = hours, mins = mins)
+    } else {
+        fl!("full-in-minutes", mins = mins.max(1))
+    }
+}
+
+#[must_use]
 pub fn displayed_amount_percent(
     window: &UsageWindow,
     now: DateTime<Utc>,
@@ -113,13 +169,40 @@ pub fn reset_label(
     now: DateTime<Utc>,
     format: ResetTimeFormat,
 ) -> Option<String> {
+    renewal_label(window, now, format, RenewalVerb::Reset)
+}
+
+#[must_use]
+pub fn refill_label(
+    window: &UsageWindow,
+    now: DateTime<Utc>,
+    format: ResetTimeFormat,
+) -> Option<String> {
+    renewal_label(window, now, format, RenewalVerb::Refill)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenewalVerb {
+    Reset,
+    Refill,
+}
+
+fn renewal_label(
+    window: &UsageWindow,
+    now: DateTime<Utc>,
+    format: ResetTimeFormat,
+    verb: RenewalVerb,
+) -> Option<String> {
     if is_elapsed(window, now) || is_inactive_window(window, now) {
-        return Some(fl!("reset-now"));
+        return Some(match verb {
+            RenewalVerb::Reset => fl!("reset-now"),
+            RenewalVerb::Refill => fl!("refilled"),
+        });
     }
     if let Some(reset_at) = window.reset_at {
         return Some(match format {
-            ResetTimeFormat::Relative => format_relative_reset_label(reset_at, now),
-            ResetTimeFormat::Absolute => format_absolute_reset_label(reset_at, now),
+            ResetTimeFormat::Relative => format_relative_reset_label(reset_at, now, verb),
+            ResetTimeFormat::Absolute => format_absolute_reset_label(reset_at, now, verb),
         });
     }
     None
@@ -147,24 +230,48 @@ fn is_inactive_window(window: &UsageWindow, now: DateTime<Utc>) -> bool {
         && elapsed < chrono::Duration::seconds(window_seconds / FRESH_WINDOW_FRACTION)
 }
 
-fn format_relative_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+fn format_relative_reset_label(
+    reset_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    verb: RenewalVerb,
+) -> String {
     let remaining = reset_at - now;
     if remaining.num_seconds() <= 0 {
-        return fl!("reset-now");
+        return match verb {
+            RenewalVerb::Reset => fl!("reset-now"),
+            RenewalVerb::Refill => fl!("refilled"),
+        };
     }
     let days = remaining.num_days();
     let hours = remaining.num_hours() % 24;
     let mins = remaining.num_minutes() % 60;
-    if days > 0 {
-        fl!("resets-in-days-hours", days = days, hours = hours)
-    } else if hours > 0 {
-        fl!("resets-in-hours-minutes", hours = hours, mins = mins)
-    } else {
-        fl!("resets-in-minutes", mins = mins)
+    match verb {
+        RenewalVerb::Reset => {
+            if days > 0 {
+                fl!("resets-in-days-hours", days = days, hours = hours)
+            } else if hours > 0 {
+                fl!("resets-in-hours-minutes", hours = hours, mins = mins)
+            } else {
+                fl!("resets-in-minutes", mins = mins)
+            }
+        }
+        RenewalVerb::Refill => {
+            if days > 0 {
+                fl!("refills-in-days-hours", days = days, hours = hours)
+            } else if hours > 0 {
+                fl!("refills-in-hours-minutes", hours = hours, mins = mins)
+            } else {
+                fl!("refills-in-minutes", mins = mins)
+            }
+        }
     }
 }
 
-fn format_absolute_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+fn format_absolute_reset_label(
+    reset_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    verb: RenewalVerb,
+) -> String {
     let reset_at = reset_at.with_timezone(&Local);
     let now = now.with_timezone(&Local);
     let days = reset_at
@@ -173,19 +280,35 @@ fn format_absolute_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> S
         .num_days();
     let time = reset_at.format("%-I:%M %p").to_string();
 
-    match days {
-        0 => fl!("resets-today-at", time = time),
-        1 => fl!("resets-tomorrow-at", time = time),
-        2..=6 => fl!(
-            "resets-weekday-at",
-            weekday = reset_at.format("%A").to_string(),
-            time = time
-        ),
-        _ => fl!(
-            "resets-date-at",
-            date = reset_at.format("%b %-e").to_string(),
-            time = time
-        ),
+    match verb {
+        RenewalVerb::Reset => match days {
+            0 => fl!("resets-today-at", time = time),
+            1 => fl!("resets-tomorrow-at", time = time),
+            2..=6 => fl!(
+                "resets-weekday-at",
+                weekday = reset_at.format("%A").to_string(),
+                time = time
+            ),
+            _ => fl!(
+                "resets-date-at",
+                date = reset_at.format("%b %-e").to_string(),
+                time = time
+            ),
+        },
+        RenewalVerb::Refill => match days {
+            0 => fl!("refills-today-at", time = time),
+            1 => fl!("refills-tomorrow-at", time = time),
+            2..=6 => fl!(
+                "refills-weekday-at",
+                weekday = reset_at.format("%A").to_string(),
+                time = time
+            ),
+            _ => fl!(
+                "refills-date-at",
+                date = reset_at.format("%b %-e").to_string(),
+                time = time
+            ),
+        },
     }
 }
 
@@ -304,6 +427,159 @@ mod tests {
             )
             .as_deref(),
             Some("Reset")
+        );
+    }
+
+    #[test]
+    fn full_regeneration_counts_discrete_ticks_from_the_next_one() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let next_tick = Utc.with_ymd_and_hms(2026, 4, 12, 16, 52, 55).unwrap();
+        let five_hour_tick = crate::model::RegenerationTick {
+            interval_seconds: 900,
+            fraction: 0.05,
+        };
+
+        let one_tick_left = UsageWindow {
+            label: "5-hour".to_string(),
+            used_percent: 5.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(18_000),
+            reset_description: None,
+            group: None,
+        };
+        assert_eq!(
+            strip_isolation_marks(
+                &full_regeneration_label(&one_tick_left, now, Some(five_hour_tick)).unwrap()
+            ),
+            "Full in 1m"
+        );
+
+        let four_ticks_left = UsageWindow {
+            used_percent: 20.0,
+            ..one_tick_left.clone()
+        };
+        assert_eq!(
+            strip_isolation_marks(
+                &full_regeneration_label(&four_ticks_left, now, Some(five_hour_tick)).unwrap()
+            ),
+            "Full in 46m"
+        );
+
+        let fractional_usage = UsageWindow {
+            used_percent: 20.1,
+            ..one_tick_left
+        };
+        assert_eq!(
+            strip_isolation_marks(
+                &full_regeneration_label(&fractional_usage, now, Some(five_hour_tick)).unwrap()
+            ),
+            "Full in 1h 1m"
+        );
+
+        let week_tick = crate::model::RegenerationTick {
+            interval_seconds: 12_120,
+            fraction: 0.02,
+        };
+        let one_week_tick_left = UsageWindow {
+            label: "Weekly credits".to_string(),
+            used_percent: 2.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(604_800),
+            reset_description: None,
+            group: None,
+        };
+        assert_eq!(
+            strip_isolation_marks(
+                &full_regeneration_label(&one_week_tick_left, now, Some(week_tick)).unwrap()
+            ),
+            "Full in 1m"
+        );
+    }
+
+    #[test]
+    fn full_regeneration_scales_with_used_quota() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let next_tick = Utc.with_ymd_and_hms(2026, 4, 12, 17, 30, 0).unwrap();
+        let five_hour = UsageWindow {
+            label: "5-hour".to_string(),
+            used_percent: 20.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(18_000),
+            reset_description: None,
+            group: None,
+        };
+
+        assert_eq!(
+            strip_isolation_marks(&full_regeneration_label(&five_hour, now, None).unwrap()),
+            "Full in 1h 0m"
+        );
+
+        let weekly = UsageWindow {
+            label: "Weekly credits".to_string(),
+            used_percent: 50.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(604_800),
+            reset_description: None,
+            group: None,
+        };
+
+        assert_eq!(
+            strip_isolation_marks(&full_regeneration_label(&weekly, now, None).unwrap()),
+            "Full in 3d 12h"
+        );
+
+        let full = UsageWindow {
+            used_percent: 0.0,
+            ..five_hour
+        };
+        assert_eq!(
+            strip_isolation_marks(&full_regeneration_label(&full, now, None).unwrap()),
+            "Full"
+        );
+    }
+
+    #[test]
+    fn refill_meter_omits_pace_marker() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let next_tick = Utc.with_ymd_and_hms(2026, 4, 12, 17, 30, 0).unwrap();
+        let regen = UsageWindow {
+            label: "5-hour".to_string(),
+            used_percent: 20.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(18_000),
+            reset_description: None,
+            group: None,
+        };
+
+        let meter = refill_meter(&regen, now, UsageAmountFormat::Used, None);
+
+        assert!((meter.fill_percent - 20.0).abs() < 0.001);
+        assert!(meter.marker_percent.is_none());
+        assert_eq!(strip_isolation_marks(&meter.tooltip), "Full in 1h 0m");
+    }
+
+    #[test]
+    fn refill_labels_use_partial_refill_wording() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
+        let next_tick = Utc.with_ymd_and_hms(2026, 4, 12, 17, 30, 0).unwrap();
+        let regen = UsageWindow {
+            label: "5-hour".to_string(),
+            used_percent: 20.0,
+            reset_at: Some(next_tick),
+            window_seconds: Some(18_000),
+            reset_description: None,
+            group: None,
+        };
+
+        assert_eq!(
+            strip_isolation_marks(&refill_label(&regen, now, ResetTimeFormat::Relative).unwrap()),
+            "Refills in 38m"
+        );
+
+        let elapsed = Utc.with_ymd_and_hms(2026, 4, 12, 12, 0, 0).unwrap();
+        assert_eq!(
+            refill_label(&window(Some(elapsed), 51.0), now, ResetTimeFormat::Relative).as_deref(),
+            Some("Refilled")
         );
     }
 

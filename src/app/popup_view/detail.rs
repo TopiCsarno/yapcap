@@ -545,13 +545,28 @@ fn usage_section_content(
     config: &Config,
 ) -> Element<'static, Message> {
     let now = chrono::Utc::now();
+    let renewal = if provider == ProviderId::Synthetic {
+        usage_display::refill_label(window, now, config.reset_time_format)
+    } else {
+        usage_display::reset_label(window, now, config.reset_time_format)
+    };
+    let meter = if provider == ProviderId::Synthetic {
+        usage_display::refill_meter(
+            window,
+            now,
+            config.usage_amount_format,
+            crate::providers::synthetic::regeneration_tick_for(window.window_seconds),
+        )
+    } else {
+        usage_display::usage_meter(window, now, config.usage_amount_format)
+    };
     usage_block_content(
         window_display_label(provider, &window.label),
         usage_display::usage_amount_label(window, now, config.usage_amount_format),
         UsageBlockDetails {
-            secondary: usage_display::reset_label(window, now, config.reset_time_format),
+            secondary: renewal,
             secondary_tooltip: None,
-            meter: usage_display::usage_meter(window, now, config.usage_amount_format),
+            meter,
             overage: overage_text(window),
         },
     )

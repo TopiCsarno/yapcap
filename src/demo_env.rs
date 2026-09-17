@@ -4,8 +4,8 @@ use crate::config::{
     Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
     ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
     ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
-    ManagedOpenCodeGoAccountConfig, ManagedZaiAccountConfig, ProviderEnablement,
-    ProviderVisibilityMode, paths,
+    ManagedOpenCodeGoAccountConfig, ManagedSyntheticAccountConfig, ManagedZaiAccountConfig,
+    ProviderEnablement, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -33,6 +33,7 @@ const ANTIGRAVITY_FREE_ID: &str = "yapcap-demo:antigravity-free";
 const OPENCODE_GO_ID: &str = "yapcap-demo:opencode-go";
 const GROK_PRIMARY_ID: &str = "yapcap-demo:grok-primary";
 const ZAI_PRIMARY_ID: &str = "yapcap-demo:zai-coding-plan";
+const SYNTHETIC_PRIMARY_ID: &str = "yapcap-demo:synthetic-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -71,6 +72,7 @@ pub fn apply_config(config: &mut Config) {
     config.opencode_go_enablement = ProviderEnablement::Enabled;
     config.grok_enablement = ProviderEnablement::Enabled;
     config.zai_enablement = ProviderEnablement::Enabled;
+    config.synthetic_enablement = ProviderEnablement::Enabled;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
@@ -83,6 +85,7 @@ pub fn apply_config(config: &mut Config) {
     config.opencode_go_managed_accounts = demo_opencode_go_accounts();
     config.grok_managed_accounts = demo_grok_accounts();
     config.zai_managed_accounts = demo_zai_accounts();
+    config.synthetic_managed_accounts = demo_synthetic_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -97,6 +100,7 @@ pub fn apply_config(config: &mut Config) {
     config.selected_opencode_go_account_ids = vec![OPENCODE_GO_ID.to_string()];
     config.selected_grok_account_ids = vec![GROK_PRIMARY_ID.to_string()];
     config.selected_zai_account_ids = vec![ZAI_PRIMARY_ID.to_string()];
+    config.selected_synthetic_account_ids = vec![SYNTHETIC_PRIMARY_ID.to_string()];
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -114,6 +118,10 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.minimax_managed_accounts, |account| &account.id);
     changed |= strip_ids(&mut config.selected_kimi_account_ids);
     changed |= retain_len_changed(&mut config.kimi_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_synthetic_account_ids);
+    changed |= retain_len_changed(&mut config.synthetic_managed_accounts, |account| {
+        &account.id
+    });
     changed |= strip_ids(&mut config.selected_antigravity_account_ids);
     changed |= retain_len_changed(&mut config.antigravity_managed_accounts, |account| {
         &account.id
@@ -196,6 +204,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::OpenCodeGo => return None,
         ProviderId::Grok => return None,
         ProviderId::Zai => return None,
+        ProviderId::Synthetic => return None,
     };
     Some(id.to_string())
 }
@@ -213,6 +222,7 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Antigravity => "OAuth".to_string(),
         ProviderId::OpenCodeGo => "API Key".to_string(),
         ProviderId::Zai => "API Key".to_string(),
+        ProviderId::Synthetic => "API Key".to_string(),
     }
 }
 
@@ -343,6 +353,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 auth_state: AuthState::Ready,
                 error: None,
                 snapshot: snapshot_kimi_primary(),
+            },
+        )],
+        ProviderId::Synthetic => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: SYNTHETIC_PRIMARY_ID,
+                label: "Synthetic",
+                last_success_at: now - Duration::minutes(3),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_synthetic_primary(),
             },
         )],
         ProviderId::Antigravity => vec![
@@ -793,6 +815,18 @@ fn demo_minimax_accounts() -> Vec<ManagedMinimaxAccountConfig> {
     }]
 }
 
+fn demo_synthetic_accounts() -> Vec<ManagedSyntheticAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedSyntheticAccountConfig {
+        id: SYNTHETIC_PRIMARY_ID.to_string(),
+        label: "Synthetic".to_string(),
+        api_key_source: "demo".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
 fn demo_kimi_accounts() -> Vec<ManagedKimiAccountConfig> {
     let now = demo_timestamp();
     vec![ManagedKimiAccountConfig {
@@ -917,6 +951,48 @@ fn snapshot_kimi_primary() -> UsageSnapshot {
             account_id: None,
             plan: Some("Intermediate".to_string()),
             display_name: Some("Kimi Intermediate".to_string()),
+        },
+    }
+}
+
+fn snapshot_synthetic_primary() -> UsageSnapshot {
+    let now = Utc::now();
+    let five_hour_tick = now + Duration::minutes(12);
+    let weekly_regen = now + Duration::hours(3);
+    UsageSnapshot {
+        provider: ProviderId::Synthetic,
+        source: "API Key".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![
+            UsageWindow {
+                label: "5-hour".to_string(),
+                used_percent: 20.0,
+                reset_at: Some(five_hour_tick),
+                window_seconds: Some(5 * 3600),
+                reset_description: Some(five_hour_tick.to_rfc3339()),
+                group: None,
+            },
+            UsageWindow {
+                label: "Weekly credits".to_string(),
+                used_percent: 23.0,
+                reset_at: Some(weekly_regen),
+                window_seconds: Some(7 * 24 * 3600),
+                reset_description: Some(weekly_regen.to_rfc3339()),
+                group: None,
+            },
+        ],
+        provider_cost: Some(ProviderCost {
+            used: 13.86,
+            limit: Some(60.0),
+            units: "USD".to_string(),
+        }),
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: None,
+            plan: None,
+            display_name: Some("Synthetic".to_string()),
         },
     }
 }
@@ -1320,6 +1396,7 @@ mod tests {
             snapshot_kimi_primary(),
             snapshot_opencode_go(),
             snapshot_zai_primary(),
+            snapshot_synthetic_primary(),
         ] {
             assert!(!snapshot.windows.is_empty());
             for window in &snapshot.windows {
@@ -1404,6 +1481,7 @@ mod tests {
             selected_antigravity_account_ids: vec!["real-antigravity".to_string()],
             selected_opencode_go_account_ids: vec!["real-opencode-go".to_string()],
             selected_zai_account_ids: vec!["real-zai".to_string()],
+            selected_synthetic_account_ids: vec!["real-synthetic".to_string()],
             ..Config::default()
         };
         apply_config(&mut config);
@@ -1450,6 +1528,11 @@ mod tests {
                     .map(|a| &a.id)
                     .collect(),
                 ProviderId::Kimi => config.kimi_managed_accounts.iter().map(|a| &a.id).collect(),
+                ProviderId::Synthetic => config
+                    .synthetic_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
                 ProviderId::Antigravity => config
                     .antigravity_managed_accounts
                     .iter()

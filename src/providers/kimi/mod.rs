@@ -7,13 +7,16 @@ pub mod storage;
 
 use crate::config::{Config, ManagedKimiAccountConfig};
 use crate::error::KimiError;
-use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow};
+use crate::model::{
+    ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
+};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 pub use storage::load_api_key;
 
 const KIMI_API_URL: &str = "https://api.kimi.com/coding/v1/usages";
+const MOONSHOT_API_URL: &str = "https://api.moonshot.ai/v1/users/me/balance";
 const KIMI_API_KEY_ENV: &str = "KIMI_API_KEY";
 const WEEK_SECONDS: i64 = 7 * 24 * 3600;
 
@@ -55,6 +58,17 @@ struct KimiMembership {
     level: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct MoonshotBalanceResponse {
+    data: Option<MoonshotBalanceData>,
+    status: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoonshotBalanceData {
+    available_balance: Option<f64>,
+}
+
 pub fn sync_managed_accounts(config: &mut Config) -> bool {
     let original_len = config.kimi_managed_accounts.len();
     config.kimi_managed_accounts.retain(|account| {
@@ -74,6 +88,16 @@ pub async fn fetch(
         .filter(|key| !key.is_empty())
         .ok_or(KimiError::LoginRequired)?;
 
+    match fetch_kimi(client, &api_key).await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(KimiError::LoginRequired | KimiError::NoUsageData) => {
+            fetch_moonshot(client, &api_key).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn fetch_kimi(client: &reqwest::Client, api_key: &str) -> Result<UsageSnapshot, KimiError> {
     let response = client
         .get(KIMI_API_URL)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -82,9 +106,40 @@ pub async fn fetch(
         .await
         .map_err(KimiError::UsageRequest)?;
 
+    handle_status(&response)?;
+
+    let response = response
+        .error_for_status()
+        .map_err(KimiError::UsageEndpoint)?;
+    let body = response.text().await.map_err(KimiError::UsageEndpoint)?;
+    parse(&body, Utc::now())
+}
+
+async fn fetch_moonshot(
+    client: &reqwest::Client,
+    api_key: &str,
+) -> Result<UsageSnapshot, KimiError> {
+    let response = client
+        .get(MOONSHOT_API_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(KimiError::UsageRequest)?;
+
+    handle_status(&response)?;
+
+    let response = response
+        .error_for_status()
+        .map_err(KimiError::UsageEndpoint)?;
+    let body = response.text().await.map_err(KimiError::UsageEndpoint)?;
+    parse_moonshot(&body, Utc::now())
+}
+
+fn handle_status(response: &reqwest::Response) -> Result<(), KimiError> {
     match response.status() {
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            return Err(KimiError::LoginRequired);
+            Err(KimiError::LoginRequired)
         }
         reqwest::StatusCode::TOO_MANY_REQUESTS => {
             let retry_after_secs = response
@@ -92,21 +147,13 @@ pub async fn fetch(
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse().ok());
-            return Err(KimiError::RateLimited { retry_after_secs });
+            Err(KimiError::RateLimited { retry_after_secs })
         }
-        status if status.is_server_error() => {
-            return Err(KimiError::UsageHttp {
-                status: status.as_u16(),
-            });
-        }
-        _ => {}
+        status if status.is_server_error() => Err(KimiError::UsageHttp {
+            status: status.as_u16(),
+        }),
+        _ => Ok(()),
     }
-
-    let response = response
-        .error_for_status()
-        .map_err(KimiError::UsageEndpoint)?;
-    let body = response.text().await.map_err(KimiError::UsageEndpoint)?;
-    parse(&body, Utc::now())
 }
 
 pub fn parse(body: &str, updated_at: DateTime<Utc>) -> Result<UsageSnapshot, KimiError> {
@@ -168,6 +215,52 @@ pub fn parse(body: &str, updated_at: DateTime<Utc>) -> Result<UsageSnapshot, Kim
             email: None,
             account_id: None,
             plan,
+            display_name: None,
+        },
+    })
+}
+
+pub fn parse_moonshot(body: &str, updated_at: DateTime<Utc>) -> Result<UsageSnapshot, KimiError> {
+    let response: MoonshotBalanceResponse =
+        serde_json::from_str(body).map_err(KimiError::DecodeUsage)?;
+
+    if response.status == Some(false) {
+        return Err(KimiError::NoUsageData);
+    }
+
+    let available_balance = response
+        .data
+        .as_ref()
+        .and_then(|data| data.available_balance)
+        .filter(|balance| *balance >= f64::EPSILON)
+        .ok_or(KimiError::NoUsageData)?;
+
+    const CREDITS_LIMIT: f64 = 100.0;
+    let used_percent = (available_balance / CREDITS_LIMIT * 100.0) as f32;
+
+    Ok(UsageSnapshot {
+        provider: ProviderId::Kimi,
+        source: "Moonshot API Key".to_string(),
+        updated_at,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "Credits".to_string(),
+            used_percent: used_percent.clamp(0.0, 100.0),
+            reset_at: None,
+            window_seconds: None,
+            reset_description: None,
+            group: None,
+        }],
+        provider_cost: Some(ProviderCost {
+            used: available_balance,
+            limit: Some(CREDITS_LIMIT),
+            units: "USD".to_string(),
+        }),
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: None,
+            plan: Some("Moonshot".to_string()),
             display_name: None,
         },
     })
@@ -301,6 +394,43 @@ mod tests {
         let result = parse(r#"{"error":{"message":"invalid request"}}"#, updated_at());
 
         assert!(matches!(result, Err(KimiError::ApiError { .. })));
+    }
+
+    #[test]
+    fn parses_moonshot_balance() {
+        let snapshot = parse_moonshot(
+            r#"{"code":0,"data":{"available_balance":40.577263,"voucher_balance":0,"cash_balance":40.577263},"scode":"0x0","status":true}"#,
+            updated_at(),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.provider, ProviderId::Kimi);
+        assert_eq!(snapshot.source, "Moonshot API Key");
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].label, "Credits");
+        assert!((snapshot.windows[0].used_percent - 40.577263).abs() < 0.001);
+        let cost = snapshot.provider_cost.expect("moonshot balance cost");
+        assert!((cost.used - 40.577263).abs() < f64::EPSILON * 1000.0);
+        assert_eq!(cost.limit, Some(100.0));
+        assert_eq!(cost.units, "USD");
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Moonshot"));
+    }
+
+    #[test]
+    fn rejects_moonshot_failed_status() {
+        let result = parse_moonshot(r#"{"code":1,"data":null,"status":false}"#, updated_at());
+
+        assert!(matches!(result, Err(KimiError::NoUsageData)));
+    }
+
+    #[test]
+    fn rejects_moonshot_zero_balance() {
+        let result = parse_moonshot(
+            r#"{"code":0,"data":{"available_balance":0},"status":true}"#,
+            updated_at(),
+        );
+
+        assert!(matches!(result, Err(KimiError::NoUsageData)));
     }
 
     #[test]

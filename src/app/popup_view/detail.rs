@@ -188,7 +188,11 @@ fn account_body_items<'a>(
             }
             _ => {
                 if let Some(cost) = snapshot.provider_cost.as_ref() {
-                    items.push(cost_section(snapshot.provider, cost));
+                    if snapshot.provider == ProviderId::Kimi {
+                        items.push(credit_section(cost));
+                    } else {
+                        items.push(cost_section(snapshot.provider, cost));
+                    }
                 }
             }
         }

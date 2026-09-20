@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credential import/restore, managed accounts, and host Active matching.
 - Added Z.AI Coding Plan usage tracking with managed API keys, five-hour, weekly,
   and optional MCP windows, plus content-aware OpenCode key detection and prefill.
+- Added Moonshot/Kimi Platform API fallback for Kimi accounts. When the Kimi
+  Coding endpoint returns no usable usage data, YapCap queries
+  `https://api.moonshot.ai/v1/users/me/balance` and displays the available
+  balance as a **Credits** usage window (normalized to 100 units) and as
+  available credits.
+
+### Fixed
+
+- Fixed invisible back-button text in the Kimi popup under light COSMIC themes
+  by replacing the hardcoded white color with the theme's component foreground
+  color.
 
 ## [0.6.0] - 2026-09-03
 

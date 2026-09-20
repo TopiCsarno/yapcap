@@ -364,8 +364,8 @@ fn back_button_class() -> cosmic::theme::Button {
 fn back_button_style(theme: &cosmic::Theme) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    style.text_color = Some(Color::WHITE);
-    style.icon_color = Some(Color::WHITE);
+    style.text_color = Some(component_on_color(theme));
+    style.icon_color = Some(component_on_color(theme));
     style.border_radius = cosmic.corner_radii.radius_s.into();
     style
 }

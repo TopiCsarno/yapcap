@@ -25,6 +25,19 @@ pub fn format_provider_cost(cost: &ProviderCost) -> (String, String) {
     (line, iso_tooltip(&kind))
 }
 
+#[must_use]
+pub fn format_panel_amount(cost: &ProviderCost) -> String {
+    let kind = classify_units(&cost.units);
+    let used_s = fmt_amount(&kind, cost.used);
+    match cost.limit.filter(|l| *l > f64::EPSILON) {
+        Some(lim) => {
+            let lim_s = fmt_amount(&kind, lim);
+            format!("{used_s} / {lim_s}")
+        }
+        None => used_s,
+    }
+}
+
 fn classify_units(raw: &str) -> SymbolKind {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -161,5 +174,32 @@ mod tests {
         assert_eq!(iso, "USD");
         assert!(line.starts_with("$ "));
         assert!(line.ends_with(" spent"));
+    }
+
+    #[test]
+    fn panel_amount_includes_limit_when_present() {
+        let cost = ProviderCost {
+            used: 3.5,
+            limit: Some(20.0),
+            units: "USD".into(),
+        };
+        assert_eq!(format_panel_amount(&cost), "$ 3.50 / $ 20.00");
+    }
+
+    #[test]
+    fn panel_amount_is_used_only_without_limit() {
+        let cost = ProviderCost {
+            used: 3.5,
+            limit: None,
+            units: "USD".into(),
+        };
+        assert_eq!(format_panel_amount(&cost), "$ 3.50");
+
+        let zero_limit = ProviderCost {
+            used: 1.0,
+            limit: Some(0.0),
+            units: "USD".into(),
+        };
+        assert_eq!(format_panel_amount(&zero_limit), "$ 1.00");
     }
 }

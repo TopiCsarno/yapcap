@@ -33,6 +33,13 @@ fn providers_expose_expected_capabilities() {
         }
     );
     assert_eq!(
+        capabilities(ProviderId::OpenRouter),
+        ProviderCapabilities {
+            supports_background_status_refresh: false,
+            requires_auth_prompt_on_auth_failure: false,
+        }
+    );
+    assert_eq!(
         capabilities(ProviderId::Zai),
         ProviderCapabilities {
             supports_background_status_refresh: false,
@@ -350,6 +357,7 @@ fn host_aware_providers_resolve_system_active_account_id() {
         (ProviderId::Kimi, true),
         (ProviderId::OpenCodeGo, true),
         (ProviderId::Grok, true),
+        (ProviderId::OpenRouter, false),
     ];
     for (provider, expect_some) in expectations {
         let result = system_active_account_id(provider, &config);
@@ -428,7 +436,8 @@ fn every_provider_descriptor_declares_supported_account_actions() {
         ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
         ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
         ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
-        ManagedOpenCodeGoAccountConfig, ManagedZaiAccountConfig, paths,
+        ManagedOpenCodeGoAccountConfig, ManagedOpenRouterAccountConfig, ManagedZaiAccountConfig,
+        paths,
     };
     use crate::providers::opencode_auth::{OPENCODE_AUTH_CONTENT_ENV, OPENCODE_AUTH_PATH_ENV};
     use std::path::PathBuf;
@@ -600,6 +609,14 @@ fn every_provider_descriptor_declares_supported_account_actions() {
             updated_at: now,
             last_authenticated_at: None,
         }],
+        openrouter_managed_accounts: vec![ManagedOpenRouterAccountConfig {
+            id: "openrouter-1".to_string(),
+            label: "OpenRouter account".to_string(),
+            api_key_source: "stored".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: None,
+        }],
         ..Config::default()
     };
 
@@ -673,6 +690,13 @@ fn every_provider_descriptor_declares_supported_account_actions() {
         ),
         (
             ProviderId::Grok,
+            vec![
+                ProviderAccountAction::Delete,
+                ProviderAccountAction::Reauthenticate,
+            ],
+        ),
+        (
+            ProviderId::OpenRouter,
             vec![
                 ProviderAccountAction::Delete,
                 ProviderAccountAction::Reauthenticate,

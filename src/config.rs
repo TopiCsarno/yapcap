@@ -20,6 +20,14 @@ pub struct Config {
     pub reset_time_format: ResetTimeFormat,
     pub usage_amount_format: UsageAmountFormat,
     pub panel_icon_style: PanelIconStyle,
+    #[serde(default)]
+    pub panel_value_display: PanelValueDisplay,
+    #[serde(default)]
+    pub show_all_providers: bool,
+    #[serde(default)]
+    pub show_all_accounts: bool,
+    #[serde(default = "default_panel_font_size")]
+    pub panel_font_size: u16,
     #[serde(default = "default_selected_provider")]
     pub selected_provider: ProviderId,
     #[serde(default = "default_provider_visibility_mode")]
@@ -46,6 +54,8 @@ pub struct Config {
     pub opencode_go_enablement: ProviderEnablement,
     #[serde(default)]
     pub grok_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub openrouter_enablement: ProviderEnablement,
     pub selected_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub selected_claude_account_ids: Vec<String>,
@@ -84,6 +94,10 @@ pub struct Config {
     pub selected_grok_account_ids: Vec<String>,
     #[serde(default)]
     pub grok_managed_accounts: Vec<ManagedGrokAccountConfig>,
+    #[serde(default)]
+    pub selected_openrouter_account_ids: Vec<String>,
+    #[serde(default)]
+    pub openrouter_managed_accounts: Vec<ManagedOpenRouterAccountConfig>,
     pub log_level: String,
 }
 
@@ -94,6 +108,10 @@ impl Default for Config {
             reset_time_format: ResetTimeFormat::Relative,
             usage_amount_format: UsageAmountFormat::Used,
             panel_icon_style: PanelIconStyle::LogoAndBars,
+            panel_value_display: PanelValueDisplay::default(),
+            show_all_providers: false,
+            show_all_accounts: false,
+            panel_font_size: default_panel_font_size(),
             selected_provider: ProviderId::Codex,
             provider_visibility_mode: ProviderVisibilityMode::UserManaged,
             codex_enablement: ProviderEnablement::Auto,
@@ -107,6 +125,7 @@ impl Default for Config {
             antigravity_enablement: ProviderEnablement::Auto,
             opencode_go_enablement: ProviderEnablement::Auto,
             grok_enablement: ProviderEnablement::Auto,
+            openrouter_enablement: ProviderEnablement::Auto,
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
             selected_claude_account_ids: Vec::new(),
@@ -129,6 +148,8 @@ impl Default for Config {
             opencode_go_managed_accounts: Vec::new(),
             selected_grok_account_ids: Vec::new(),
             grok_managed_accounts: Vec::new(),
+            selected_openrouter_account_ids: Vec::new(),
+            openrouter_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -142,11 +163,25 @@ fn default_selected_provider() -> ProviderId {
     ProviderId::Codex
 }
 
+pub const PANEL_FONT_SIZE_MIN: u16 = 8;
+pub const PANEL_FONT_SIZE_MAX: u16 = 24;
+
+#[must_use]
+pub fn default_panel_font_size() -> u16 {
+    13
+}
+
 fn default_gemini_enablement() -> ProviderEnablement {
     ProviderEnablement::Disabled
 }
 
 impl Config {
+    #[must_use]
+    pub fn effective_panel_font_size(&self) -> u16 {
+        self.panel_font_size
+            .clamp(PANEL_FONT_SIZE_MIN, PANEL_FONT_SIZE_MAX)
+    }
+
     #[must_use]
     pub fn provider_enablement(&self, provider: ProviderId) -> ProviderEnablement {
         match provider {
@@ -161,6 +196,7 @@ impl Config {
             ProviderId::Antigravity => self.antigravity_enablement,
             ProviderId::OpenCodeGo => self.opencode_go_enablement,
             ProviderId::Grok => self.grok_enablement,
+            ProviderId::OpenRouter => self.openrouter_enablement,
         }
     }
 
@@ -178,6 +214,7 @@ impl Config {
             ProviderId::Antigravity => &self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &self.selected_opencode_go_account_ids,
             ProviderId::Grok => &self.selected_grok_account_ids,
+            ProviderId::OpenRouter => &self.selected_openrouter_account_ids,
         }
     }
 
@@ -194,6 +231,7 @@ impl Config {
             ProviderId::Antigravity => &mut self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &mut self.selected_opencode_go_account_ids,
             ProviderId::Grok => &mut self.selected_grok_account_ids,
+            ProviderId::OpenRouter => &mut self.selected_openrouter_account_ids,
         }
     }
 
@@ -249,6 +287,7 @@ fn provider_enabled_key(provider: ProviderId) -> &'static str {
         ProviderId::Antigravity => "antigravity_enabled",
         ProviderId::OpenCodeGo => "opencode_go_enabled",
         ProviderId::Grok => "grok_enabled",
+        ProviderId::OpenRouter => "openrouter_enabled",
     }
 }
 
@@ -265,6 +304,7 @@ fn provider_enablement_key(provider: ProviderId) -> &'static str {
         ProviderId::Antigravity => "antigravity_enablement",
         ProviderId::OpenCodeGo => "opencode_go_enablement",
         ProviderId::Grok => "grok_enablement",
+        ProviderId::OpenRouter => "openrouter_enablement",
     }
 }
 
@@ -281,6 +321,7 @@ fn provider_enablement_mut(config: &mut Config, provider: ProviderId) -> &mut Pr
         ProviderId::Antigravity => &mut config.antigravity_enablement,
         ProviderId::OpenCodeGo => &mut config.opencode_go_enablement,
         ProviderId::Grok => &mut config.grok_enablement,
+        ProviderId::OpenRouter => &mut config.openrouter_enablement,
     }
 }
 
@@ -301,6 +342,15 @@ pub enum ProviderEnablement {
     Auto,
     Enabled,
     Disabled,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelValueDisplay {
+    #[default]
+    Percent,
+    Amount,
+    Both,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -452,6 +502,16 @@ pub struct ManagedOpenCodeGoAccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedOpenRouterAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub api_key_source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedGrokAccountConfig {
     pub id: String,
     pub label: String,
@@ -495,6 +555,7 @@ pub struct AppPaths {
     pub kimi_accounts_dir: PathBuf,
     pub antigravity_accounts_dir: PathBuf,
     pub opencode_go_accounts_dir: PathBuf,
+    pub openrouter_accounts_dir: PathBuf,
     #[allow(dead_code)]
     pub grok_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
@@ -527,6 +588,10 @@ pub fn write_changed_config_entries(
         reset_time_format,
         usage_amount_format,
         panel_icon_style,
+        panel_value_display,
+        show_all_providers,
+        show_all_accounts,
+        panel_font_size,
         selected_provider,
         provider_visibility_mode,
         codex_enablement,
@@ -539,6 +604,7 @@ pub fn write_changed_config_entries(
         kimi_enablement,
         antigravity_enablement,
         opencode_go_enablement,
+        openrouter_enablement,
         selected_codex_account_ids,
         codex_managed_accounts,
         selected_claude_account_ids,
@@ -562,6 +628,8 @@ pub fn write_changed_config_entries(
         grok_enablement,
         selected_grok_account_ids,
         grok_managed_accounts,
+        selected_openrouter_account_ids,
+        openrouter_managed_accounts,
         log_level,
     } = new;
 
@@ -577,6 +645,10 @@ pub fn write_changed_config_entries(
     set_changed!(reset_time_format);
     set_changed!(usage_amount_format);
     set_changed!(panel_icon_style);
+    set_changed!(panel_value_display);
+    set_changed!(show_all_providers);
+    set_changed!(show_all_accounts);
+    set_changed!(panel_font_size);
     set_changed!(selected_provider);
     set_changed!(provider_visibility_mode);
     set_changed!(codex_enablement);
@@ -590,6 +662,7 @@ pub fn write_changed_config_entries(
     set_changed!(antigravity_enablement);
     set_changed!(opencode_go_enablement);
     set_changed!(grok_enablement);
+    set_changed!(openrouter_enablement);
     set_changed!(selected_codex_account_ids);
     set_changed!(codex_managed_accounts);
     set_changed!(selected_claude_account_ids);
@@ -612,6 +685,8 @@ pub fn write_changed_config_entries(
     set_changed!(opencode_go_managed_accounts);
     set_changed!(selected_grok_account_ids);
     set_changed!(grok_managed_accounts);
+    set_changed!(selected_openrouter_account_ids);
+    set_changed!(openrouter_managed_accounts);
     set_changed!(log_level);
 
     tx.commit()
@@ -748,6 +823,7 @@ pub fn paths() -> AppPaths {
     let kimi_accounts_dir = state_dir.join("kimi-accounts");
     let antigravity_accounts_dir = state_dir.join("antigravity-accounts");
     let opencode_go_accounts_dir = state_dir.join("opencode-go-accounts");
+    let openrouter_accounts_dir = state_dir.join("openrouter-accounts");
     let grok_accounts_dir = state_dir.join("grok-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
@@ -763,6 +839,7 @@ pub fn paths() -> AppPaths {
         kimi_accounts_dir,
         antigravity_accounts_dir,
         opencode_go_accounts_dir,
+        openrouter_accounts_dir,
         grok_accounts_dir,
         log_dir,
     }

@@ -39,6 +39,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
     const COPILOT: [Marker; 2] = [dir(".config/github-copilot"), dir(".copilot")];
     const MINIMAX: [Marker; 1] = [dir(".mmx")];
     const KIMI: [Marker; 0] = [];
+    const OPENROUTER: [Marker; 0] = [];
     const OPENCODE_GO: [Marker; 1] = [file(".local/share/opencode/auth.json")];
     const GROK: [Marker; 2] = [dir(".grok"), file(".grok/auth.json")];
     const ZAI: [Marker; 0] = [];
@@ -54,6 +55,7 @@ fn markers(provider: ProviderId) -> &'static [Marker] {
         ProviderId::OpenCodeGo => &OPENCODE_GO,
         ProviderId::Grok => &GROK,
         ProviderId::Zai => &ZAI,
+        ProviderId::OpenRouter => &OPENROUTER,
     }
 }
 

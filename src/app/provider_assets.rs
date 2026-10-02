@@ -68,6 +68,12 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Grok, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/grok-reversed.svg")
         }
+        (ProviderId::OpenRouter, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/openrouter.svg")
+        }
+        (ProviderId::OpenRouter, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/openrouter-reversed.svg")
+        }
     };
 
     icon::from_svg_bytes(bytes)

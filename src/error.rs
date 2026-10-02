@@ -85,6 +85,12 @@ impl From<GrokError> for AppError {
     }
 }
 
+impl From<OpenRouterError> for AppError {
+    fn from(value: OpenRouterError) -> Self {
+        Self::Provider(ProviderError::OpenRouter(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -133,6 +139,7 @@ impl AppError {
             Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::OpenCodeGo(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Grok(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::OpenRouter(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -174,6 +181,8 @@ pub enum ProviderError {
     OpenCodeGo(#[from] OpenCodeGoError),
     #[error(transparent)]
     Grok(#[from] GrokError),
+    #[error(transparent)]
+    OpenRouter(#[from] OpenRouterError),
 }
 
 impl ProviderError {
@@ -191,6 +200,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_network_unavailable(),
             Self::OpenCodeGo(error) => error.is_network_unavailable(),
             Self::Grok(error) => error.is_network_unavailable(),
+            Self::OpenRouter(error) => error.is_network_unavailable(),
         }
     }
 
@@ -208,6 +218,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.requires_user_action(),
             Self::OpenCodeGo(error) => error.requires_user_action(),
             Self::Grok(error) => error.requires_user_action(),
+            Self::OpenRouter(error) => error.requires_user_action(),
         }
     }
 
@@ -225,6 +236,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_transient(),
             Self::OpenCodeGo(error) => error.is_transient(),
             Self::Grok(error) => error.is_transient(),
+            Self::OpenRouter(error) => error.is_transient(),
         }
     }
 }
@@ -969,6 +981,59 @@ impl GrokError {
             }
             Self::TokenRefreshHttp { status } => *status == 429 || *status >= 500,
             Self::UsageEndpoint { status, .. } => *status == 429 || *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum OpenRouterError {
+    #[error("OpenRouter login required")]
+    LoginRequired,
+    #[error("OpenRouter usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("OpenRouter usage endpoint returned HTTP {status}")]
+    UsageHttp { status: u16 },
+    #[error("OpenRouter usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode OpenRouter usage response")]
+    DecodeUsage(#[source] serde_json::Error),
+    #[error("OpenRouter response had no usage windows")]
+    NoUsageData,
+    #[error("Rate limited by OpenRouter — will retry automatically")]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("OpenRouter API error: {message}")]
+    ApiError { message: String },
+}
+
+impl OpenRouterError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            Self::UsageHttp { status } => *status >= 500,
             _ => false,
         }
     }

@@ -20,10 +20,11 @@ pub enum ProviderId {
     Kimi,
     OpenCodeGo,
     Grok,
+    OpenRouter,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Codex,
         Self::Claude,
         Self::Cursor,
@@ -35,6 +36,7 @@ impl ProviderId {
         Self::Kimi,
         Self::OpenCodeGo,
         Self::Grok,
+        Self::OpenRouter,
     ];
 
     #[must_use]
@@ -51,6 +53,7 @@ impl ProviderId {
             Self::Kimi => "Kimi",
             Self::OpenCodeGo => "OpenCode Go",
             Self::Grok => "Grok",
+            Self::OpenRouter => "OpenRouter",
         }
     }
 }
@@ -149,6 +152,14 @@ impl UsageSnapshot {
                     secondary: Some(secondary),
                 });
             }
+        }
+        if self.provider == ProviderId::Claude
+            && let Some(weekly) = self.windows.iter().find(|window| window.label == "Weekly")
+        {
+            return Some(AppletWindows {
+                primary: weekly,
+                secondary: self.windows.iter().find(|window| window.label == "Session"),
+            });
         }
         self.windows.first().map(|primary| AppletWindows {
             primary,
@@ -503,6 +514,24 @@ mod tests {
         let windows = snap.applet_windows().unwrap();
         assert_eq!(windows.primary.label, "Total");
         assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("API"));
+    }
+
+    #[test]
+    fn claude_applet_prefers_weekly_as_primary() {
+        let mut snap = snapshot(ProviderId::Claude);
+        snap.windows = vec![window("Session"), window("Weekly"), window("Fable")];
+        let windows = snap.applet_windows().unwrap();
+        assert_eq!(windows.primary.label, "Weekly");
+        assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("Session"));
+    }
+
+    #[test]
+    fn claude_applet_falls_back_without_weekly() {
+        let mut snap = snapshot(ProviderId::Claude);
+        snap.windows = vec![window("Session"), window("Fable")];
+        let windows = snap.applet_windows().unwrap();
+        assert_eq!(windows.primary.label, "Session");
+        assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("Fable"));
     }
 
     #[test]

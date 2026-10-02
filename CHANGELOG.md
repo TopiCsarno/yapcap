@@ -9,10 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added OpenRouter account credit and usage tracking with managed API keys,
+  OpenCode key prefill, and per-key usage fallback.
+- Added Codex banked-reset availability per account, deduplicated desktop alerts,
+  and explicit two-step redemption that returns to the account after success.
+- Added optional all-provider and all-account panel display, percent/amount/both
+  values, and adjustable panel text size.
 - Added Grok subscription usage tracking with browser OAuth, explicit Grok CLI
   credential import/restore, managed accounts, and host Active matching.
 - Added Z.AI Coding Plan usage tracking with managed API keys, five-hour, weekly,
   and optional MCP windows, plus content-aware OpenCode key detection and prefill.
+
+### Changed
+
+- The Claude weekly window is now the primary panel value.
+- When displaying all accounts, refresh each account instead of only the selected one.
 
 ## [0.6.0] - 2026-09-03
 

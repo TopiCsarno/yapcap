@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, OpenRouter, and Grok.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -23,7 +23,7 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 ## Highlights
 
 - 🤖 **Providers**
-    - **Codex** — 5h/weekly windows + credits
+    - **Codex** — 5h/weekly windows, usage credits, and banked reset availability
     - **Claude** — session/weekly/extra usage
     - **Cursor** — total, Auto/Composer, and API usage
     - **Antigravity** — grouped Gemini and Claude/GPT model quota (5h + weekly)
@@ -33,15 +33,21 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Z.AI Coding Plan** — global personal quota with 5-hour, weekly, and optional MCP windows
     - **Kimi for Coding** — API key usage tracking with weekly and rate-limit windows
     - **OpenCode Go** — API key usage tracking with 5-hour, weekly, and monthly windows
+    - **OpenRouter** — account credits and spent balance via an explicitly added API key
     - **Grok** — subscription usage shown as a weekly window + available prepaid credits
-- 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time, while the panel remains fixed-width for the active account.
+- 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time; independent panel switches can show all enabled providers and all their accounts side by side. With “Show all accounts” on, each displayed account is refreshed.
 - 🔎 **Automatic discovery** — detected providers appear automatically, provider availability updates live, and an empty setup opens Manage providers. Gemini remains opt-in and must be enabled manually.
-- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, and OpenCode Go; Cursor scans the local IDE state.
-- 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, and OpenCode Go forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
+- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, OpenCode Go, and OpenRouter; Cursor scans the local IDE state.
+- 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, OpenCode Go, and OpenRouter forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
 - ✅ **Active badge** — matches the host account for Codex, Claude, Cursor, Gemini, OpenCode Go, and Grok. Minimax and Kimi only mark legacy environment-source accounts when the corresponding environment key is present. Copilot, Antigravity, and Z.AI have no host Active badge.
-- ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times.
+- ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; optional all-provider and all-account display, percent/amount/both, panel text size, used/left toggle, and relative or absolute reset times.
+- 🔔 **Codex banked resets** — show available resets separately for each account, notify once when a new reset appears, and offer an explicit two-step, account-specific redemption flow.
 
 ## Screenshots
+
+**Multi-provider panel (illustrative values).** This crop was provided by a user; account percentages and balances have been replaced with synthetic examples. No account credentials or live balances are included.
+
+<img src="resources/screenshots/screenshot-panel-multi-provider-synthetic.png" alt="YapCap COSMIC panel showing multiple providers and accounts with illustrative percentages and credit amounts" width="875" />
 
 <table>
 <tr>
@@ -186,7 +192,19 @@ Each provider supports multiple accounts. Select its popup tab and open **Manage
 - **Switch account** — select an account row or use the account card's arrows; the panel and popup follow that selection. This does not switch the host tool's account or its Active badge.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 
-Codex, Claude, Cursor, Antigravity, and Gemini keep at most one account per provider identity. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username. Minimax, Z.AI, Kimi, and OpenCode Go use unique user-provided labels and reject duplicate API keys.
+Codex, Claude, Cursor, Antigravity, and Gemini keep at most one account per provider identity. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username. Minimax, Z.AI, Kimi, OpenCode Go, and OpenRouter use unique user-provided labels and reject duplicate API keys.
+
+### Codex banked resets
+
+Banked resets are **not** the same as purchased Codex usage credits or the automatic weekly reset. They are one-time benefits that may expire; [OpenAI explains their effect and eligibility](https://help.openai.com/en/articles/20001498-how-banked-codex-resets-work). YapCap reads availability for each configured Codex account from `GET /backend-api/wham/rate-limit-reset-credits`. In the Codex account detail, it shows the number available and the earliest expiry. When a new credit appears, a desktop notification is sent once per account and credit; the deduplication record is kept privately in that account's storage. Native desktop notifications require `notify-send`.
+
+To use one, open that account in YapCap and choose **Use a reset…**. YapCap fetches the availability again, selects the credit expiring soonest, and shows the account, expiry, and a **second confirmation**. Only **Yes, use one reset** sends `POST /backend-api/wham/rate-limit-reset-credits/consume` with a unique idempotency key. A successful reset can change the weekly reset date. The success page returns automatically to the account after three seconds; **Done** returns immediately. A failed response never claims success, and a retry within the dialog reuses the same request key. No reset is consumed just by opening the applet, checking availability, or opening the confirmation.
+
+The reset endpoints are part of the Codex backend and may change. The app never logs raw reset IDs or OAuth tokens; it stores only hashed credit fingerprints for notification deduplication. This redemption flow was verified with synthetic HTTP responses and manually with one real credit; the test suite does not consume credits.
+
+### OpenRouter
+
+Enable **OpenRouter** in Manage providers and add a management API key through the account form. YapCap reads account totals from `GET https://openrouter.ai/api/v1/credits` and, when that response is unavailable, attempts the per-key `/api/v1/key` endpoint. Account credit totals and spend are distinct from Codex banked resets. The key is stored privately under the YapCap account state directory; OpenCode's `openrouter` API credential may be used as a one-time prefill. No OpenRouter key or private profile is shipped with YapCap.
 
 ### Grok
 
@@ -235,13 +253,16 @@ Configured under **Settings** (the header's gear icon):
 | Logo + percent | Provider icon and the primary panel window as a percentage |
 | Percent only | Primary panel window as a percentage only |
 
-The panel normally uses the first two windows. Cursor shows Total plus API usage; Antigravity uses the first two five-hour model-group windows when available. Without accounts on any enabled provider, the panel shows the YapCap icon.
+The panel normally uses the first two windows. Claude shows Weekly first and Session second; Cursor shows Total plus API usage; Antigravity uses the first two five-hour model-group windows when available. Without accounts on any enabled provider, the panel shows the YapCap icon.
 
 ## Display options
 
 Also under **Settings**:
 
 - **Usage format** — show quota as *used* (how much you've consumed) or *left* (how much remains).
+- **Panel value** — percent, monetary amount, or both. Providers without monetary data fall back to percent.
+- **Show all providers / Show all accounts** — independent switches: each visible account uses the selected panel style; when showing all accounts, each account is refreshed individually.
+- **Panel text size** — adjustable from 8 to 24.
 - **Reset time format** — relative durations (`Resets in 2d 4h`) or absolute local times (`Resets Wednesday at 8:25 AM`).
 - **Auto-refresh interval** — how often YapCap polls the provider APIs in the background.
 
@@ -265,7 +286,8 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 | --- | --- |
 | `~/.config/cosmic/io.github.TopiCsarno.YapCap/v600/` | Settings (provider toggles, accounts, display options) |
 | `~/.cache/yapcap/snapshots.json` | Former cached usage state; current builds leave it on disk but do not load it |
-| `~/.local/state/yapcap/<provider>-accounts/` | Managed credential copies (`<provider>` is one of `codex`, `claude`, `cursor`, `antigravity`, `gemini`, `copilot`, `minimax`, `zai`, `kimi`, `opencode-go`, `grok`) |
+| `~/.local/state/yapcap/<provider>-accounts/` | Managed credential copies (`<provider>` is one of `codex`, `claude`, `cursor`, `antigravity`, `gemini`, `copilot`, `minimax`, `zai`, `kimi`, `opencode-go`, `openrouter`, `grok`) |
+| `~/.local/state/yapcap/codex-accounts/<id>/reset-notifications.json` | Private per-account banked-reset notification history and latest available count; no tokens or raw reset IDs |
 | `~/.local/state/yapcap/logs/yapcap.log.YYYY-MM-DD` | Daily log output |
 
 **Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap account state and logs live only under `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`. Old Flatpak snapshot caches under `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/` may remain on disk but are no longer active runtime state. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).

@@ -33,6 +33,7 @@ const ANTIGRAVITY_FREE_ID: &str = "yapcap-demo:antigravity-free";
 const OPENCODE_GO_ID: &str = "yapcap-demo:opencode-go";
 const GROK_PRIMARY_ID: &str = "yapcap-demo:grok-primary";
 const ZAI_PRIMARY_ID: &str = "yapcap-demo:zai-coding-plan";
+const OPENROUTER_PRIMARY_ID: &str = "yapcap-demo:openrouter-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -71,6 +72,7 @@ pub fn apply_config(config: &mut Config) {
     config.opencode_go_enablement = ProviderEnablement::Enabled;
     config.grok_enablement = ProviderEnablement::Enabled;
     config.zai_enablement = ProviderEnablement::Enabled;
+    config.openrouter_enablement = ProviderEnablement::Enabled;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
@@ -83,6 +85,7 @@ pub fn apply_config(config: &mut Config) {
     config.opencode_go_managed_accounts = demo_opencode_go_accounts();
     config.grok_managed_accounts = demo_grok_accounts();
     config.zai_managed_accounts = demo_zai_accounts();
+    config.openrouter_managed_accounts = demo_openrouter_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -97,6 +100,7 @@ pub fn apply_config(config: &mut Config) {
     config.selected_opencode_go_account_ids = vec![OPENCODE_GO_ID.to_string()];
     config.selected_grok_account_ids = vec![GROK_PRIMARY_ID.to_string()];
     config.selected_zai_account_ids = vec![ZAI_PRIMARY_ID.to_string()];
+    config.selected_openrouter_account_ids = vec![OPENROUTER_PRIMARY_ID.to_string()];
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -126,6 +130,10 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.grok_managed_accounts, |account| &account.id);
     changed |= strip_ids(&mut config.selected_zai_account_ids);
     changed |= retain_len_changed(&mut config.zai_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_openrouter_account_ids);
+    changed |= retain_len_changed(&mut config.openrouter_managed_accounts, |account| {
+        &account.id
+    });
     changed
 }
 
@@ -196,6 +204,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::OpenCodeGo => return None,
         ProviderId::Grok => return None,
         ProviderId::Zai => return None,
+        ProviderId::OpenRouter => return None,
     };
     Some(id.to_string())
 }
@@ -213,6 +222,7 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Antigravity => "OAuth".to_string(),
         ProviderId::OpenCodeGo => "API Key".to_string(),
         ProviderId::Zai => "API Key".to_string(),
+        ProviderId::OpenRouter => "API Key".to_string(),
     }
 }
 
@@ -405,6 +415,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 auth_state: AuthState::Ready,
                 error: None,
                 snapshot: snapshot_zai_primary(),
+            },
+        )],
+        ProviderId::OpenRouter => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: OPENROUTER_PRIMARY_ID,
+                label: "OpenRouter Credits",
+                last_success_at: now - Duration::minutes(2),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_openrouter_primary(),
             },
         )],
     }
@@ -843,6 +865,48 @@ fn demo_zai_accounts() -> Vec<ManagedZaiAccountConfig> {
         updated_at: now,
         last_authenticated_at: Some(now),
     }]
+}
+
+fn demo_openrouter_accounts() -> Vec<crate::config::ManagedOpenRouterAccountConfig> {
+    let now = demo_timestamp();
+    vec![crate::config::ManagedOpenRouterAccountConfig {
+        id: OPENROUTER_PRIMARY_ID.to_string(),
+        label: "OpenRouter Credits".to_string(),
+        api_key_source: "demo".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_openrouter_primary() -> UsageSnapshot {
+    let now = Utc::now();
+    UsageSnapshot {
+        provider: ProviderId::OpenRouter,
+        source: "API Key".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "Credits".to_string(),
+            used_percent: 25.0,
+            reset_at: None,
+            window_seconds: None,
+            reset_description: None,
+            group: None,
+        }],
+        provider_cost: Some(ProviderCost {
+            used: 25.0,
+            limit: Some(100.0),
+            units: "USD".to_string(),
+        }),
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: None,
+            plan: None,
+            display_name: Some("OpenRouter Credits".to_string()),
+        },
+    }
 }
 
 fn snapshot_minimax_primary() -> UsageSnapshot {
@@ -1462,6 +1526,11 @@ mod tests {
                     .collect(),
                 ProviderId::Grok => config.grok_managed_accounts.iter().map(|a| &a.id).collect(),
                 ProviderId::Zai => config.zai_managed_accounts.iter().map(|a| &a.id).collect(),
+                ProviderId::OpenRouter => config
+                    .openrouter_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
             };
             for id in selected {
                 assert!(

@@ -10,6 +10,7 @@ mod grok_adapter;
 mod kimi_adapter;
 mod minimax_adapter;
 mod opencode_go_adapter;
+mod openrouter_adapter;
 mod zai_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
@@ -33,6 +34,7 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Antigravity => &ANTIGRAVITY_ADAPTER,
         ProviderId::OpenCodeGo => &OPENCODE_GO_ADAPTER,
         ProviderId::Grok => &GROK_ADAPTER,
+        ProviderId::OpenRouter => &OPENROUTER_ADAPTER,
     }
 }
 
@@ -49,6 +51,8 @@ static ANTIGRAVITY_ADAPTER: antigravity_adapter::AntigravityAdapter =
 static OPENCODE_GO_ADAPTER: opencode_go_adapter::OpenCodeGoAdapter =
     opencode_go_adapter::OpenCodeGoAdapter;
 static GROK_ADAPTER: grok_adapter::GrokAdapter = grok_adapter::GrokAdapter;
+static OPENROUTER_ADAPTER: openrouter_adapter::OpenRouterAdapter =
+    openrouter_adapter::OpenRouterAdapter;
 
 pub(super) fn opencode_go_system_active_account_id(
     managed_accounts: &[crate::config::ManagedOpenCodeGoAccountConfig],
@@ -227,6 +231,23 @@ pub(super) fn grok_system_active_account_id(
 ) -> Option<String> {
     let path = host_user_home_dir()?.join(".grok").join("auth.json");
     grok::account::system_active_account_id(managed_accounts, &path)
+}
+
+pub(super) fn openrouter_system_active_account_id(
+    managed_accounts: &[crate::config::ManagedOpenRouterAccountConfig],
+) -> Option<String> {
+    std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .and_then(|api_key| {
+            if api_key.is_empty() {
+                None
+            } else {
+                managed_accounts
+                    .iter()
+                    .find(|account| account.api_key_source == "env:OPENROUTER_API_KEY")
+                    .map(|account| account.id.clone())
+            }
+        })
 }
 
 #[cfg(test)]

@@ -595,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn load_initial_state_includes_grok_in_canonical_order() {
+    fn load_initial_state_includes_openrouter_in_canonical_order() {
         let config = Config::default();
         let state = load_initial_state(
             &config,
@@ -604,7 +604,7 @@ mod tests {
         );
         assert!(state.provider(ProviderId::Grok).is_some());
         let last_provider = state.providers.last().map(|p| p.provider);
-        assert_eq!(last_provider, Some(ProviderId::Grok));
+        assert_eq!(last_provider, Some(ProviderId::OpenRouter));
     }
 
     #[test]

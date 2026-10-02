@@ -1,9 +1,10 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PagerDirection,
-    PanelIconStyle, PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, Size, Task,
-    UpdateStatus, UsageAmountFormat, app_popup, demo_env, destroy_popup, format_retry_delay,
-    panel_button_size, popup_view, refresh_provider_account_statuses_task, registry, runtime,
-    select_provider, update_retry_delay, update_retry_task,
+    PanelDisplayOptions, PanelIconStyle, PanelValueDisplay, PopupRoute, ProviderId,
+    ProviderRefreshResult, ResetTimeFormat, Size, Task, UpdateStatus, UsageAmountFormat, app_popup,
+    demo_env, destroy_popup, format_retry_delay, panel_button_size, popup_view,
+    refresh_provider_account_statuses_task, registry, runtime, select_provider, update_retry_delay,
+    update_retry_task,
 };
 use crate::config::APP_ID;
 use crate::shared_state::{self, ProviderRefreshRequest, RefreshRequestReason};
@@ -133,7 +134,15 @@ impl AppModel {
     }
 
     pub(super) fn sync_panel_suggested_bounds(&mut self) {
-        let (w, h) = panel_button_size(&self.core, &self.state, self.config.panel_icon_style);
+        let options = PanelDisplayOptions {
+            style: self.config.panel_icon_style,
+            value_display: self.config.panel_value_display,
+            show_all_providers: self.config.show_all_providers,
+            show_all_accounts: self.config.show_all_accounts,
+            font_size: f32::from(self.config.effective_panel_font_size()),
+            usage_amount_format: self.config.usage_amount_format,
+        };
+        let (w, h) = panel_button_size(&self.core, &self.state, options, self.selected_provider);
         self.core.applet.suggested_bounds = Some(Size::new(w, h));
     }
 
@@ -403,6 +412,73 @@ impl AppModel {
         Task::none()
     }
 
+    pub(super) fn set_panel_value_display(
+        &mut self,
+        value_display: PanelValueDisplay,
+    ) -> Task<Message> {
+        let previous = self.config.panel_value_display;
+        self.write_config(|new_config| {
+            new_config.panel_value_display = value_display;
+        });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous = ?previous,
+            value_display = ?value_display,
+            "panel value display setting changed"
+        );
+        self.sync_panel_suggested_bounds();
+        Task::none()
+    }
+
+    pub(super) fn set_show_all_providers(&mut self, value: bool) -> Task<Message> {
+        let previous = self.config.show_all_providers;
+        self.write_config(|new_config| {
+            new_config.show_all_providers = value;
+        });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous,
+            value,
+            "show all providers setting changed"
+        );
+        self.sync_panel_suggested_bounds();
+        Task::none()
+    }
+
+    pub(super) fn set_show_all_accounts(&mut self, value: bool) -> Task<Message> {
+        let previous = self.config.show_all_accounts;
+        self.write_config(|new_config| {
+            new_config.show_all_accounts = value;
+        });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous,
+            value,
+            "show all accounts setting changed"
+        );
+        self.sync_panel_suggested_bounds();
+        Task::none()
+    }
+
+    pub(super) fn set_panel_font_size(&mut self, value: u16) -> Task<Message> {
+        let value = value.clamp(
+            crate::config::PANEL_FONT_SIZE_MIN,
+            crate::config::PANEL_FONT_SIZE_MAX,
+        );
+        let previous = self.config.panel_font_size;
+        self.write_config(|new_config| {
+            new_config.panel_font_size = value;
+        });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous,
+            value,
+            "panel font size setting changed"
+        );
+        self.sync_panel_suggested_bounds();
+        Task::none()
+    }
+
     pub(super) fn on_host_cli_auth_changed(&mut self) {
         if demo_env::is_active() {
             return;
@@ -566,6 +642,7 @@ impl AppModel {
 pub(super) fn popup_route_label(route: PopupRoute) -> &'static str {
     match route {
         PopupRoute::ProviderDetail => "provider_detail",
+        PopupRoute::CodexReset => "codex_reset",
         PopupRoute::Settings => "settings",
         PopupRoute::ManageProviders => "manage_providers",
         PopupRoute::ManageAccounts(provider) => match provider {
@@ -580,6 +657,7 @@ pub(super) fn popup_route_label(route: PopupRoute) -> &'static str {
             ProviderId::Antigravity => "manage_accounts_antigravity",
             ProviderId::OpenCodeGo => "manage_accounts_opencode_go",
             ProviderId::Grok => "manage_accounts_grok",
+            ProviderId::OpenRouter => "manage_accounts_openrouter",
         },
         PopupRoute::About => "about",
     }
@@ -591,6 +669,7 @@ pub(super) fn popup_route_provider_label(
 ) -> &'static str {
     match route {
         PopupRoute::ProviderDetail => selected_provider.label(),
+        PopupRoute::CodexReset => ProviderId::Codex.label(),
         PopupRoute::Settings | PopupRoute::ManageProviders | PopupRoute::About => "none",
         PopupRoute::ManageAccounts(provider) => provider.label(),
     }
@@ -623,6 +702,7 @@ fn managed_account_count(config: &Config) -> usize {
         + config.antigravity_managed_accounts.len()
         + config.opencode_go_managed_accounts.len()
         + config.grok_managed_accounts.len()
+        + config.openrouter_managed_accounts.len()
 }
 
 #[cfg(test)]

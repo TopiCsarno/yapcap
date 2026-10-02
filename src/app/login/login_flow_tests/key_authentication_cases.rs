@@ -2,13 +2,14 @@ use crate::app::AppModel;
 use crate::app::login::LoginFlow;
 use crate::config::{
     Config, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig, ManagedOpenCodeGoAccountConfig,
-    ManagedZaiAccountConfig,
+    ManagedOpenRouterAccountConfig, ManagedZaiAccountConfig,
 };
 use crate::key_authentication::KeyAuthenticationState;
 use crate::model::ProviderId;
 use crate::providers::kimi::storage as kimi_storage;
 use crate::providers::minimax::storage as minimax_storage;
 use crate::providers::opencode_go::storage as opencode_go_storage;
+use crate::providers::openrouter::storage as openrouter_storage;
 use crate::providers::zai::storage as zai_storage;
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
@@ -82,8 +83,60 @@ impl KeyAuthenticationCase for KimiCase {
     }
 }
 
-pub(super) struct MinimaxCase;
+pub(super) struct OpenRouterCase;
 
+impl KeyAuthenticationCase for OpenRouterCase {
+    type Flow = super::super::OpenRouterLoginFlow;
+
+    const PROVIDER: ProviderId = ProviderId::OpenRouter;
+
+    fn state(app: &AppModel) -> Option<&KeyAuthenticationState> {
+        app.openrouter_login.as_ref()
+    }
+
+    fn opencode_auth(key: &str) -> String {
+        format!(r#"{{"openrouter":{{"type":"api","key":"{key}"}}}}"#)
+    }
+
+    fn storage_root(root: &Path) -> PathBuf {
+        root.join("yapcap/openrouter-accounts")
+    }
+
+    fn account_facts(config: &Config, account_id: &str) -> Option<AccountFacts> {
+        config
+            .openrouter_managed_accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .map(AccountFacts::from_openrouter)
+    }
+
+    fn set_account(config: &mut Config, account_id: &str, label: &str, created_at: DateTime<Utc>) {
+        config
+            .openrouter_managed_accounts
+            .push(ManagedOpenRouterAccountConfig {
+                id: account_id.to_string(),
+                label: label.to_string(),
+                api_key_source: "stored".to_string(),
+                created_at,
+                updated_at: created_at,
+                last_authenticated_at: Some(created_at),
+            });
+    }
+
+    fn load_api_key(account_id: &str) -> Result<String, String> {
+        openrouter_storage::load_api_key(account_id)
+    }
+
+    fn write_api_key(account_id: &str, api_key: &str) -> Result<(), String> {
+        openrouter_storage::write_api_key(account_id, api_key)
+    }
+
+    fn save_error_prefix() -> &'static str {
+        "Failed to save OpenRouter API key:"
+    }
+}
+
+pub(super) struct MinimaxCase;
 impl KeyAuthenticationCase for MinimaxCase {
     type Flow = super::super::MinimaxLoginFlow;
 
@@ -249,6 +302,15 @@ pub(super) struct AccountFacts {
 
 impl AccountFacts {
     fn from_kimi(account: &ManagedKimiAccountConfig) -> Self {
+        Self {
+            label: account.label.clone(),
+            created_at: account.created_at,
+            updated_at: account.updated_at,
+            last_authenticated_at: account.last_authenticated_at,
+        }
+    }
+
+    fn from_openrouter(account: &ManagedOpenRouterAccountConfig) -> Self {
         Self {
             label: account.label.clone(),
             created_at: account.created_at,

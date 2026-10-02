@@ -360,6 +360,7 @@ impl ProviderAccountStorage {
             ProviderId::Antigravity => "antigravity",
             ProviderId::OpenCodeGo => "opencode_go",
             ProviderId::Grok => "grok",
+            ProviderId::OpenRouter => "openrouter",
         };
         let millis = Utc::now().timestamp_millis();
         let sequence = ACCOUNT_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);

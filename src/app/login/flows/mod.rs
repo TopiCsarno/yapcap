@@ -7,6 +7,7 @@ mod grok;
 mod kimi;
 mod minimax;
 mod opencode_go;
+mod openrouter;
 mod zai;
 
 pub(crate) use antigravity::AntigravityLoginFlow;
@@ -18,4 +19,5 @@ pub(crate) use grok::GrokLoginFlow;
 pub(crate) use kimi::KimiLoginFlow;
 pub(crate) use minimax::MinimaxLoginFlow;
 pub(crate) use opencode_go::OpenCodeGoLoginFlow;
+pub(crate) use openrouter::OpenRouterLoginFlow;
 pub(crate) use zai::ZaiLoginFlow;

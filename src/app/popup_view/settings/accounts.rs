@@ -6,7 +6,8 @@ use self::empty::empty_accounts_state;
 use self::login_controls::{
     antigravity_login_controls, claude_login_controls, codex_login_controls,
     copilot_login_controls, cursor_scan_controls, gemini_login_controls, grok_login_controls,
-    kimi_login_controls, minimax_login_controls, opencode_go_login_controls, zai_login_controls,
+    kimi_login_controls, minimax_login_controls, opencode_go_login_controls,
+    openrouter_login_controls, zai_login_controls,
 };
 use self::rows::{
     AccountRowPosition, account_action_container, account_selector_list, account_settings_row,
@@ -116,6 +117,10 @@ pub(super) fn provider_settings_view<'a>(
         ProviderLoginKind::Kimi => (
             kimi_login_controls(logins.kimi, enabled),
             logins.kimi.is_some(),
+        ),
+        ProviderLoginKind::OpenRouter => (
+            openrouter_login_controls(logins.openrouter, enabled),
+            logins.openrouter.is_some(),
         ),
         ProviderLoginKind::Antigravity => (
             antigravity_login_controls(logins.antigravity, enabled),

@@ -195,6 +195,34 @@ fn account_body_items<'a>(
     } else {
         items.extend(provider_status_info(provider, state, account, detection));
     }
+    if provider.provider == ProviderId::Codex
+        && let Some((count, expiry)) = account.and_then(|account| {
+            crate::providers::codex::reset_credits::latest_availability(&account.account_id)
+        })
+    {
+        let count = i64::try_from(count).unwrap_or(i64::MAX);
+        let description = if count == 0 {
+            fl!("codex-reset-none")
+        } else if let Some(expiry) = expiry {
+            let date = expiry.format("%Y-%m-%d %H:%M UTC").to_string();
+            fl!("codex-reset-popup-expiry", date = date.as_str())
+        } else {
+            fl!("codex-reset-popup-action")
+        };
+        let action = (count > 0).then(|| {
+            widget::button::suggested(fl!("codex-reset-use-action"))
+                .on_press(Message::PrepareCodexReset(
+                    account.unwrap().account_id.clone(),
+                ))
+                .into()
+        });
+        items.push(info_block(
+            fl!("codex-reset-popup-title", count = count),
+            description,
+            None,
+            action,
+        ));
+    }
     items
 }
 

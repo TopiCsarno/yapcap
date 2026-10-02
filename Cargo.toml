@@ -3,7 +3,7 @@ name = "yapcap"
 version = "0.6.0"
 edition = "2024"
 license = "MPL-2.0"
-description = "COSMIC panel applet for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok usage"
+description = "COSMIC panel applet for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, OpenRouter, and Grok usage"
 repository = "https://github.com/TopiCsarno/yapcap"
 
 [package.metadata.deb]
@@ -21,7 +21,7 @@ assets = [
 ]
 extended-description = """
 YapCap is a native COSMIC panel applet that surfaces local usage limits for \
-Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok from accounts added in YapCap.
+Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, OpenRouter, and Grok from accounts added in YapCap.
 """
 
 [package.metadata.generate-rpm]
@@ -54,6 +54,7 @@ tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dependencies.i18n-embed]
 version = "0.16"

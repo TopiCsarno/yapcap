@@ -12,4 +12,5 @@ mod key_authentication_cases;
 mod kimi;
 mod minimax;
 mod opencode_go;
+mod openrouter;
 mod zai;

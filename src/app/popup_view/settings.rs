@@ -8,7 +8,7 @@ use super::{
     component_divider_color, container, fl, provider_icon_handle, provider_icon_variant, widget,
 };
 
-pub(super) fn general_settings_view<'a>(config: &'a Config) -> Element<'a, Message> {
+pub(crate) fn general_settings_view<'a>(config: &'a Config) -> Element<'a, Message> {
     general::general_settings_view(config)
 }
 

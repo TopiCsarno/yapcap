@@ -4,7 +4,7 @@ use crate::config::{
     Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
     ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
     ManagedGrokAccountConfig, ManagedKimiAccountConfig, ManagedMinimaxAccountConfig,
-    ManagedOpenCodeGoAccountConfig, ManagedZaiAccountConfig,
+    ManagedOpenCodeGoAccountConfig, ManagedOpenRouterAccountConfig, ManagedZaiAccountConfig,
 };
 use crate::error::AppError;
 use crate::model::{AppState, AuthState, ProviderAccountRuntimeState, ProviderId, UsageSnapshot};
@@ -72,6 +72,7 @@ pub enum ProviderLoginKind {
     Antigravity,
     OpenCodeGo,
     Grok,
+    OpenRouter,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +133,7 @@ pub enum ProviderAccountHandle {
     Antigravity(ManagedAntigravityAccountConfig),
     OpenCodeGo(ManagedOpenCodeGoAccountConfig),
     Grok(ManagedGrokAccountConfig),
+    OpenRouter(ManagedOpenRouterAccountConfig),
 }
 
 pub trait ProviderAdapter: Send + Sync {

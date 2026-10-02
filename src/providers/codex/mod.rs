@@ -5,6 +5,7 @@ mod login;
 mod oauth;
 mod opencode_import;
 mod refresh;
+pub(crate) mod reset_credits;
 #[cfg(test)]
 mod tests;
 
@@ -64,14 +65,18 @@ pub async fn fetch(
     account_id: &str,
     account_dir: PathBuf,
 ) -> Result<UsageSnapshot, CodexError> {
-    fetch_at(
+    let snapshot = fetch_at(
         client,
         account_id,
-        account_dir,
+        account_dir.clone(),
         ENDPOINT,
         refresh::TOKEN_ENDPOINT,
     )
-    .await
+    .await?;
+    if let Err(reason) = reset_credits::check_and_notify(account_id, &account_dir).await {
+        tracing::debug!(reason, "Codex reset availability check skipped");
+    }
+    Ok(snapshot)
 }
 
 async fn fetch_at(

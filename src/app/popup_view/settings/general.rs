@@ -1,20 +1,28 @@
 use super::super::{
-    Alignment, Background, ButtonInteraction, Element, Length, Message, PanelIconStyle, ProviderId,
-    ResetTimeFormat, UsageAmountFormat, UsageWindow, apply_alpha, component_container_style,
-    component_divider_color, component_hover_color, component_on_color, component_selected_color,
-    component_surface_color, container, fl, progress_bar, provider_icon_handle,
-    provider_icon_variant, row, settings_block, usage_display, widget,
+    Alignment, Background, ButtonInteraction, Element, Length, Message, PanelIconStyle,
+    PanelValueDisplay, ProviderId, ResetTimeFormat, UsageAmountFormat, UsageWindow, apply_alpha,
+    component_container_style, component_divider_color, component_hover_color, component_on_color,
+    component_selected_color, component_surface_color, container, fl, progress_bar,
+    provider_icon_handle, provider_icon_variant, row, settings_block, usage_display, widget,
 };
 
 pub(super) fn general_settings_view<'a>(config: &'a crate::config::Config) -> Element<'a, Message> {
     let refresh_section = refresh_section(config.refresh_interval_seconds);
     let panel_icon_section = panel_icon_section(config.panel_icon_style);
+    let show_all_providers_section = show_all_providers_section(config.show_all_providers);
+    let show_all_accounts_section = show_all_accounts_section(config.show_all_accounts);
+    let panel_font_size_section = panel_font_size_section(config.effective_panel_font_size());
+    let panel_value_section = panel_value_section(config.panel_value_display);
     let reset_time_section = reset_time_section(config.reset_time_format);
     let usage_amount_section = usage_amount_section(config.usage_amount_format);
     Element::from(
         cosmic::iced::widget::column![
             refresh_section,
             panel_icon_section,
+            show_all_providers_section,
+            show_all_accounts_section,
+            panel_font_size_section,
+            panel_value_section,
             reset_time_section,
             usage_amount_section
         ]
@@ -154,6 +162,111 @@ fn panel_icon_preview(style: PanelIconStyle) -> Element<'static, Message> {
         .height(Length::Fixed(22.0))
         .align_y(Alignment::Center)
         .into()
+}
+
+fn show_all_providers_section(show_all_providers: bool) -> Element<'static, Message> {
+    let checkbox = widget::checkbox(show_all_providers)
+        .label(fl!("show-all-providers"))
+        .on_toggle(Message::SetShowAllProviders)
+        .text_size(12);
+
+    widget::tooltip::tooltip(
+        checkbox,
+        widget::text(fl!("show-all-providers-tooltip")).size(12),
+        widget::tooltip::Position::Top,
+    )
+    .into()
+}
+
+fn show_all_accounts_section(show_all_accounts: bool) -> Element<'static, Message> {
+    let checkbox = widget::checkbox(show_all_accounts)
+        .label(fl!("show-all-accounts"))
+        .on_toggle(Message::SetShowAllAccounts)
+        .text_size(12);
+
+    widget::tooltip::tooltip(
+        checkbox,
+        widget::text(fl!("show-all-accounts-tooltip")).size(12),
+        widget::tooltip::Position::Top,
+    )
+    .into()
+}
+
+fn panel_font_size_section(current: u16) -> Element<'static, Message> {
+    let value_label = widget::text(format!("{current}")).size(14);
+    let slider = cosmic::iced::widget::slider(
+        crate::config::PANEL_FONT_SIZE_MIN..=crate::config::PANEL_FONT_SIZE_MAX,
+        current,
+        Message::SetPanelFontSize,
+    )
+    .step(1u16)
+    .width(Length::Fill);
+
+    let content = row![
+        widget::tooltip::tooltip(
+            value_label,
+            widget::text(fl!("panel-font-size-tooltip")).size(12),
+            widget::tooltip::Position::Top,
+        ),
+        container(slider).width(Length::Fill),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
+
+    settings_block(
+        widget::text(fl!("panel-font-size-section-title"))
+            .size(16)
+            .into(),
+        container(content).padding([4, 0]),
+    )
+}
+
+fn panel_value_section(current_display: PanelValueDisplay) -> Element<'static, Message> {
+    let options = [
+        (PanelValueDisplay::Percent, fl!("panel-value-percent")),
+        (PanelValueDisplay::Amount, fl!("panel-value-amount")),
+        (PanelValueDisplay::Both, fl!("panel-value-both")),
+    ];
+
+    let buttons = options.iter().enumerate().fold(
+        row![].width(Length::Fill),
+        |row, (index, (display, text))| {
+            let is_selected = *display == current_display;
+            let content = segmented_option_content(
+                index,
+                is_selected,
+                segmented_option_text(text.clone(), 12, is_selected),
+                [9, 8],
+                34.0,
+            );
+            let tooltip = match *display {
+                PanelValueDisplay::Percent => fl!("panel-value-percent-tooltip"),
+                PanelValueDisplay::Amount => fl!("panel-value-amount-tooltip"),
+                PanelValueDisplay::Both => fl!("panel-value-both-tooltip"),
+            };
+            row.push(widget::tooltip::tooltip(
+                widget::button::custom(content)
+                    .class(segmented_option_class(
+                        is_selected,
+                        index == 0,
+                        index + 1 == options.len(),
+                    ))
+                    .padding(0)
+                    .on_press(Message::SetPanelValueDisplay(*display))
+                    .width(Length::FillPortion(1)),
+                widget::text(tooltip).size(12),
+                widget::tooltip::Position::Top,
+            ))
+        },
+    );
+
+    settings_block(
+        widget::text(fl!("panel-value-section-title"))
+            .size(16)
+            .into(),
+        segmented_options(buttons.into()),
+    )
 }
 
 fn reset_time_section(current_format: ResetTimeFormat) -> Element<'static, Message> {

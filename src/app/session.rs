@@ -43,6 +43,7 @@ pub(super) fn start_login(app: &mut AppModel, provider: ProviderId) -> Task<Mess
         ProviderId::Minimax => login::start_login::<login::MinimaxLoginFlow>(app),
         ProviderId::Zai => login::start_login::<login::ZaiLoginFlow>(app),
         ProviderId::Kimi => login::start_login::<login::KimiLoginFlow>(app),
+        ProviderId::OpenRouter => login::start_login::<login::OpenRouterLoginFlow>(app),
         ProviderId::Antigravity => login::start_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::start_login::<login::OpenCodeGoLoginFlow>(app),
         ProviderId::Grok => login::start_login::<login::GrokLoginFlow>(app),
@@ -96,6 +97,7 @@ pub(super) fn cancel_login(app: &mut AppModel, provider: ProviderId) {
         ProviderId::Minimax => login::cancel_login::<login::MinimaxLoginFlow>(app),
         ProviderId::Zai => login::cancel_login::<login::ZaiLoginFlow>(app),
         ProviderId::Kimi => login::cancel_login::<login::KimiLoginFlow>(app),
+        ProviderId::OpenRouter => login::cancel_login::<login::OpenRouterLoginFlow>(app),
         ProviderId::Antigravity => login::cancel_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::cancel_login::<login::OpenCodeGoLoginFlow>(app),
         ProviderId::Grok => login::cancel_login::<login::GrokLoginFlow>(app),
@@ -116,6 +118,9 @@ pub(super) fn reauthenticate(
         ProviderId::Minimax => login::reauthenticate::<login::MinimaxLoginFlow>(app, account_id),
         ProviderId::Zai => login::reauthenticate::<login::ZaiLoginFlow>(app, account_id),
         ProviderId::Kimi => login::reauthenticate::<login::KimiLoginFlow>(app, account_id),
+        ProviderId::OpenRouter => {
+            login::reauthenticate::<login::OpenRouterLoginFlow>(app, account_id)
+        }
         ProviderId::Antigravity => {
             login::reauthenticate::<login::AntigravityLoginFlow>(app, account_id)
         }
@@ -146,6 +151,7 @@ pub(super) fn sync_metadata_after_refresh(app: &mut AppModel, provider: Provider
         | ProviderId::Minimax
         | ProviderId::Zai
         | ProviderId::Kimi
+        | ProviderId::OpenRouter
         | ProviderId::Antigravity
         | ProviderId::OpenCodeGo
         | ProviderId::Grok => {}

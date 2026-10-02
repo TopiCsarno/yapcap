@@ -12,15 +12,17 @@
   <summary>COSMIC panel applet for AI coding usage tracking</summary>
   <summary xml:lang="pl">Aplet dla panelu COSMIC do śledzenia zużycia AI do kodowania</summary>
   <description>
-    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
-    <p xml:lang="pl">YapCap jest natywnym apletem dla panelu COSMIC który śledzi zużycie AI do kodowania przy pomocy Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go i Grok prosto z panelu. Dodaj konta raz i YapCap sprawdza zużycie bezpośrednio przez API usługodawcy. Bez telemetrii, bez synchronizacji z chmurą, bez wymagania osobnych kont do obsługi.</p>
-    <p>Use the popup to compare multiple accounts, see which CLI account is active, switch panel styles, and follow your COSMIC light, dark, and accent color settings.</p>
-    <p xml:lang="pl">Użyj wyskakującego okna by porównać wiele kont, zobaczyć które konto jest aktywne w CLI, zmień styl paneli i dostosowuje się do twoich preferencji wyglądu z Ustawień COSMIC.</p>
+    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, OpenRouter, and Grok right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
+    <p xml:lang="pl">YapCap jest natywnym apletem dla panelu COSMIC który śledzi zużycie AI do kodowania przy pomocy Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, GitHub Copilot, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, OpenRouter i Grok prosto z panelu. Dodaj konta raz i YapCap sprawdza zużycie bezpośrednio przez API usługodawcy. Bez telemetrii, bez synchronizacji z chmurą, bez wymagania osobnych kont do obsługi.</p>
+    <p>Use the popup to compare multiple accounts, see which CLI account is active, show all providers or all accounts side by side, switch panel styles, and follow your COSMIC light, dark, and accent color settings. Codex accounts show available banked resets and an explicit confirmation before redeeming one.</p>
+    <p xml:lang="pl">Użyj wyskakującego okna by porównać wiele kont, zobaczyć które konto jest aktywne w CLI, pokazać wszystkich dostawców i konta obok siebie oraz zmienić styl panelu. Konta Codex pokazują dostępne zapisane resety limitów; użycie jednego wymaga wyraźnego potwierdzenia.</p>
     <p>Main features:</p>
     <p xml:lang="pl">Główne funkcje:</p>
     <ul>
       <li>Codex usage tracking and credits</li>
       <li xml:lang="pl">Śledzenie zużycia i kredytu z Codexie</li>
+      <li>Codex banked reset availability, desktop alerts, and confirmed manual redemption</li>
+      <li xml:lang="pl">Dostępność zapisanych resetów Codex, powiadomienia i ręczne użycie po potwierdzeniu</li>
       <li>Claude usage tracking and extra usage meter</li>
       <li xml:lang="pl">Śledzenie zużycia Claude i licznik dodatkowego użycia</li>
       <li>Cursor usage tracking: Total, Auto + Composer, and API</li>
@@ -35,14 +37,18 @@
       <li xml:lang="pl">Śledzenie zużycia Z.AI Coding Plan przy użyciu klucza API, z limitami pięciogodzinnymi, tygodniowymi i opcjonalnymi limitami MCP</li>
       <li>OpenCode Go API-key usage tracking with 5 Hour, Weekly, and Monthly windows</li>
       <li xml:lang="pl">Śledzenie zużycia OpenCode Go klucza API z oknami 5-godzinnymi, Tygodniowymi i Miesięcznymi</li>
+      <li>OpenRouter API-key credit balance and usage tracking</li>
+      <li xml:lang="pl">Śledzenie kredytów i zużycia OpenRouter za pomocą klucza API</li>
       <li>GitHub Copilot usage tracking: Free and paid quota shapes</li>
       <li xml:lang="pl">Śledzenie zużycia GitHub Copilot: Darmowe i płatne kształtowanie limitów </li>
       <li>Grok subscription usage tracking with browser sign-in, explicit CLI credential import, and available prepaid credits</li>
       <li xml:lang="pl">Śledzenie zużycia subskrypcji Grok z logowaniem przez przeglądarkę, importem danych uwierzytelniających z CLI na żądanie i saldem przedpłaconych kredytów</li>
-      <li>Optional one-time API-key prefill for Minimax, Z.AI Coding Plan, Kimi for Coding, and OpenCode Go from OpenCode's local auth file</li>
-      <li xml:lang="pl">Opcjonalne jednorazowe wstępne wypełnienie klucza API dla Minimax, Z.AI Coding Plan, Kimi for Coding i OpenCode Go z lokalnego pliku uwierzytelnienia OpenCode'a</li>
+      <li>Optional one-time API-key prefill for Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and OpenRouter from OpenCode's local auth file</li>
+      <li xml:lang="pl">Opcjonalne jednorazowe wstępne wypełnienie klucza API dla Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go i OpenRouter z lokalnego pliku uwierzytelnienia OpenCode'a</li>
       <li>Multiple accounts per provider</li>
       <li xml:lang="pl">Wiele kont dla każdego usługodawcy</li>
+      <li>Optional simultaneous display of all providers and all accounts, with amount and panel text size controls</li>
+      <li xml:lang="pl">Opcjonalny jednoczesny widok wszystkich dostawców i kont oraz ustawienia wartości i rozmiaru tekstu</li>
       <li>Active account badge</li>
       <li xml:lang="pl">Plakietki z aktywnym kontem</li>
       <li>COSMIC theme integration</li>

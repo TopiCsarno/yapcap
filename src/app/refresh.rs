@@ -132,12 +132,30 @@ pub(super) fn selected_account_refresh_due(
     let Some(entry) = state.provider(provider) else {
         return true;
     };
-    if entry.is_refreshing
-        || entry.account_status != crate::model::AccountSelectionStatus::Ready
-        || entry.selected_account_ids.is_empty()
-    {
+    if entry.is_refreshing || entry.account_status != crate::model::AccountSelectionStatus::Ready {
         return false;
     }
+
+    let account_ids = if config.show_all_accounts {
+        let ids = state
+            .accounts_for(provider)
+            .into_iter()
+            .map(|account| account.account_id.as_str())
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return false;
+        }
+        ids
+    } else {
+        if entry.selected_account_ids.is_empty() {
+            return false;
+        }
+        entry
+            .selected_account_ids
+            .iter()
+            .map(String::as_str)
+            .collect()
+    };
 
     let interval = chrono::Duration::seconds(
         config
@@ -146,7 +164,7 @@ pub(super) fn selected_account_refresh_due(
             .cast_signed(),
     );
     let now = Utc::now();
-    entry.selected_account_ids.iter().any(|account_id| {
+    account_ids.iter().any(|account_id| {
         let Some(account) = state
             .provider_accounts
             .iter()
@@ -377,8 +395,39 @@ fn account_ids_to_refresh(
     previous_accounts: &[crate::model::ProviderAccountRuntimeState],
     force: bool,
 ) -> Vec<String> {
+    refresh_candidate_account_ids(config, provider, previous, previous_accounts)
+        .into_iter()
+        .filter(|id| {
+            !previous_accounts.iter().any(|a| {
+                &a.account_id == id
+                    && ((!force && a.is_backing_off()) || a.auth_state == AuthState::ActionRequired)
+            })
+        })
+        .collect()
+}
+
+fn refresh_candidate_account_ids(
+    config: &Config,
+    provider: ProviderId,
+    previous: Option<&crate::model::ProviderRuntimeState>,
+    previous_accounts: &[crate::model::ProviderAccountRuntimeState],
+) -> Vec<String> {
+    if config.show_all_accounts {
+        let stored_ids = previous_accounts
+            .iter()
+            .map(|account| account.account_id.clone())
+            .collect::<Vec<_>>();
+        if !stored_ids.is_empty() {
+            return stored_ids;
+        }
+        return registry::discover_accounts(provider, config)
+            .into_iter()
+            .map(|account| account.account_id)
+            .collect();
+    }
+
     let config_ids = config.selected_account_ids(provider);
-    let candidate_ids = if !config_ids.is_empty() {
+    if !config_ids.is_empty() {
         config_ids.to_vec()
     } else if let Some(prev_id) = previous.and_then(|p| p.selected_account_ids.first()) {
         vec![prev_id.clone()]
@@ -388,17 +437,7 @@ fn account_ids_to_refresh(
             .next()
             .map(|a| vec![a.account_id])
             .unwrap_or_default()
-    };
-
-    candidate_ids
-        .into_iter()
-        .filter(|id| {
-            !previous_accounts.iter().any(|a| {
-                &a.account_id == id
-                    && ((!force && a.is_backing_off()) || a.auth_state == AuthState::ActionRequired)
-            })
-        })
-        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -435,6 +474,26 @@ mod tests {
         let mut env = test_support::test_env();
         env.remove("YAPCAP_DEMO");
         env
+    }
+
+    fn runtime_account(
+        provider: ProviderId,
+        account_id: &str,
+        last_success_at: Option<chrono::DateTime<Utc>>,
+    ) -> crate::model::ProviderAccountRuntimeState {
+        crate::model::ProviderAccountRuntimeState {
+            provider,
+            account_id: account_id.to_string(),
+            label: account_id.to_string(),
+            source_label: None,
+            last_success_at,
+            snapshot: None,
+            health: crate::model::ProviderHealth::Ok,
+            auth_state: AuthState::Ready,
+            error: None,
+            retry_after: None,
+            consecutive_failures: 0,
+        }
     }
 
     fn stored_claude_account(
@@ -570,6 +629,84 @@ mod tests {
         let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
 
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn account_ids_to_refresh_returns_all_stored_accounts_when_show_all_accounts() {
+        let _env = test_env_without_demo();
+        let config = Config {
+            show_all_accounts: true,
+            selected_codex_account_ids: vec!["acct-a".to_string()],
+            ..Config::default()
+        };
+        let accounts = vec![
+            runtime_account(ProviderId::Codex, "acct-a", Some(Utc::now())),
+            runtime_account(ProviderId::Codex, "acct-b", Some(Utc::now())),
+        ];
+
+        let ids = account_ids_to_refresh(&config, ProviderId::Codex, None, &accounts, false);
+
+        assert_eq!(ids, vec!["acct-a".to_string(), "acct-b".to_string()]);
+    }
+
+    #[test]
+    fn account_ids_to_refresh_returns_selected_only_when_not_show_all_accounts() {
+        let _env = test_env_without_demo();
+        let config = Config {
+            show_all_accounts: false,
+            selected_codex_account_ids: vec!["acct-a".to_string()],
+            ..Config::default()
+        };
+        let accounts = vec![
+            runtime_account(ProviderId::Codex, "acct-a", Some(Utc::now())),
+            runtime_account(ProviderId::Codex, "acct-b", Some(Utc::now())),
+        ];
+
+        let ids = account_ids_to_refresh(&config, ProviderId::Codex, None, &accounts, false);
+
+        assert_eq!(ids, vec!["acct-a".to_string()]);
+    }
+
+    #[test]
+    fn selected_account_refresh_due_checks_all_accounts_only_when_show_all_accounts() {
+        let _env = test_env_without_demo();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        if let Some(entry) = state.provider_mut(ProviderId::Codex) {
+            entry.selected_account_ids = vec!["acct-a".to_string()];
+        }
+        state.upsert_account(runtime_account(
+            ProviderId::Codex,
+            "acct-a",
+            Some(Utc::now()),
+        ));
+        state.upsert_account(runtime_account(
+            ProviderId::Codex,
+            "acct-b",
+            Some(Utc::now() - chrono::Duration::minutes(10)),
+        ));
+
+        let show_all = Config {
+            show_all_accounts: true,
+            selected_codex_account_ids: vec!["acct-a".to_string()],
+            ..Config::default()
+        };
+        let selected_only = Config {
+            show_all_accounts: false,
+            selected_codex_account_ids: vec!["acct-a".to_string()],
+            ..Config::default()
+        };
+
+        assert!(selected_account_refresh_due(
+            &show_all,
+            &state,
+            ProviderId::Codex
+        ));
+        assert!(!selected_account_refresh_due(
+            &selected_only,
+            &state,
+            ProviderId::Codex
+        ));
     }
 
     #[test]

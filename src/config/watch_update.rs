@@ -23,6 +23,10 @@ impl Config {
             "reset_time_format" => self.reset_time_format = update.reset_time_format,
             "usage_amount_format" => self.usage_amount_format = update.usage_amount_format,
             "panel_icon_style" => self.panel_icon_style = update.panel_icon_style,
+            "panel_value_display" => self.panel_value_display = update.panel_value_display,
+            "show_all_providers" => self.show_all_providers = update.show_all_providers,
+            "show_all_accounts" => self.show_all_accounts = update.show_all_accounts,
+            "panel_font_size" => self.panel_font_size = update.panel_font_size,
             "selected_provider" => self.selected_provider = update.selected_provider,
             "provider_visibility_mode" => {
                 self.provider_visibility_mode = update.provider_visibility_mode;
@@ -43,6 +47,9 @@ impl Config {
             }
             "grok_enablement" => {
                 self.grok_enablement = update.grok_enablement;
+            }
+            "openrouter_enablement" => {
+                self.openrouter_enablement = update.openrouter_enablement;
             }
             "log_level" => self.log_level.clone_from(&update.log_level),
             _ => return false,
@@ -119,6 +126,13 @@ impl Config {
             }
             "grok_managed_accounts" => {
                 self.grok_managed_accounts = update.grok_managed_accounts.clone();
+            }
+            "selected_openrouter_account_ids" => {
+                self.selected_openrouter_account_ids =
+                    update.selected_openrouter_account_ids.clone();
+            }
+            "openrouter_managed_accounts" => {
+                self.openrouter_managed_accounts = update.openrouter_managed_accounts.clone();
             }
             _ => {}
         }

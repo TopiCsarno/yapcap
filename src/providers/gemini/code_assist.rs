@@ -31,6 +31,8 @@ struct RawTier {
 struct RawLoadCodeAssist {
     #[serde(default, rename = "currentTier")]
     current_tier: Option<RawTier>,
+    #[serde(default, rename = "paidTier")]
+    paid_tier: Option<RawTier>,
     #[serde(default, rename = "cloudaicompanionProject")]
     cloudaicompanion_project: Option<String>,
 }
@@ -38,13 +40,31 @@ struct RawLoadCodeAssist {
 pub fn parse_load_code_assist(raw: &str) -> Result<LoadCodeAssist, String> {
     let parsed: RawLoadCodeAssist = serde_json::from_str(raw)
         .map_err(|error| format!("failed to decode loadCodeAssist response: {error}"))?;
-    let tier_id = parsed
+    let paid_tier_id = parsed
+        .paid_tier
+        .as_ref()
+        .and_then(|tier| tier.id.clone())
+        .filter(|value| !value.trim().is_empty());
+    let current_tier_id = parsed
         .current_tier
         .as_ref()
-        .and_then(|tier| tier.id.clone());
+        .and_then(|tier| tier.id.clone())
+        .filter(|value| !value.trim().is_empty());
+    let tier_id = paid_tier_id
+        .clone()
+        .filter(|id| id != "free-tier")
+        .or(current_tier_id)
+        .or(paid_tier_id);
     let cloudaicompanion_project = parsed
         .cloudaicompanion_project
         .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            parsed
+                .paid_tier
+                .as_ref()
+                .and_then(|tier| tier.cloudaicompanion_project.clone())
+                .filter(|value| !value.trim().is_empty())
+        })
         .or_else(|| {
             parsed
                 .current_tier
@@ -345,5 +365,35 @@ mod tests {
         let parsed = parse_load_code_assist(raw).expect("parsed");
         assert_eq!(parsed.tier_id.as_deref(), Some("standard-tier"));
         assert_eq!(parsed.cloudaicompanion_project.as_deref(), Some("proj-1"));
+    }
+
+    #[test]
+    fn prefers_paid_tier_over_free_current_tier() {
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fixtures/antigravity/load_code_assist_response.json"
+        ))
+        .expect("fixture");
+        let captured: serde_json::Value = serde_json::from_str(&fixture).expect("json");
+        let body = serde_json::to_string(&captured["body_json"]).expect("body_json");
+        let parsed = parse_load_code_assist(&body).expect("parsed");
+        assert_eq!(parsed.tier_id.as_deref(), Some("g1-pro-tier"));
+        assert_eq!(
+            parsed.cloudaicompanion_project.as_deref(),
+            Some("redacted-project-id")
+        );
+    }
+
+    #[test]
+    fn antigravity_free_fixture_resolves_to_free_tier() {
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fixtures/antigravity/load_code_assist_free_response.json"
+        ))
+        .expect("fixture");
+        let captured: serde_json::Value = serde_json::from_str(&fixture).expect("json");
+        let body = serde_json::to_string(&captured["body_json"]).expect("body_json");
+        let parsed = parse_load_code_assist(&body).expect("parsed");
+        assert_eq!(parsed.tier_id.as_deref(), Some("free-tier"));
     }
 }

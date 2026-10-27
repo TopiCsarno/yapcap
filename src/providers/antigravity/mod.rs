@@ -31,7 +31,7 @@ pub const DEFAULT_CLIENT_SECRET: &str = "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";
 pub const SCOPE: &str = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/aicode";
 
 pub const IDE_TYPE: &str = "ANTIGRAVITY";
-pub const USER_AGENT: &str = "antigravity";
+pub const USER_AGENT: &str = "antigravity/cli/1.4.7";
 
 const HOST_ENV: &str = "YAPCAP_ANTIGRAVITY_HOST";
 const CLIENT_ID_ENV: &str = "YAPCAP_ANTIGRAVITY_CLIENT_ID";
@@ -422,6 +422,56 @@ mod tests {
         );
         let meta = storage.load_metadata(&account_id).unwrap();
         assert_eq!(meta.antigravity_last_tier_id.as_deref(), Some("free-tier"));
+    }
+
+    #[tokio::test]
+    async fn fetch_detects_pro_plan_from_paid_tier_and_sends_cli_user_agent() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/load",
+                status: 200,
+                body: r#"{"currentTier":{"id":"free-tier"},"paidTier":{"id":"g1-pro-tier"},"cloudaicompanionProject":"superb-project"}"#.to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/quota",
+                status: 200,
+                body: quota_body(),
+            },
+        ])
+        .await;
+
+        let snapshot = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            endpoints(&base),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Pro"));
+        let requests = handle.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("user-agent: antigravity/cli/")
+        );
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("user-agent: antigravity/cli/")
+        );
+        let meta = storage.load_metadata(&account_id).unwrap();
+        assert_eq!(
+            meta.antigravity_last_tier_id.as_deref(),
+            Some("g1-pro-tier")
+        );
     }
 
     #[tokio::test]

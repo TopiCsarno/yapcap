@@ -13,25 +13,60 @@ pub(super) fn parse(
     mut identity: ProviderIdentity,
     updated_at: DateTime<Utc>,
 ) -> Result<UsageSnapshot, CommandCodeError> {
-    let balance = extra_balance(credits)?;
-    identity.plan = subscription
-        .and_then(|value| value.get("data"))
-        .and_then(|data| data.get("planId"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let windows = windows(credits);
+    let provider_cost = extra_balance(credits).ok().map(|balance| ProviderCost {
+        used: balance,
+        limit: None,
+        units: "credits".to_string(),
+    });
+    if provider_cost.is_none() {
+        if windows.is_empty() {
+            return Err(CommandCodeError::InvalidResponse);
+        }
+        tracing::warn!("Command Code credit balance unavailable; keeping valid quota windows");
+    }
+    identity.plan = subscription.and_then(plan_name);
     Ok(UsageSnapshot {
         provider: ProviderId::CommandCode,
         source: "API Key".to_string(),
         updated_at,
         headline: UsageHeadline(0),
-        windows: windows(credits),
-        provider_cost: Some(ProviderCost {
-            used: balance,
-            limit: None,
-            units: "credits".to_string(),
-        }),
+        windows,
+        provider_cost,
         extra_usage: None,
         identity,
+    })
+}
+
+fn plan_name(subscription: &Value) -> Option<String> {
+    let data = subscription.get("data")?;
+    if !matches!(
+        data.get("status").and_then(Value::as_str),
+        Some("active" | "trialing" | "past_due")
+    ) {
+        return None;
+    }
+    let id = data
+        .get("planId")?
+        .as_str()?
+        .to_ascii_lowercase()
+        .replace('_', "-");
+    [
+        ("individual-provider", "Provider"),
+        ("individual-goat", "GOAT"),
+        ("individual-ultra", "Ultra"),
+        ("individual-max", "Max"),
+        ("individual-pro", "Pro"),
+        ("individual-go", "Go"),
+        ("teams-pro", "Teams Pro"),
+    ]
+    .into_iter()
+    .find_map(|(prefix, name)| {
+        (id == prefix
+            || id
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| suffix.starts_with('-')))
+        .then(|| name.to_string())
     })
 }
 
@@ -56,7 +91,10 @@ fn extra_balance(value: &Value) -> Result<f64, CommandCodeError> {
 }
 
 fn windows(credits: &Value) -> Vec<UsageWindow> {
-    let Some(limits) = credits.get("windowLimits") else {
+    let Some(limits) = credits
+        .get("windowLimits")
+        .filter(|limits| limits.get("limited").and_then(Value::as_bool) == Some(true))
+    else {
         return Vec::new();
     };
     [

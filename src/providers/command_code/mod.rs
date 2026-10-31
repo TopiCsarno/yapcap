@@ -26,11 +26,7 @@ pub async fn fetch(
 }
 
 pub(crate) async fn fetch_key(key: &str) -> Result<UsageSnapshot, CommandCodeError> {
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(CommandCodeError::Request)?;
+    let client = crate::runtime::http_client_without_redirects();
     tokio::time::timeout(Duration::from_secs(30), fetch_at(&client, key, API_BASE))
         .await
         .map_err(|_| CommandCodeError::Timeout)?

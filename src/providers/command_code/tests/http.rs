@@ -40,13 +40,14 @@ async fn fetch_authenticates_and_scopes_organization_requests() {
     let (base, task) = server(vec![
         (200, json!({"user":{"id":"fixture-user","userName":"fixture"},"org":{"id":"fixture-org","login":"fixture-team"}}).to_string()),
         (200, credits().to_string()),
-        (200, json!({"data":{"planId":"fixture-plan"}}).to_string()),
+        (200, json!({"data":{"planId":"individual-pro-v1","status":"active"}}).to_string()),
     ]).await;
     let snapshot = fetch_at(&client(), "fixture-key", &base).await.unwrap();
     assert_eq!(
         snapshot.identity.display_name.as_deref(),
         Some("fixture-team")
     );
+    assert_eq!(snapshot.identity.plan.as_deref(), Some("Pro"));
     let requests = task.await.unwrap();
     assert!(
         requests
@@ -103,6 +104,14 @@ async fn invalid_json_is_reported_without_returning_raw_body() {
 }
 
 #[tokio::test]
+#[ignore = "Run separately with YAPCAP_DEBUG_OFFLINE=1 to avoid caching the offline client in other tests"]
+async fn debug_offline_blocks_provider_authentication() {
+    assert_eq!(std::env::var("YAPCAP_DEBUG_OFFLINE").as_deref(), Ok("1"));
+    let error = fetch_key("fixture-offline-key").await.unwrap_err();
+    assert!(matches!(error, CommandCodeError::Request(error) if error.is_connect()));
+}
+
+#[tokio::test]
 #[ignore = "Requires YAPCAP_COMMAND_CODE_SMOKE_KEY; makes read-only requests to Command Code"]
 async fn live_read_only_usage_smoke_test() {
     let key = std::env::var("YAPCAP_COMMAND_CODE_SMOKE_KEY")
@@ -111,11 +120,10 @@ async fn live_read_only_usage_smoke_test() {
         .await
         .expect("Command Code usage fetch failed");
     assert_eq!(snapshot.provider, ProviderId::CommandCode);
-    assert!(
-        snapshot
-            .provider_cost
-            .is_some_and(|balance| balance.used.is_finite())
-    );
+    assert!(snapshot.provider_cost.is_some() || !snapshot.windows.is_empty());
+    if let Some(balance) = snapshot.provider_cost {
+        assert!(balance.used.is_finite() && balance.used >= 0.0);
+    }
     assert!(
         snapshot
             .windows

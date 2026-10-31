@@ -1492,7 +1492,22 @@ fn delete_account_requests_refresh_for_all_providers() {
                 app.config.selected_antigravity_account_ids = vec![keep_id.to_string()];
                 "remove".to_string()
             }
-            ProviderId::OpenCodeGo | ProviderId::Grok | ProviderId::CommandCode => continue,
+            ProviderId::CommandCode => {
+                let now = Utc::now();
+                app.config.command_code_managed_accounts = [keep_id, "remove"]
+                    .into_iter()
+                    .map(|id| crate::config::ManagedCommandCodeAccountConfig {
+                        id: id.to_string(),
+                        label: id.to_string(),
+                        created_at: now,
+                        updated_at: now,
+                        last_authenticated_at: Some(now),
+                    })
+                    .collect();
+                app.config.selected_command_code_account_ids = vec![keep_id.to_string()];
+                "remove".to_string()
+            }
+            ProviderId::OpenCodeGo | ProviderId::Grok => continue,
         };
 
         let _task = app.delete_account(provider, &remove_account_id);

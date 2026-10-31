@@ -53,6 +53,13 @@ fn providers_expose_expected_capabilities() {
             requires_auth_prompt_on_auth_failure: false,
         }
     );
+    assert_eq!(
+        capabilities(ProviderId::CommandCode),
+        ProviderCapabilities {
+            supports_background_status_refresh: false,
+            requires_auth_prompt_on_auth_failure: false,
+        }
+    );
 }
 
 #[test]

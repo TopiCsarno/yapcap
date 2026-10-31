@@ -1,14 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use super::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod form;
+mod request;
+
 async fn exchange(request: String, fragment: bool) -> (String, Result<Option<String>, String>) {
+    let (response, result) = exchange_action(request, fragment, false).await;
+    let result = result.map(|action| match action {
+        CallbackAction::Credential(key) => Some(key),
+        _ => None,
+    });
+    (response, result)
+}
+
+async fn exchange_action(
+    request: String,
+    fragment: bool,
+    can_complete: bool,
+) -> (String, Result<CallbackAction, String>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-        handle(&mut stream, "fixture-state").await
+        handle(&mut stream, "fixture-state", can_complete).await
     });
     let mut stream = TcpStream::connect(address).await.unwrap();
     if fragment {

@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod redirect;
+
 #[tokio::test]
 async fn browser_login_uses_a_loopback_callback_and_unpredictable_state() {
     let first = BrowserLogin::start().await.unwrap();
@@ -9,6 +11,10 @@ async fn browser_login_uses_a_loopback_callback_and_unpredictable_state() {
     let url = reqwest::Url::parse(&first.url).unwrap();
     assert_eq!(url.origin().ascii_serialization(), "https://commandcode.ai");
     assert_eq!(url.path(), "/studio/auth/cli");
+    assert!(
+        url.query_pairs()
+            .any(|(key, value)| key == "mode" && value == "redirect")
+    );
     let callback = url
         .query_pairs()
         .find(|(key, _)| key == "callback")

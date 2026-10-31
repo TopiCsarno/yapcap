@@ -10,7 +10,7 @@ fn parse(data: &Value) -> Result<UsageSnapshot, CommandCodeError> {
 fn parses_service_reported_limits_and_extra_credit_balance() {
     let snapshot = usage::parse(
         &credits(),
-        Some(&json!({"data":{"planId":"test-plan"}})),
+        Some(&json!({"data":{"planId":"individual-pro-v1","status":"active"}})),
         ProviderIdentity::default(),
         chrono::Utc::now(),
     )
@@ -25,7 +25,7 @@ fn parses_service_reported_limits_and_extra_credit_balance() {
     assert_eq!(snapshot.windows[1].used_percent, 50.0);
     assert_eq!(snapshot.windows[0].reset_at, snapshot.windows[1].reset_at);
     assert_eq!(snapshot.windows[0].window_seconds, Some(18_000));
-    assert_eq!(snapshot.identity.plan.as_deref(), Some("test-plan"));
+    assert_eq!(snapshot.identity.plan.as_deref(), Some("Pro"));
 }
 
 #[test]
@@ -76,6 +76,7 @@ fn invalid_extra_pools_are_not_silently_reported_as_available() {
         for invalid in [json!(null), json!("unknown"), json!(-1)] {
             let mut data = credits();
             data["credits"][name] = invalid;
+            data.as_object_mut().unwrap().remove("windowLimits");
             assert!(matches!(
                 parse(&data),
                 Err(CommandCodeError::InvalidResponse)
@@ -105,6 +106,70 @@ fn overflowing_extra_credit_pools_are_rejected() {
     let data = json!({
         "credits":{"purchasedCredits":f64::MAX,"freeCredits":f64::MAX}
     });
+    assert!(matches!(
+        parse(&data),
+        Err(CommandCodeError::InvalidResponse)
+    ));
+}
+
+#[test]
+fn invalid_or_missing_extra_pools_preserve_valid_rolling_quotas() {
+    for name in ["purchasedCredits", "freeCredits"] {
+        for invalid in [json!(null), json!("unknown"), json!(-1)] {
+            let mut data = credits();
+            data["credits"][name] = invalid;
+            let snapshot = parse(&data).unwrap();
+            assert!(snapshot.provider_cost.is_none());
+            assert_eq!(snapshot.windows.len(), 2);
+        }
+        let mut data = credits();
+        data["credits"].as_object_mut().unwrap().remove(name);
+        let snapshot = parse(&data).unwrap();
+        assert!(snapshot.provider_cost.is_none());
+        assert_eq!(snapshot.windows.len(), 2);
+    }
+}
+
+#[test]
+fn valid_quota_survives_a_missing_credit_object_and_invalid_sibling_window() {
+    let mut data = credits();
+    data.as_object_mut().unwrap().remove("credits");
+    data["windowLimits"]["weekly"]["cap"] = json!(0);
+    let snapshot = parse(&data).unwrap();
+    assert!(snapshot.provider_cost.is_none());
+    assert_eq!(snapshot.windows.len(), 1);
+    assert_eq!(snapshot.windows[0].label, "5 Hour");
+}
+
+#[test]
+fn unlimited_or_unspecified_plans_do_not_show_nominal_quota_bars() {
+    for limited in [json!(false), json!(null), json!("true")] {
+        let mut data = credits();
+        data["windowLimits"]["limited"] = limited;
+        let snapshot = parse(&data).unwrap();
+        assert!(snapshot.windows.is_empty());
+        assert_eq!(snapshot.provider_cost.unwrap().used, 4.0);
+    }
+    let mut data = credits();
+    data["windowLimits"]
+        .as_object_mut()
+        .unwrap()
+        .remove("limited");
+    assert!(parse(&data).unwrap().windows.is_empty());
+}
+
+#[test]
+fn unusable_balances_and_disabled_or_invalid_windows_are_an_error() {
+    let mut data = credits();
+    data["credits"]["purchasedCredits"] = json!(-1);
+    data["windowLimits"]["limited"] = json!(false);
+    assert!(matches!(
+        parse(&data),
+        Err(CommandCodeError::InvalidResponse)
+    ));
+    data["windowLimits"]["limited"] = json!(true);
+    data["windowLimits"]["fiveHour"]["cap"] = json!(0);
+    data["windowLimits"]["weekly"]["cap"] = json!(0);
     assert!(matches!(
         parse(&data),
         Err(CommandCodeError::InvalidResponse)

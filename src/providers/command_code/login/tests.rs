@@ -3,6 +3,16 @@
 use super::*;
 
 #[test]
+fn failed_login_starts_in_editing_without_a_panic_path() {
+    let state = CommandCodeLoginState::failed("Fixture failure".to_string());
+    assert_eq!(state.status, CommandCodeLoginStatus::Editing);
+    assert_eq!(state.error.as_deref(), Some("Fixture failure"));
+    assert!(!state.reauth);
+    assert!(state.api_key.is_empty());
+    assert!(state.login_url.is_none());
+}
+
+#[test]
 fn login_state_and_events_redact_api_keys_in_debug_output() {
     let mut state = prepare(&Config::default(), None).unwrap();
     state.api_key = "sensitive-fixture-key".to_string();

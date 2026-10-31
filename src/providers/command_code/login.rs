@@ -73,7 +73,7 @@ impl fmt::Debug for CommandCodeLoginEvent {
 
 impl CommandCodeLoginState {
     pub fn failed(error: String) -> Self {
-        let mut state = prepare(&Config::default(), None).expect("new login has no target");
+        let mut state = new_state(None);
         state.error = Some(error);
         state
     }
@@ -92,7 +92,11 @@ pub(crate) fn prepare(
                 .ok_or_else(|| "Command Code account no longer exists".to_string())
         })
         .transpose()?;
-    Ok(CommandCodeLoginState {
+    Ok(new_state(account))
+}
+
+fn new_state(account: Option<&ManagedCommandCodeAccountConfig>) -> CommandCodeLoginState {
+    CommandCodeLoginState {
         flow_id: account::new_account_id(),
         account_id: account.map_or_else(account::new_account_id, |account| account.id.clone()),
         label: account.map_or_else(String::new, |account| account.label.clone()),
@@ -103,7 +107,7 @@ pub(crate) fn prepare(
         error: None,
         created_at: account.map_or_else(Utc::now, |account| account.created_at),
         reauth: account.is_some(),
-    })
+    }
 }
 
 pub(crate) fn authenticate(

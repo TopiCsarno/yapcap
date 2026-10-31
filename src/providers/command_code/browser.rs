@@ -23,7 +23,8 @@ impl BrowserLogin {
             .map_err(|_| "Could not build Command Code login URL".to_string())?;
         url.query_pairs_mut()
             .append_pair("callback", &format!("http://127.0.0.1:{port}/callback"))
-            .append_pair("state", &state);
+            .append_pair("state", &state)
+            .append_pair("mode", "redirect");
         Ok(Self {
             listener,
             state,
@@ -32,29 +33,37 @@ impl BrowserLogin {
     }
 
     pub async fn wait(self) -> Result<String, String> {
-        tokio::time::timeout(Duration::from_secs(300), async {
-            loop {
-                let (mut stream, _) = self
-                    .listener
-                    .accept()
-                    .await
-                    .map_err(|_| "Could not receive browser callback".to_string())?;
-                match tokio::time::timeout(
-                    Duration::from_secs(5),
-                    callback::handle(&mut stream, &self.state),
-                )
-                .await
-                {
-                    Ok(Ok(Some(key))) => return Ok(key),
-                    Ok(Err(error)) => return Err(error),
-                    _ => {}
-                }
-            }
-        })
+        tokio::time::timeout(
+            Duration::from_secs(300),
+            self.receive(Duration::from_secs(10)),
+        )
         .await
         .map_err(|_| {
             "Command Code browser login timed out; retry or paste an API key".to_string()
         })?
+    }
+
+    async fn receive(self, completion_timeout: Duration) -> Result<String, String> {
+        let mut pending = None;
+        loop {
+            let next = next_callback(&self.listener, &self.state, pending.is_some());
+            let action = if let Some((_, deadline)) = &pending {
+                match tokio::time::timeout_at(*deadline, next).await {
+                    Ok(result) => result?,
+                    Err(_) => return completed_key(pending),
+                }
+            } else {
+                next.await?
+            };
+            match action {
+                callback::CallbackAction::Ignored => {}
+                callback::CallbackAction::Credential(key) => return Ok(key),
+                callback::CallbackAction::Redirect(key) => {
+                    pending = Some((key, tokio::time::Instant::now() + completion_timeout));
+                }
+                callback::CallbackAction::Complete => return completed_key(pending),
+            }
+        }
     }
 }
 
@@ -76,8 +85,28 @@ async fn listener() -> Result<TcpListener, String> {
     })
 }
 
-#[cfg(test)]
-mod tests;
+async fn next_callback(
+    listener: &TcpListener,
+    state: &str,
+    can_complete: bool,
+) -> Result<callback::CallbackAction, String> {
+    let (mut stream, _) = listener
+        .accept()
+        .await
+        .map_err(|_| "Could not receive browser callback".to_string())?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        callback::handle(&mut stream, state, can_complete),
+    )
+    .await
+    .unwrap_or(Ok(callback::CallbackAction::Ignored))
+}
+
+fn completed_key(pending: Option<(String, tokio::time::Instant)>) -> Result<String, String> {
+    pending
+        .map(|(key, _)| key)
+        .ok_or_else(|| "Command Code browser login did not complete".to_string())
+}
 
 fn state_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
@@ -88,3 +117,6 @@ fn state_token() -> Result<String, String> {
         })?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
+
+#[cfg(test)]
+mod tests;

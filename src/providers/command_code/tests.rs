@@ -5,11 +5,13 @@ use crate::model::ProviderId;
 use serde_json::json;
 mod balances;
 mod http;
+mod subscription;
 
 fn credits() -> Value {
     json!({
         "credits": {"monthlyCredits": 12.5, "purchasedCredits": 3, "freeCredits": 1},
         "windowLimits": {
+            "limited": true,
             "fiveHour": {"used": 5, "cap": 20, "resetAt": 1793455200},
             "weekly": {"used": 30, "cap": 60, "resetAt": 1793455200000i64}
         }

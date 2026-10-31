@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
+mod request;
+mod response;
+
 use super::account::normalize_key;
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const ORIGIN: &str = "https://commandcode.ai";
-const MAX_REQUEST_BYTES: usize = 16_384;
+
+pub(super) enum CallbackAction {
+    Ignored,
+    Credential(String),
+    Redirect(String),
+    Complete,
+}
 
 #[derive(Deserialize)]
 struct Callback {
@@ -19,119 +27,137 @@ struct Callback {
 pub(super) async fn handle(
     stream: &mut TcpStream,
     expected_state: &str,
-) -> Result<Option<String>, String> {
-    let Some((headers, body)) = read_request(stream).await else {
-        respond(stream, 400, false).await;
-        return Ok(None);
+    can_complete: bool,
+) -> Result<CallbackAction, String> {
+    let Some(request) = request::read(stream).await else {
+        response::json(stream, 400, false).await;
+        return Ok(CallbackAction::Ignored);
     };
-    let mut request_line = headers
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace();
-    let method = request_line.next().unwrap_or_default();
-    let path = request_line.next().unwrap_or_default();
+    let (path, query) = request
+        .target
+        .split_once('?')
+        .unwrap_or((&request.target, ""));
+    if path == "/callback/complete" && request.method == "GET" {
+        return complete(stream, query, expected_state, can_complete).await;
+    }
     if path != "/callback" {
-        respond(stream, 404, false).await;
-        return Ok(None);
+        response::json(stream, 404, false).await;
+        return Ok(CallbackAction::Ignored);
     }
-    if header(&headers, "origin") != Some(ORIGIN) {
-        respond(stream, 403, false).await;
-        return Ok(None);
+    if request.method == "OPTIONS" && request.header("origin") == Some(ORIGIN) {
+        response::json(stream, 204, true).await;
+        return Ok(CallbackAction::Ignored);
     }
-    if method == "OPTIONS" {
-        respond(stream, 204, true).await;
-        return Ok(None);
+    if request.method != "POST" {
+        response::json(stream, 405, false).await;
+        return Ok(CallbackAction::Ignored);
     }
-    if method != "POST" {
-        respond(stream, 405, false).await;
-        return Ok(None);
+    if can_complete {
+        response::json(stream, 409, false).await;
+        return Ok(CallbackAction::Ignored);
     }
-    let Ok(callback) = serde_json::from_slice::<Callback>(&body) else {
-        respond(stream, 400, false).await;
-        return Ok(None);
+    post(stream, &request, expected_state).await
+}
+
+async fn post(
+    stream: &mut TcpStream,
+    request: &request::Request,
+    expected_state: &str,
+) -> Result<CallbackAction, String> {
+    let content_type = request.header("content-type").unwrap_or_default();
+    let content_type = content_type.split(';').next().unwrap_or_default().trim();
+    let form = content_type.eq_ignore_ascii_case("application/x-www-form-urlencoded");
+    if !form && !content_type.eq_ignore_ascii_case("application/json") {
+        response::json(stream, 415, false).await;
+        return Ok(CallbackAction::Ignored);
+    }
+    let origin = request.header("origin");
+    if !(origin == Some(ORIGIN) || form && matches!(origin, None | Some("null"))) {
+        response::json(stream, 403, false).await;
+        return Ok(CallbackAction::Ignored);
+    }
+    let callback = if form {
+        std::str::from_utf8(&request.body).ok().and_then(parse_form)
+    } else {
+        serde_json::from_slice::<Callback>(&request.body).ok()
+    };
+    let Some(callback) = callback else {
+        response::json(stream, 400, false).await;
+        return Ok(CallbackAction::Ignored);
     };
     if callback.state != expected_state {
-        respond(stream, 403, false).await;
-        return Ok(None);
+        response::json(stream, 403, false).await;
+        return Ok(CallbackAction::Ignored);
     }
+    finish(stream, callback, form).await
+}
+
+async fn finish(
+    stream: &mut TcpStream,
+    callback: Callback,
+    form: bool,
+) -> Result<CallbackAction, String> {
     if callback.error.is_some() {
-        respond(stream, 200, true).await;
+        if form {
+            response::complete(stream, false).await;
+        } else {
+            response::json(stream, 200, true).await;
+        }
         return Err("Command Code authorization was denied or failed".to_string());
     }
     let Some(key) = callback.api_key.and_then(|key| normalize_key(&key).ok()) else {
-        respond(stream, 400, false).await;
-        return Ok(None);
+        response::json(stream, 400, false).await;
+        return Ok(CallbackAction::Ignored);
     };
-    respond(stream, 200, true).await;
-    Ok(Some(key))
-}
-
-fn header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
-    let mut values = headers.lines().skip(1).filter_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        key.eq_ignore_ascii_case(name).then_some(value.trim())
-    });
-    let first = values.next()?;
-    values.next().is_none().then_some(first)
-}
-
-async fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
-    let mut request = Vec::new();
-    let header_end = loop {
-        if let Some(position) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-            break position + 4;
-        }
-        read_more(stream, &mut request).await?;
-    };
-    let headers = std::str::from_utf8(&request[..header_end])
-        .ok()?
-        .to_string();
-    if headers.lines().any(|line| {
-        line.split_once(':')
-            .is_some_and(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
-    }) {
-        return None;
-    }
-    let body_length = match header(&headers, "content-length") {
-        Some(value) => value.parse::<usize>().ok()?,
-        None if headers.starts_with("OPTIONS ") => 0,
-        None => return None,
-    };
-    let total_length = header_end.checked_add(body_length)?;
-    if total_length > MAX_REQUEST_BYTES {
-        return None;
-    }
-    while request.len() < total_length {
-        read_more(stream, &mut request).await?;
-    }
-    Some((headers, request[header_end..total_length].to_vec()))
-}
-
-async fn read_more(stream: &mut TcpStream, request: &mut Vec<u8>) -> Option<()> {
-    let mut buffer = [0; 1024];
-    let received = stream.read(&mut buffer).await.ok()?;
-    if received == 0 || request.len() + received > MAX_REQUEST_BYTES {
-        return None;
-    }
-    request.extend_from_slice(&buffer[..received]);
-    Some(())
-}
-
-async fn respond(stream: &mut TcpStream, status: u16, success: bool) {
-    let body = if status == 204 {
-        ""
-    } else if success {
-        r#"{"success":true}"#
+    if form {
+        response::redirect(stream, &callback.state).await;
+        Ok(CallbackAction::Redirect(key))
     } else {
-        r#"{"success":false}"#
-    };
-    let response = format!(
-        "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: {ORIGIN}\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.shutdown().await;
+        response::json(stream, 200, true).await;
+        Ok(CallbackAction::Credential(key))
+    }
+}
+
+async fn complete(
+    stream: &mut TcpStream,
+    query: &str,
+    expected_state: &str,
+    can_complete: bool,
+) -> Result<CallbackAction, String> {
+    if !can_complete
+        || !parse_form(query).is_some_and(|callback| {
+            callback.state == expected_state
+                && callback.api_key.is_none()
+                && callback.error.is_none()
+        })
+    {
+        response::json(stream, 403, false).await;
+        return Ok(CallbackAction::Ignored);
+    }
+    response::complete(stream, true).await;
+    Ok(CallbackAction::Complete)
+}
+
+fn parse_form(body: &str) -> Option<Callback> {
+    let mut url = reqwest::Url::parse("http://127.0.0.1").ok()?;
+    url.set_query(Some(body));
+    let (mut state, mut api_key, mut error) = (None, None, None);
+    for (name, value) in url.query_pairs() {
+        let field = match name.as_ref() {
+            "state" => &mut state,
+            "apiKey" => &mut api_key,
+            "error" => &mut error,
+            _ => continue,
+        };
+        if field.replace(value.into_owned()).is_some() {
+            return None;
+        }
+    }
+    Some(Callback {
+        state: state?,
+        api_key,
+        error,
+    })
 }
 
 #[cfg(test)]

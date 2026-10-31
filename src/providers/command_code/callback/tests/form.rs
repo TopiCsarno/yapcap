@@ -45,6 +45,8 @@ async fn rejects_foreign_form_origins_and_invalid_nonce_fields() {
         (None, "state=fixture-state&state=wrong&apiKey=fixture", 400),
         (None, "state=fixture-state&apiKey=first&apiKey=second", 400),
         (None, "state=fixture-state&apiKey=bad%0Akey", 400),
+        (None, "state=fixture-\nstate&apiKey=fixture", 400),
+        (None, "sta\tte=fixture-state&apiKey=fixture", 400),
     ] {
         let (response, result) = exchange_action(form(origin, body), false, false).await;
         assert!(response.starts_with(&format!("HTTP/1.1 {status} ")));

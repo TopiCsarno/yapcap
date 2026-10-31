@@ -139,6 +139,9 @@ async fn complete(
 }
 
 fn parse_form(body: &str) -> Option<Callback> {
+    if body.bytes().any(|byte| byte.is_ascii_control()) {
+        return None;
+    }
     let mut url = reqwest::Url::parse("http://127.0.0.1").ok()?;
     url.set_query(Some(body));
     let (mut state, mut api_key, mut error) = (None, None, None);

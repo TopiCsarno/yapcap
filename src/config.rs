@@ -9,6 +9,8 @@ use dirs::{cache_dir, state_dir};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 
+#[cfg(test)]
+mod command_code_tests;
 mod watch_update;
 
 pub const APP_ID: &str = "io.github.TopiCsarno.YapCap";
@@ -46,6 +48,8 @@ pub struct Config {
     pub opencode_go_enablement: ProviderEnablement,
     #[serde(default)]
     pub grok_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub command_code_enablement: ProviderEnablement,
     pub selected_codex_account_ids: Vec<String>,
     pub codex_managed_accounts: Vec<ManagedCodexAccountConfig>,
     pub selected_claude_account_ids: Vec<String>,
@@ -84,6 +88,10 @@ pub struct Config {
     pub selected_grok_account_ids: Vec<String>,
     #[serde(default)]
     pub grok_managed_accounts: Vec<ManagedGrokAccountConfig>,
+    #[serde(default)]
+    pub selected_command_code_account_ids: Vec<String>,
+    #[serde(default)]
+    pub command_code_managed_accounts: Vec<ManagedCommandCodeAccountConfig>,
     pub log_level: String,
 }
 
@@ -107,6 +115,7 @@ impl Default for Config {
             antigravity_enablement: ProviderEnablement::Auto,
             opencode_go_enablement: ProviderEnablement::Auto,
             grok_enablement: ProviderEnablement::Auto,
+            command_code_enablement: ProviderEnablement::Auto,
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
             selected_claude_account_ids: Vec::new(),
@@ -129,6 +138,8 @@ impl Default for Config {
             opencode_go_managed_accounts: Vec::new(),
             selected_grok_account_ids: Vec::new(),
             grok_managed_accounts: Vec::new(),
+            selected_command_code_account_ids: Vec::new(),
+            command_code_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -161,6 +172,7 @@ impl Config {
             ProviderId::Antigravity => self.antigravity_enablement,
             ProviderId::OpenCodeGo => self.opencode_go_enablement,
             ProviderId::Grok => self.grok_enablement,
+            ProviderId::CommandCode => self.command_code_enablement,
         }
     }
 
@@ -178,6 +190,7 @@ impl Config {
             ProviderId::Antigravity => &self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &self.selected_opencode_go_account_ids,
             ProviderId::Grok => &self.selected_grok_account_ids,
+            ProviderId::CommandCode => &self.selected_command_code_account_ids,
         }
     }
 
@@ -194,6 +207,7 @@ impl Config {
             ProviderId::Antigravity => &mut self.selected_antigravity_account_ids,
             ProviderId::OpenCodeGo => &mut self.selected_opencode_go_account_ids,
             ProviderId::Grok => &mut self.selected_grok_account_ids,
+            ProviderId::CommandCode => &mut self.selected_command_code_account_ids,
         }
     }
 
@@ -249,6 +263,7 @@ fn provider_enabled_key(provider: ProviderId) -> &'static str {
         ProviderId::Antigravity => "antigravity_enabled",
         ProviderId::OpenCodeGo => "opencode_go_enabled",
         ProviderId::Grok => "grok_enabled",
+        ProviderId::CommandCode => "command_code_enabled",
     }
 }
 
@@ -265,6 +280,7 @@ fn provider_enablement_key(provider: ProviderId) -> &'static str {
         ProviderId::Antigravity => "antigravity_enablement",
         ProviderId::OpenCodeGo => "opencode_go_enablement",
         ProviderId::Grok => "grok_enablement",
+        ProviderId::CommandCode => "command_code_enablement",
     }
 }
 
@@ -281,6 +297,7 @@ fn provider_enablement_mut(config: &mut Config, provider: ProviderId) -> &mut Pr
         ProviderId::Antigravity => &mut config.antigravity_enablement,
         ProviderId::OpenCodeGo => &mut config.opencode_go_enablement,
         ProviderId::Grok => &mut config.grok_enablement,
+        ProviderId::CommandCode => &mut config.command_code_enablement,
     }
 }
 
@@ -452,6 +469,15 @@ pub struct ManagedOpenCodeGoAccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedCommandCodeAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedGrokAccountConfig {
     pub id: String,
     pub label: String,
@@ -495,6 +521,7 @@ pub struct AppPaths {
     pub kimi_accounts_dir: PathBuf,
     pub antigravity_accounts_dir: PathBuf,
     pub opencode_go_accounts_dir: PathBuf,
+    pub command_code_accounts_dir: PathBuf,
     #[allow(dead_code)]
     pub grok_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
@@ -562,6 +589,9 @@ pub fn write_changed_config_entries(
         grok_enablement,
         selected_grok_account_ids,
         grok_managed_accounts,
+        command_code_enablement,
+        selected_command_code_account_ids,
+        command_code_managed_accounts,
         log_level,
     } = new;
 
@@ -612,6 +642,9 @@ pub fn write_changed_config_entries(
     set_changed!(opencode_go_managed_accounts);
     set_changed!(selected_grok_account_ids);
     set_changed!(grok_managed_accounts);
+    set_changed!(command_code_enablement);
+    set_changed!(selected_command_code_account_ids);
+    set_changed!(command_code_managed_accounts);
     set_changed!(log_level);
 
     tx.commit()
@@ -749,6 +782,7 @@ pub fn paths() -> AppPaths {
     let antigravity_accounts_dir = state_dir.join("antigravity-accounts");
     let opencode_go_accounts_dir = state_dir.join("opencode-go-accounts");
     let grok_accounts_dir = state_dir.join("grok-accounts");
+    let command_code_accounts_dir = state_dir.join("command-code-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         cache_dir,
@@ -764,6 +798,7 @@ pub fn paths() -> AppPaths {
         antigravity_accounts_dir,
         opencode_go_accounts_dir,
         grok_accounts_dir,
+        command_code_accounts_dir,
         log_dir,
     }
 }

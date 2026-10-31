@@ -43,6 +43,7 @@ use crate::providers::antigravity::{
 };
 use crate::providers::claude::{self, ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLoginStatus};
+use crate::providers::command_code::login::CommandCodeLoginState;
 use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus};
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
@@ -138,6 +139,8 @@ pub struct AppModel {
     pub grok_login_handle: Option<Handle>,
     zai_login: Option<ZaiLoginState>,
     zai_login_handle: Option<Handle>,
+    command_code_login: Option<CommandCodeLoginState>,
+    command_code_login_handle: Option<Handle>,
 }
 
 impl Drop for AppModel {
@@ -323,6 +326,8 @@ impl cosmic::Application for AppModel {
             grok_login_handle: None,
             zai_login: None,
             zai_login_handle: None,
+            command_code_login: None,
+            command_code_login_handle: None,
         };
         tracing::info!(
             pid = app.process_info.pid,
@@ -407,6 +412,7 @@ impl cosmic::Application for AppModel {
                 opencode_go: self.opencode_go_login.as_ref(),
                 grok: self.grok_login.as_ref(),
                 zai: self.zai_login.as_ref(),
+                command_code: self.command_code_login.as_ref(),
             },
             popup_view::DetailSelection {
                 provider: self.selected_provider,
@@ -610,6 +616,9 @@ impl AppModel {
                     }
                     (ProviderId::Zai, login::LoginEventKind::Zai(event)) => {
                         login::ZaiLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::CommandCode, login::LoginEventKind::CommandCode(event)) => {
+                        login::CommandCodeLoginFlow::on_event(self, event)
                     }
                     _ => Task::none(),
                 });

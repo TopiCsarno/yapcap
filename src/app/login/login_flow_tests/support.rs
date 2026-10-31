@@ -53,6 +53,8 @@ pub(super) fn test_app() -> AppModel {
         grok_login_handle: None,
         zai_login: None,
         zai_login_handle: None,
+        command_code_login: None,
+        command_code_login_handle: None,
     }
 }
 

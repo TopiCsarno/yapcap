@@ -46,6 +46,7 @@ pub(super) fn start_login(app: &mut AppModel, provider: ProviderId) -> Task<Mess
         ProviderId::Antigravity => login::start_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::start_login::<login::OpenCodeGoLoginFlow>(app),
         ProviderId::Grok => login::start_login::<login::GrokLoginFlow>(app),
+        ProviderId::CommandCode => login::start_login::<login::CommandCodeLoginFlow>(app),
         ProviderId::Cursor => Task::none(),
     }
 }
@@ -99,6 +100,7 @@ pub(super) fn cancel_login(app: &mut AppModel, provider: ProviderId) {
         ProviderId::Antigravity => login::cancel_login::<login::AntigravityLoginFlow>(app),
         ProviderId::OpenCodeGo => login::cancel_login::<login::OpenCodeGoLoginFlow>(app),
         ProviderId::Grok => login::cancel_login::<login::GrokLoginFlow>(app),
+        ProviderId::CommandCode => login::cancel_login::<login::CommandCodeLoginFlow>(app),
         ProviderId::Cursor => {}
     }
 }
@@ -123,6 +125,9 @@ pub(super) fn reauthenticate(
             login::reauthenticate::<login::OpenCodeGoLoginFlow>(app, account_id)
         }
         ProviderId::Grok => login::reauthenticate::<login::GrokLoginFlow>(app, account_id),
+        ProviderId::CommandCode => {
+            login::reauthenticate::<login::CommandCodeLoginFlow>(app, account_id)
+        }
         ProviderId::Cursor => app.reauthenticate_cursor_account(account_id),
     }
 }
@@ -148,7 +153,8 @@ pub(super) fn sync_metadata_after_refresh(app: &mut AppModel, provider: Provider
         | ProviderId::Kimi
         | ProviderId::Antigravity
         | ProviderId::OpenCodeGo
-        | ProviderId::Grok => {}
+        | ProviderId::Grok
+        | ProviderId::CommandCode => {}
     }
 }
 

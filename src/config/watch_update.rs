@@ -44,6 +44,9 @@ impl Config {
             "grok_enablement" => {
                 self.grok_enablement = update.grok_enablement;
             }
+            "command_code_enablement" => {
+                self.command_code_enablement = update.command_code_enablement;
+            }
             "log_level" => self.log_level.clone_from(&update.log_level),
             _ => return false,
         }
@@ -119,6 +122,14 @@ impl Config {
             }
             "grok_managed_accounts" => {
                 self.grok_managed_accounts = update.grok_managed_accounts.clone();
+            }
+            "selected_command_code_account_ids" => {
+                self.selected_command_code_account_ids
+                    .clone_from(&update.selected_command_code_account_ids);
+            }
+            "command_code_managed_accounts" => {
+                self.command_code_managed_accounts
+                    .clone_from(&update.command_code_managed_accounts);
             }
             _ => {}
         }

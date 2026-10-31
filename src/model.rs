@@ -19,11 +19,12 @@ pub enum ProviderId {
     Zai,
     Kimi,
     OpenCodeGo,
+    CommandCode,
     Grok,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Codex,
         Self::Claude,
         Self::Cursor,
@@ -34,6 +35,7 @@ impl ProviderId {
         Self::Zai,
         Self::Kimi,
         Self::OpenCodeGo,
+        Self::CommandCode,
         Self::Grok,
     ];
 
@@ -50,6 +52,7 @@ impl ProviderId {
             Self::Zai => "Z.AI Coding Plan",
             Self::Kimi => "Kimi",
             Self::OpenCodeGo => "OpenCode Go",
+            Self::CommandCode => "Command Code",
             Self::Grok => "Grok",
         }
     }

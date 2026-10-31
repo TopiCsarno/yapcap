@@ -72,6 +72,8 @@ struct WatchTargets {
     gemini_settings: std::path::PathBuf,
     grok_auth: std::path::PathBuf,
     grok_dir: std::path::PathBuf,
+    command_code_dir: std::path::PathBuf,
+    command_code_auth: std::path::PathBuf,
     opencode_auth: std::path::PathBuf,
     opencode_dir: std::path::PathBuf,
 }
@@ -87,6 +89,8 @@ impl WatchTargets {
         let gemini_settings = gemini_dir.join("settings.json");
         let grok_dir = home.join(".grok");
         let grok_auth = grok_dir.join("auth.json");
+        let command_code_dir = home.join(".commandcode");
+        let command_code_auth = command_code_dir.join("auth.json");
         let default_opencode_dir = home.join(".local/share/opencode");
         let opencode_auth = crate::providers::opencode_auth::auth_path()
             .unwrap_or_else(|| default_opencode_dir.join("auth.json"));
@@ -105,6 +109,8 @@ impl WatchTargets {
             gemini_settings,
             grok_auth,
             grok_dir,
+            command_code_dir,
+            command_code_auth,
             opencode_auth,
             opencode_dir,
         }
@@ -134,6 +140,13 @@ fn install_watches(watcher: &mut RecommendedWatcher, targets: &WatchTargets) -> 
         installed |= install_watch(watcher, &targets.grok_auth);
     } else if targets.grok_dir.is_dir() {
         installed |= install_watch(watcher, &targets.grok_dir);
+    }
+
+    if targets.command_code_dir.is_dir() {
+        installed |= install_watch(watcher, &targets.command_code_dir);
+    }
+    if targets.command_code_auth.exists() {
+        installed |= install_watch(watcher, &targets.command_code_auth);
     }
 
     if targets.opencode_dir.is_dir() {
@@ -168,6 +181,7 @@ fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
             || p == &targets.gemini_accounts
             || p == &targets.gemini_settings
             || p == &targets.grok_auth
+            || p == &targets.command_code_auth
             || p == &targets.opencode_auth
             || codex_auth_in_dir_event(p, &targets.codex_auth)
             || claude_json_in_home_event(p, &targets.home, &targets.claude_json)
@@ -216,7 +230,9 @@ fn opencode_auth_in_dir_event(path: &Path, opencode_auth: &Path) -> bool {
 fn detection_marker_in_home_event(path: &Path, home: &Path) -> bool {
     matches!(
         path.file_name().and_then(OsStr::to_str),
-        Some(".codex" | ".claude" | ".claude.json" | ".copilot" | ".mmx" | ".grok")
+        Some(
+            ".codex" | ".claude" | ".claude.json" | ".copilot" | ".mmx" | ".grok" | ".commandcode"
+        )
     ) && path.parent() == Some(home)
 }
 

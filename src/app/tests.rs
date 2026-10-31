@@ -1152,6 +1152,8 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         grok_login_handle: None,
         zai_login: None,
         zai_login_handle: None,
+        command_code_login: None,
+        command_code_login_handle: None,
     }
 }
 
@@ -1490,7 +1492,7 @@ fn delete_account_requests_refresh_for_all_providers() {
                 app.config.selected_antigravity_account_ids = vec![keep_id.to_string()];
                 "remove".to_string()
             }
-            ProviderId::OpenCodeGo | ProviderId::Grok => continue,
+            ProviderId::OpenCodeGo | ProviderId::Grok | ProviderId::CommandCode => continue,
         };
 
         let _task = app.delete_account(provider, &remove_account_id);

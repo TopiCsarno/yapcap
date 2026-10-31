@@ -16,6 +16,8 @@ use chrono::{DateTime, Duration, Utc};
 use std::path::PathBuf;
 use std::sync::Once;
 
+mod command_code;
+
 const DEMO_ENV: &str = "YAPCAP_DEMO";
 const DEMO_ID_PREFIX: &str = "yapcap-demo:";
 const CODEX_PRO_ID: &str = "yapcap-demo:codex-pro";
@@ -83,6 +85,7 @@ pub fn apply_config(config: &mut Config) {
     config.opencode_go_managed_accounts = demo_opencode_go_accounts();
     config.grok_managed_accounts = demo_grok_accounts();
     config.zai_managed_accounts = demo_zai_accounts();
+    command_code::configure(config);
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -126,6 +129,10 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.grok_managed_accounts, |account| &account.id);
     changed |= strip_ids(&mut config.selected_zai_account_ids);
     changed |= retain_len_changed(&mut config.zai_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_command_code_account_ids);
+    changed |= retain_len_changed(&mut config.command_code_managed_accounts, |account| {
+        &account.id
+    });
     changed
 }
 
@@ -196,6 +203,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::OpenCodeGo => return None,
         ProviderId::Grok => return None,
         ProviderId::Zai => return None,
+        ProviderId::CommandCode => return None,
     };
     Some(id.to_string())
 }
@@ -213,6 +221,7 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Antigravity => "OAuth".to_string(),
         ProviderId::OpenCodeGo => "API Key".to_string(),
         ProviderId::Zai => "API Key".to_string(),
+        ProviderId::CommandCode => "API Key".to_string(),
     }
 }
 
@@ -395,6 +404,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 snapshot: snapshot_grok(),
             },
         )],
+        ProviderId::CommandCode => command_code::accounts(now),
         ProviderId::Zai => vec![demo_account(
             provider,
             DemoAccount {
@@ -1462,6 +1472,11 @@ mod tests {
                     .collect(),
                 ProviderId::Grok => config.grok_managed_accounts.iter().map(|a| &a.id).collect(),
                 ProviderId::Zai => config.zai_managed_accounts.iter().map(|a| &a.id).collect(),
+                ProviderId::CommandCode => config
+                    .command_code_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
             };
             for id in selected {
                 assert!(

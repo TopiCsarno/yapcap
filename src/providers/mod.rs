@@ -4,6 +4,7 @@ mod adapters;
 pub mod antigravity;
 pub mod claude;
 pub mod codex;
+pub mod command_code;
 pub mod copilot;
 pub mod cursor;
 pub mod gemini;

@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, and Grok.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, GitHub Copilot, Minimax, Z.AI Coding Plan, Kimi for Coding, OpenCode Go, Command Code, and Grok.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -33,12 +33,13 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Z.AI Coding Plan** — global personal quota with 5-hour, weekly, and optional MCP windows
     - **Kimi for Coding** — API key usage tracking with weekly and rate-limit windows
     - **OpenCode Go** — API key usage tracking with 5-hour, weekly, and monthly windows
+    - **Command Code** — extra credits and service-reported 5-hour/weekly limits with reset times
     - **Grok** — subscription usage shown as a weekly window + available prepaid credits
 - 👥 **Multi-account support** — add, switch, and remove accounts per provider. The popup pages through stored accounts one at a time, while the panel remains fixed-width for the active account.
 - 🔎 **Automatic discovery** — detected providers appear automatically, provider availability updates live, and an empty setup opens Manage providers. Gemini remains opt-in and must be enabled manually.
-- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, and OpenCode Go; Cursor scans the local IDE state.
+- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, Copilot, and Grok; API-key forms for Minimax, Z.AI, Kimi, and OpenCode Go; browser sign-in, API-key fallback, and explicit CLI import for Command Code; Cursor scans the local IDE state.
 - 🔑 **OpenCode integration** — compatible keys can optionally prefill Minimax, Z.AI, Kimi, and OpenCode Go forms; Codex and Copilot offer explicit OAuth imports. Credentials are copied only after confirmation and are never synchronized with OpenCode.
-- ✅ **Active badge** — matches the host account for Codex, Claude, Cursor, Gemini, OpenCode Go, and Grok. Minimax and Kimi only mark legacy environment-source accounts when the corresponding environment key is present. Copilot, Antigravity, and Z.AI have no host Active badge.
+- ✅ **Active badge** — matches the host account for Codex, Claude, Cursor, Gemini, OpenCode Go, and Grok. Minimax and Kimi only mark legacy environment-source accounts when the corresponding environment key is present. Copilot, Antigravity, Z.AI, and Command Code have no host Active badge.
 - ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times.
 
 ## Screenshots
@@ -265,7 +266,7 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 | --- | --- |
 | `~/.config/cosmic/io.github.TopiCsarno.YapCap/v600/` | Settings (provider toggles, accounts, display options) |
 | `~/.cache/yapcap/snapshots.json` | Former cached usage state; current builds leave it on disk but do not load it |
-| `~/.local/state/yapcap/<provider>-accounts/` | Managed credential copies (`<provider>` is one of `codex`, `claude`, `cursor`, `antigravity`, `gemini`, `copilot`, `minimax`, `zai`, `kimi`, `opencode-go`, `grok`) |
+| `~/.local/state/yapcap/<provider>-accounts/` | Managed credential copies (`<provider>` is one of `codex`, `claude`, `cursor`, `antigravity`, `gemini`, `copilot`, `minimax`, `zai`, `kimi`, `opencode-go`, `command-code`, `grok`) |
 | `~/.local/state/yapcap/logs/yapcap.log.YYYY-MM-DD` | Daily log output |
 
 **Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap account state and logs live only under `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`. Old Flatpak snapshot caches under `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/` may remain on disk but are no longer active runtime state. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
@@ -273,7 +274,7 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 ## Limitations
 
 - COSMIC only. No GNOME, KDE, or tray fallback.
-- **No Active badge for Copilot, Antigravity, or Z.AI.** These adapters do not
+- **No Active badge for Copilot, Antigravity, Z.AI, or Command Code.** These adapters do not
   implement host-active-account detection. Selecting an account in YapCap does
   not establish which account an external tool is using.
 - **Gemini OAuth only.** Add a Gemini account through YapCap's Google browser

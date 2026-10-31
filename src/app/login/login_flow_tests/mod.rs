@@ -3,6 +3,7 @@ mod support;
 mod antigravity;
 mod claude;
 mod codex;
+mod command_code;
 mod copilot;
 mod gemini;
 mod generic;

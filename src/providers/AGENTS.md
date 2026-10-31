@@ -7,4 +7,4 @@
 - `adapters.rs` and `adapters/` map each provider implementation to the shared interface.
 - `google_oauth.rs` contains shared Google OAuth helpers.
 - `opencode_auth.rs` reads compatible OpenCode credentials for explicit imports/prefills.
-- `antigravity/`, `claude/`, `codex/`, `copilot/`, `cursor/`, `gemini/`, `grok/`, `kimi/`, `minimax/`, `opencode_go/`, and `zai/` implement provider-specific behavior.
+- `antigravity/`, `claude/`, `codex/`, `command_code/`, `copilot/`, `cursor/`, `gemini/`, `grok/`, `kimi/`, `minimax/`, `opencode_go/`, and `zai/` implement provider-specific behavior.

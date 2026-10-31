@@ -59,6 +59,7 @@ pub struct ProviderLoginStates<'a> {
     pub opencode_go: Option<&'a crate::providers::opencode_go::login::OpenCodeGoLoginState>,
     pub grok: Option<&'a crate::providers::grok::GrokLoginState>,
     pub zai: Option<&'a ZaiLoginState>,
+    pub command_code: Option<&'a crate::providers::command_code::login::CommandCodeLoginState>,
 }
 
 #[derive(Clone, Copy)]

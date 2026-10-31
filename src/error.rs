@@ -4,6 +4,7 @@ use std::num::ParseFloatError;
 use std::path::PathBuf;
 
 use crate::model::ProviderId;
+use crate::providers::command_code::CommandCodeError;
 use thiserror::Error;
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
@@ -79,6 +80,12 @@ impl From<OpenCodeGoError> for AppError {
     }
 }
 
+impl From<CommandCodeError> for AppError {
+    fn from(value: CommandCodeError) -> Self {
+        Self::Provider(ProviderError::CommandCode(value))
+    }
+}
+
 impl From<GrokError> for AppError {
     fn from(value: GrokError) -> Self {
         Self::Provider(ProviderError::Grok(value))
@@ -133,6 +140,7 @@ impl AppError {
             Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::OpenCodeGo(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Grok(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::CommandCode(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -174,6 +182,8 @@ pub enum ProviderError {
     OpenCodeGo(#[from] OpenCodeGoError),
     #[error(transparent)]
     Grok(#[from] GrokError),
+    #[error(transparent)]
+    CommandCode(#[from] CommandCodeError),
 }
 
 impl ProviderError {
@@ -191,6 +201,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_network_unavailable(),
             Self::OpenCodeGo(error) => error.is_network_unavailable(),
             Self::Grok(error) => error.is_network_unavailable(),
+            Self::CommandCode(error) => error.is_network_unavailable(),
         }
     }
 
@@ -208,6 +219,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.requires_user_action(),
             Self::OpenCodeGo(error) => error.requires_user_action(),
             Self::Grok(error) => error.requires_user_action(),
+            Self::CommandCode(error) => error.requires_user_action(),
         }
     }
 
@@ -225,6 +237,7 @@ impl ProviderError {
             Self::Antigravity(error) => error.is_transient(),
             Self::OpenCodeGo(error) => error.is_transient(),
             Self::Grok(error) => error.is_transient(),
+            Self::CommandCode(error) => error.is_transient(),
         }
     }
 }

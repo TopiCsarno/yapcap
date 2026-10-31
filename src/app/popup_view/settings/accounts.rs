@@ -1,3 +1,4 @@
+mod command_code_login;
 mod empty;
 mod login_controls;
 mod rows;
@@ -120,6 +121,10 @@ pub(super) fn provider_settings_view<'a>(
         ProviderLoginKind::Antigravity => (
             antigravity_login_controls(logins.antigravity, enabled),
             logins.antigravity.is_some(),
+        ),
+        ProviderLoginKind::CommandCode => (
+            command_code_login::controls(logins.command_code, enabled),
+            logins.command_code.is_some(),
         ),
         ProviderLoginKind::OpenCodeGo => (
             opencode_go_login_controls(logins.opencode_go, enabled),

@@ -1152,6 +1152,8 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         grok_login_handle: None,
         zai_login: None,
         zai_login_handle: None,
+        command_code_login: None,
+        command_code_login_handle: None,
     }
 }
 
@@ -1488,6 +1490,21 @@ fn delete_account_requests_refresh_for_all_providers() {
                     .antigravity_managed_accounts
                     .push(antigravity_account("remove"));
                 app.config.selected_antigravity_account_ids = vec![keep_id.to_string()];
+                "remove".to_string()
+            }
+            ProviderId::CommandCode => {
+                let now = Utc::now();
+                app.config.command_code_managed_accounts = [keep_id, "remove"]
+                    .into_iter()
+                    .map(|id| crate::config::ManagedCommandCodeAccountConfig {
+                        id: id.to_string(),
+                        label: id.to_string(),
+                        created_at: now,
+                        updated_at: now,
+                        last_authenticated_at: Some(now),
+                    })
+                    .collect();
+                app.config.selected_command_code_account_ids = vec![keep_id.to_string()];
                 "remove".to_string()
             }
             ProviderId::OpenCodeGo | ProviderId::Grok => continue,

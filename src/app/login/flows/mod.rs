@@ -1,6 +1,7 @@
 mod antigravity;
 mod claude;
 mod codex;
+mod command_code;
 mod copilot;
 mod gemini;
 mod grok;
@@ -12,6 +13,7 @@ mod zai;
 pub(crate) use antigravity::AntigravityLoginFlow;
 pub(crate) use claude::ClaudeLoginFlow;
 pub(crate) use codex::CodexLoginFlow;
+pub(crate) use command_code::CommandCodeLoginFlow;
 pub(crate) use copilot::CopilotLoginFlow;
 pub(crate) use gemini::GeminiLoginFlow;
 pub(crate) use grok::GrokLoginFlow;

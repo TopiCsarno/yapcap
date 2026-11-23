@@ -39,6 +39,8 @@ pub struct ProviderRefreshRequest {
     pub reason: RefreshRequestReason,
     pub requested_at: DateTime<Utc>,
     pub requesting_process_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reauthenticated_account_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,12 +105,17 @@ impl SharedControlState {
         next
     }
 
-    pub fn upsert_request(&mut self, request: ProviderRefreshRequest) {
+    pub fn upsert_request(&mut self, mut request: ProviderRefreshRequest) {
         if let Some(existing) = self
             .requests
             .iter_mut()
             .find(|existing| existing.provider == request.provider)
         {
+            for account_id in existing.reauthenticated_account_ids.drain(..) {
+                if !request.reauthenticated_account_ids.contains(&account_id) {
+                    request.reauthenticated_account_ids.push(account_id);
+                }
+            }
             *existing = request;
         } else {
             self.requests.push(request);
@@ -337,12 +344,14 @@ mod tests {
             reason: RefreshRequestReason::User,
             requested_at: Utc::now(),
             requesting_process_id: "first".to_string(),
+            reauthenticated_account_ids: Vec::new(),
         });
         control.upsert_request(ProviderRefreshRequest {
             provider: ProviderId::Codex,
             reason: RefreshRequestReason::ProviderSelected,
             requested_at: Utc::now(),
             requesting_process_id: "second".to_string(),
+            reauthenticated_account_ids: Vec::new(),
         });
 
         let raw = serde_json::to_string(&control).unwrap();
@@ -366,6 +375,7 @@ mod tests {
             reason: RefreshRequestReason::User,
             requested_at: Utc::now(),
             requesting_process_id: "process".to_string(),
+            reauthenticated_account_ids: Vec::new(),
         });
         let generation = control.generation;
 

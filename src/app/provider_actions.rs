@@ -192,12 +192,34 @@ impl AppModel {
         provider: ProviderId,
         reason: RefreshRequestReason,
     ) -> Task<Message> {
+        self.write_provider_refresh_request(provider, reason, Vec::new())
+    }
+
+    pub(super) fn request_provider_refresh_after_reauth(
+        &mut self,
+        provider: ProviderId,
+        account_id: String,
+    ) -> Task<Message> {
+        self.write_provider_refresh_request(
+            provider,
+            RefreshRequestReason::AccountAction,
+            vec![account_id],
+        )
+    }
+
+    fn write_provider_refresh_request(
+        &mut self,
+        provider: ProviderId,
+        reason: RefreshRequestReason,
+        reauthenticated_account_ids: Vec<String>,
+    ) -> Task<Message> {
         let mut shared_control = self.shared_control.clone();
         shared_control.upsert_request(ProviderRefreshRequest {
             provider,
             reason,
             requested_at: Utc::now(),
             requesting_process_id: self.process_info.id.clone(),
+            reauthenticated_account_ids,
         });
         match shared_state::save_control(APP_ID, &shared_control) {
             Ok(()) => {

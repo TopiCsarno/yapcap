@@ -1196,6 +1196,7 @@ fn refresh_request(provider: ProviderId, process_id: &str) -> ProviderRefreshReq
         reason: RefreshRequestReason::User,
         requested_at: Utc::now(),
         requesting_process_id: process_id.to_string(),
+        reauthenticated_account_ids: Vec::new(),
     }
 }
 

@@ -11,7 +11,6 @@ use super::{
     GeminiLoginEvent, GrokLoginEvent, Handle, KimiLoginEvent, Message, MinimaxLoginEvent,
     OpenCodeGoLoginEvent, ProviderId, Task, runtime,
 };
-use crate::shared_state::RefreshRequestReason;
 
 pub(crate) trait LoginFlow: Sized {
     type State: Clone;
@@ -140,7 +139,7 @@ fn apply_login_success(
     runtime::reconcile_provider(&app.config, &app.detection, &mut app.state, provider);
     runtime::mark_account_reauthenticated(&mut app.state, provider, &account_id);
     app.sync_panel_suggested_bounds();
-    app.request_provider_refresh(provider, RefreshRequestReason::AccountAction)
+    app.request_provider_refresh_after_reauth(provider, account_id)
 }
 
 pub(super) fn apply_login_success_checked(
@@ -163,7 +162,7 @@ pub(super) fn apply_login_success_checked(
     runtime::reconcile_provider(&app.config, &app.detection, &mut app.state, provider);
     runtime::mark_account_reauthenticated(&mut app.state, provider, &account_id);
     app.sync_panel_suggested_bounds();
-    Ok(app.request_provider_refresh(provider, RefreshRequestReason::AccountAction))
+    Ok(app.request_provider_refresh_after_reauth(provider, account_id))
 }
 
 fn log_login_failed(process_id: &str, provider: ProviderId, flow_id: &str, error: &str) {

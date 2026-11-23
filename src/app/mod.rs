@@ -8,6 +8,8 @@ use self::login::LoginFlow;
 mod popup_view;
 mod provider_actions;
 mod provider_assets;
+#[cfg(test)]
+mod reauth_sync_tests;
 mod refresh;
 mod session;
 mod state;
@@ -860,6 +862,7 @@ fn owner_shared_control_refresh_task(
     if refresh_owner.is_none() {
         return (Task::none(), Vec::new());
     }
+    apply_requested_reauthentications(state, shared_control);
 
     let mut consumed_providers = Vec::new();
     let request_count = shared_control.requests.len();
@@ -936,6 +939,14 @@ fn owner_shared_control_refresh_task(
             }),
         );
         (Task::batch(tasks), consumed_providers)
+    }
+}
+
+fn apply_requested_reauthentications(state: &mut AppState, shared_control: &SharedControlState) {
+    for request in &shared_control.requests {
+        for account_id in &request.reauthenticated_account_ids {
+            runtime::mark_account_reauthenticated(state, request.provider, account_id);
+        }
     }
 }
 
@@ -1029,6 +1040,7 @@ fn shared_control_with_user_refresh_requests(
             reason: RefreshRequestReason::User,
             requested_at: Utc::now(),
             requesting_process_id: process_id.to_string(),
+            reauthenticated_account_ids: Vec::new(),
         });
     }
     next

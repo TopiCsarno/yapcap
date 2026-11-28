@@ -23,6 +23,10 @@ impl Config {
             "reset_time_format" => self.reset_time_format = update.reset_time_format,
             "usage_amount_format" => self.usage_amount_format = update.usage_amount_format,
             "panel_icon_style" => self.panel_icon_style = update.panel_icon_style,
+            "pinned_quota_groups" => {
+                self.pinned_quota_groups
+                    .clone_from(&update.pinned_quota_groups);
+            }
             "selected_provider" => self.selected_provider = update.selected_provider,
             "provider_visibility_mode" => {
                 self.provider_visibility_mode = update.provider_visibility_mode;

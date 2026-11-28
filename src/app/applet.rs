@@ -85,6 +85,7 @@ pub(super) fn applet_indicator<'a>(
     selected_provider: ProviderId,
     style: PanelIconStyle,
     usage_amount_format: UsageAmountFormat,
+    pinned_quota_group: Option<&str>,
     core: &cosmic::Core,
 ) -> Element<'a, Message> {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
@@ -92,7 +93,12 @@ pub(super) fn applet_indicator<'a>(
     let logo_size_px = compact_px.saturating_sub(8).max(11);
     let logo_size = f32::from(logo_size_px);
     let bar_width = applet_bar_width(suggested_w, suggested_h);
-    let layout = selected_provider_bar_layout(state, selected_provider, usage_amount_format);
+    let layout = selected_provider_bar_layout(
+        state,
+        selected_provider,
+        usage_amount_format,
+        pinned_quota_group,
+    );
     let bars = applet_bar_column(layout, bar_width);
     let percent = account_percent(layout);
 
@@ -273,6 +279,7 @@ pub(super) fn selected_provider_bar_layout(
     state: &AppState,
     selected_provider: ProviderId,
     usage_amount_format: UsageAmountFormat,
+    pinned_quota_group: Option<&str>,
 ) -> AppletBarLayout {
     let now = chrono::Utc::now();
     let snapshot = state
@@ -284,7 +291,7 @@ pub(super) fn selected_provider_bar_layout(
                 .and_then(|provider| provider.legacy_display_snapshot.as_ref())
         });
     applet_bar_layout(
-        snapshot.and_then(|snapshot| snapshot.applet_windows()),
+        snapshot.and_then(|snapshot| snapshot.applet_windows_for_group(pinned_quota_group)),
         now,
         usage_amount_format,
     )

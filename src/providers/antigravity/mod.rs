@@ -23,7 +23,7 @@ pub use login::{
     prepare_for_reauth,
 };
 
-pub const DEFAULT_HOST: &str = "cloudcode-pa.googleapis.com";
+pub const DEFAULT_HOST: &str = "daily-cloudcode-pa.googleapis.com";
 pub const DEFAULT_CLIENT_ID: &str =
     "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 pub const DEFAULT_CLIENT_SECRET: &str = "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";
@@ -31,9 +31,10 @@ pub const DEFAULT_CLIENT_SECRET: &str = "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";
 pub const SCOPE: &str = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/aicode";
 
 pub const IDE_TYPE: &str = "ANTIGRAVITY";
-pub const USER_AGENT: &str = "antigravity";
+pub const USER_AGENT: &str = "antigravity/cli/1.5.18";
 
 const HOST_ENV: &str = "YAPCAP_ANTIGRAVITY_HOST";
+const USER_AGENT_ENV: &str = "YAPCAP_ANTIGRAVITY_USER_AGENT";
 const CLIENT_ID_ENV: &str = "YAPCAP_ANTIGRAVITY_CLIENT_ID";
 const CLIENT_SECRET_ENV: &str = "YAPCAP_ANTIGRAVITY_CLIENT_SECRET";
 
@@ -47,6 +48,11 @@ fn env_override(key: &str, default: &'static str) -> Cow<'static, str> {
 #[must_use]
 pub fn host() -> Cow<'static, str> {
     env_override(HOST_ENV, DEFAULT_HOST)
+}
+
+#[must_use]
+pub fn user_agent() -> Cow<'static, str> {
+    env_override(USER_AGENT_ENV, USER_AGENT)
 }
 
 #[must_use]
@@ -204,7 +210,8 @@ async fn load_code_assist(
     endpoint: &str,
     access_token: &str,
 ) -> Result<code_assist::LoadCodeAssist, AntigravityError> {
-    code_assist::load_code_assist_typed(client, endpoint, IDE_TYPE, access_token, Some(USER_AGENT))
+    let ua = user_agent();
+    code_assist::load_code_assist_typed(client, endpoint, IDE_TYPE, access_token, Some(ua.as_ref()))
         .await
         .map_err(map_load_error)
 }
@@ -422,6 +429,56 @@ mod tests {
         );
         let meta = storage.load_metadata(&account_id).unwrap();
         assert_eq!(meta.antigravity_last_tier_id.as_deref(), Some("free-tier"));
+    }
+
+    #[tokio::test]
+    async fn fetch_detects_pro_plan_from_paid_tier_and_sends_cli_user_agent() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/load",
+                status: 200,
+                body: r#"{"currentTier":{"id":"free-tier"},"paidTier":{"id":"g1-pro-tier"},"cloudaicompanionProject":"superb-project"}"#.to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/quota",
+                status: 200,
+                body: quota_body(),
+            },
+        ])
+        .await;
+
+        let snapshot = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            endpoints(&base),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Pro"));
+        let requests = handle.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("user-agent: antigravity/cli/")
+        );
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("user-agent: antigravity/cli/")
+        );
+        let meta = storage.load_metadata(&account_id).unwrap();
+        assert_eq!(
+            meta.antigravity_last_tier_id.as_deref(),
+            Some("g1-pro-tier")
+        );
     }
 
     #[tokio::test]
@@ -762,6 +819,31 @@ mod tests {
         assert!(matches!(error, AntigravityError::QuotaHttp { status: 503 }));
         assert!(error.is_transient());
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn default_host_targets_daily_code_assist_endpoint() {
+        let _guard = crate::test_support::env_lock();
+        unsafe {
+            std::env::remove_var(HOST_ENV);
+        }
+        assert_eq!(host().as_ref(), "daily-cloudcode-pa.googleapis.com");
+    }
+
+    #[test]
+    fn user_agent_defaults_and_respects_env_override() {
+        let _guard = crate::test_support::env_lock();
+        unsafe {
+            std::env::remove_var(USER_AGENT_ENV);
+        }
+        assert_eq!(user_agent().as_ref(), USER_AGENT);
+        unsafe {
+            std::env::set_var(USER_AGENT_ENV, "antigravity/cli/9.9.9");
+        }
+        assert_eq!(user_agent().as_ref(), "antigravity/cli/9.9.9");
+        unsafe {
+            std::env::remove_var(USER_AGENT_ENV);
+        }
     }
 
     #[test]

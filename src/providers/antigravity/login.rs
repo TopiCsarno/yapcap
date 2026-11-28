@@ -148,12 +148,13 @@ async fn run_login_inner(
         verify_reauth_email_match(expected, &claims.email)?;
     }
     let client = crate::runtime::http_client();
+    let ua = super::user_agent();
     let code_assist = load_code_assist_at(
         &client,
         &load_code_assist_url(),
         IDE_TYPE,
         &tokens.access_token,
-        Some(super::USER_AGENT),
+        Some(ua.as_ref()),
     )
     .await
     .unwrap_or_else(|error| {

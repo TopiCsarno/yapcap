@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use super::USER_AGENT;
+use super::user_agent;
 use crate::error::AntigravityError;
 use crate::model::UsageWindow;
 use chrono::{DateTime, Utc};
@@ -61,7 +61,11 @@ pub fn normalize_quota_summary(response: &QuotaSummaryResponse) -> Vec<UsageWind
         for bucket in buckets {
             let used_percent = ((1.0 - bucket.remaining_fraction) * 100.0).clamp(0.0, 100.0) as f32;
             windows.push(UsageWindow {
-                label: bucket.display_name.clone(),
+                label: bucket
+                    .display_name
+                    .strip_suffix(" Remaining")
+                    .unwrap_or(&bucket.display_name)
+                    .to_string(),
                 used_percent,
                 reset_at: bucket.reset_time,
                 window_seconds: window_seconds(bucket.window.as_deref()),
@@ -83,12 +87,13 @@ pub async fn retrieve_user_quota_summary_typed(
         Some(project) => json!({ "project": project }),
         None => json!({}),
     };
+    let ua = user_agent();
     let response = client
         .post(endpoint)
         .bearer_auth(access_token)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .header("User-Agent", USER_AGENT)
+        .header("User-Agent", ua.as_ref())
         .json(&body)
         .send()
         .await
@@ -197,6 +202,18 @@ mod tests {
         let windows = normalize_quota_summary(&response);
         assert_eq!(windows[0].label, "Five Hour Limit");
         assert_eq!(windows[1].label, "Weekly Limit");
+    }
+
+    #[test]
+    fn strips_trailing_remaining_from_labels() {
+        let raw = r#"{"groups":[{"displayName":"G","buckets":[
+            {"displayName":"Five Hour Limit Remaining","window":"5h","remainingFraction":0.8},
+            {"displayName":"Gemini 4 Argon Weekly Limit","window":"weekly","remainingFraction":0.9}
+        ]}]}"#;
+        let response = parse_quota_summary(raw).unwrap();
+        let windows = normalize_quota_summary(&response);
+        assert_eq!(windows[0].label, "Five Hour Limit");
+        assert_eq!(windows[1].label, "Gemini 4 Argon Weekly Limit");
     }
 
     #[test]

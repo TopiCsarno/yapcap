@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use super::USER_AGENT;
+use super::user_agent;
 use crate::error::AntigravityError;
 use crate::model::UsageWindow;
 use chrono::{DateTime, Utc};
@@ -87,12 +87,13 @@ pub async fn retrieve_user_quota_summary_typed(
         Some(project) => json!({ "project": project }),
         None => json!({}),
     };
+    let ua = user_agent();
     let response = client
         .post(endpoint)
         .bearer_auth(access_token)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .header("User-Agent", USER_AGENT)
+        .header("User-Agent", ua.as_ref())
         .json(&body)
         .send()
         .await

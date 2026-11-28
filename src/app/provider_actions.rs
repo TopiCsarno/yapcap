@@ -403,6 +403,28 @@ impl AppModel {
         Task::none()
     }
 
+    pub(super) fn toggle_pinned_quota_group(
+        &mut self,
+        provider: ProviderId,
+        group: String,
+    ) -> Task<Message> {
+        let previous = self
+            .config
+            .pinned_quota_group(provider)
+            .map(ToOwned::to_owned);
+        self.write_config(|new_config| {
+            new_config.toggle_pinned_quota_group(provider, &group);
+        });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = provider.label(),
+            previous = ?previous,
+            pinned = ?self.config.pinned_quota_group(provider),
+            "pinned quota group toggled"
+        );
+        Task::none()
+    }
+
     pub(super) fn on_host_cli_auth_changed(&mut self) {
         if demo_env::is_active() {
             return;

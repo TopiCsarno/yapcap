@@ -7,6 +7,7 @@ use cosmic::cosmic_config::{
 };
 use dirs::{cache_dir, state_dir};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 mod watch_update;
@@ -20,6 +21,8 @@ pub struct Config {
     pub reset_time_format: ResetTimeFormat,
     pub usage_amount_format: UsageAmountFormat,
     pub panel_icon_style: PanelIconStyle,
+    #[serde(default)]
+    pub pinned_quota_groups: BTreeMap<ProviderId, String>,
     #[serde(default = "default_selected_provider")]
     pub selected_provider: ProviderId,
     #[serde(default = "default_provider_visibility_mode")]
@@ -94,6 +97,7 @@ impl Default for Config {
             reset_time_format: ResetTimeFormat::Relative,
             usage_amount_format: UsageAmountFormat::Used,
             panel_icon_style: PanelIconStyle::LogoAndBars,
+            pinned_quota_groups: BTreeMap::new(),
             selected_provider: ProviderId::Codex,
             provider_visibility_mode: ProviderVisibilityMode::UserManaged,
             codex_enablement: ProviderEnablement::Auto,
@@ -147,6 +151,22 @@ fn default_gemini_enablement() -> ProviderEnablement {
 }
 
 impl Config {
+    #[must_use]
+    pub fn pinned_quota_group(&self, provider: ProviderId) -> Option<&str> {
+        self.pinned_quota_groups
+            .get(&provider)
+            .map(String::as_str)
+            .filter(|group| !group.trim().is_empty())
+    }
+
+    pub fn toggle_pinned_quota_group(&mut self, provider: ProviderId, group: &str) {
+        if self.pinned_quota_group(provider) == Some(group) {
+            self.pinned_quota_groups.remove(&provider);
+        } else {
+            self.pinned_quota_groups.insert(provider, group.to_string());
+        }
+    }
+
     #[must_use]
     pub fn provider_enablement(&self, provider: ProviderId) -> ProviderEnablement {
         match provider {
@@ -527,6 +547,7 @@ pub fn write_changed_config_entries(
         reset_time_format,
         usage_amount_format,
         panel_icon_style,
+        pinned_quota_groups,
         selected_provider,
         provider_visibility_mode,
         codex_enablement,
@@ -577,6 +598,7 @@ pub fn write_changed_config_entries(
     set_changed!(reset_time_format);
     set_changed!(usage_amount_format);
     set_changed!(panel_icon_style);
+    set_changed!(pinned_quota_groups);
     set_changed!(selected_provider);
     set_changed!(provider_visibility_mode);
     set_changed!(codex_enablement);

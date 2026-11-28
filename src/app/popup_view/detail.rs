@@ -485,6 +485,8 @@ fn window_sections<'a>(
             None,
         ));
     }
+    let distinct_groups = distinct_group_count(&snapshot.windows);
+    let pinned_group = config.pinned_quota_group(snapshot.provider);
     let mut windows = snapshot.windows.iter().peekable();
     while let Some(window) = windows.next() {
         let Some(group) = window.group.as_deref() else {
@@ -499,9 +501,25 @@ fn window_sections<'a>(
         while let Some(next) = windows.next_if(|next| next.group.as_deref() == Some(group)) {
             sections.push(usage_section_content(next, snapshot.provider, config));
         }
-        items.push(usage_group_card(group, sections));
+        items.push(usage_group_card(
+            snapshot.provider,
+            group,
+            distinct_groups > 1,
+            pinned_group == Some(group),
+            sections,
+        ));
     }
     items
+}
+
+fn distinct_group_count(windows: &[UsageWindow]) -> usize {
+    let mut groups: Vec<&str> = Vec::new();
+    for group in windows.iter().filter_map(|w| w.group.as_deref()) {
+        if !groups.contains(&group) {
+            groups.push(group);
+        }
+    }
+    groups.len()
 }
 
 fn zai_coding_plan_absent(provider: ProviderId, windows: &[UsageWindow]) -> bool {
@@ -511,10 +529,39 @@ fn zai_coding_plan_absent(provider: ProviderId, windows: &[UsageWindow]) -> bool
 }
 
 fn usage_group_card(
+    provider: ProviderId,
     group: &str,
+    pinnable: bool,
+    pinned: bool,
     sections: Vec<Element<'static, Message>>,
 ) -> Element<'static, Message> {
-    let mut content = column![widget::text(group.to_string()).size(18)]
+    let header: Element<'static, Message> = if pinnable {
+        let tooltip_text = if pinned {
+            fl!("quota-group-unpin-tooltip")
+        } else {
+            fl!("quota-group-pin-tooltip")
+        };
+        let pin_button = widget::tooltip::tooltip(
+            widget::button::icon(widget::icon::from_name("pin-symbolic"))
+                .extra_small()
+                .padding(5)
+                .class(quota_group_pin_button_class(pinned))
+                .on_press(Message::TogglePinnedQuotaGroup(provider, group.to_string())),
+            widget::text(tooltip_text).size(12),
+            widget::tooltip::Position::Top,
+        );
+        row![
+            widget::text(group.to_string()).size(18).width(Length::Fill),
+            pin_button,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill)
+        .into()
+    } else {
+        widget::text(group.to_string()).size(18).into()
+    };
+    let mut content = column![header]
         .spacing(PROVIDER_GROUP_SPACING)
         .width(Length::Fill);
     for section in sections {
@@ -525,6 +572,44 @@ fn usage_group_card(
         .padding(PROVIDER_GROUP_PADDING / 2.0)
         .style(group_card_style)
         .into()
+}
+
+fn quota_group_pin_button_class(pinned: bool) -> cosmic::theme::Button {
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, theme| quota_group_pin_button_style(theme, pinned, false)),
+        disabled: Box::new(move |theme| quota_group_pin_button_style(theme, pinned, false)),
+        hovered: Box::new(move |_focused, theme| quota_group_pin_button_style(theme, pinned, true)),
+        pressed: Box::new(move |_focused, theme| quota_group_pin_button_style(theme, pinned, true)),
+    }
+}
+
+fn quota_group_pin_button_style(
+    theme: &cosmic::Theme,
+    pinned: bool,
+    hovered: bool,
+) -> widget::button::Style {
+    let cosmic = theme.cosmic();
+    let accent = Color::from(cosmic.accent_color());
+    let mut style = widget::button::Style::new();
+    style.border_radius = cosmic.corner_radii.radius_s.into();
+    if pinned {
+        style.background = Some(Background::Color(apply_alpha(
+            accent,
+            if hovered { 0.30 } else { 0.20 },
+        )));
+        style.icon_color = Some(accent);
+        style.text_color = Some(accent);
+    } else {
+        style.background = hovered.then_some(Background::Color(component_hover_color(theme)));
+        let color = if hovered {
+            component_on_color(theme)
+        } else {
+            apply_alpha(component_on_color(theme), 0.55)
+        };
+        style.icon_color = Some(color);
+        style.text_color = Some(color);
+    }
+    style
 }
 
 fn group_card_style(theme: &cosmic::Theme) -> widget::container::Style {

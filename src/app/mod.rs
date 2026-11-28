@@ -212,6 +212,7 @@ pub enum Message {
     SetResetTimeFormat(ResetTimeFormat),
     SetUsageAmountFormat(UsageAmountFormat),
     SetPanelIconStyle(PanelIconStyle),
+    TogglePinnedQuotaGroup(ProviderId, String),
     CheckUpdates,
     UpdateChecked { status: UpdateStatus, attempt: u32 },
     RetryUpdateCheck(u32),
@@ -376,6 +377,7 @@ impl cosmic::Application for AppModel {
                 self.selected_provider,
                 self.config.panel_icon_style,
                 self.config.usage_amount_format,
+                self.config.pinned_quota_group(self.selected_provider),
                 &self.core,
             )
         };
@@ -549,6 +551,9 @@ impl AppModel {
             }
             Message::SetPanelIconStyle(style) => {
                 return Some(self.set_panel_icon_style(style));
+            }
+            Message::TogglePinnedQuotaGroup(provider, group) => {
+                return Some(self.toggle_pinned_quota_group(provider, group));
             }
             Message::ToggleAccountSelection(provider, account_id) => {
                 return Some(self.toggle_account_selection(provider, &account_id));

@@ -223,3 +223,7 @@ resets-today-at = Zresetuj dzisiaj za { $time }
 resets-tomorrow-at = Zresetuj jutro za { $time }
 resets-weekday-at = Zresetuj w { $weekday } o { $time }
 resets-date-at = Zresetuj { $date } o { $time }
+
+## Quota group pinning
+quota-group-pin-tooltip = Przypnij do panelu
+quota-group-unpin-tooltip = Przypięto do panelu — kliknij, aby odpiąć (auto)

@@ -1021,12 +1021,12 @@ fn selected_provider_bar_layout_uses_first_panel_window() {
     state.upsert_account(account);
 
     let percents_used =
-        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used);
+        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used, None);
     assert_eq!(percents_used.primary, 86.5);
     assert_eq!(percents_used.secondary, Some(42.0));
 
     let percents_left =
-        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Left);
+        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Left, None);
     assert_eq!(percents_left.primary, 13.5);
 }
 
@@ -1063,9 +1063,40 @@ fn applet_bar_layout_preserves_single_bar_shape() {
 fn selected_provider_bar_layout_uses_only_the_active_account() {
     let state = state_with_account_percents(&[30.0, 90.0]);
 
-    let layout = selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used);
+    let layout =
+        selected_provider_bar_layout(&state, ProviderId::Codex, UsageAmountFormat::Used, None);
 
     assert_eq!(layout.primary, 30.0);
+}
+
+#[test]
+fn toggle_pinned_quota_group_persists_and_unpins_on_second_toggle() {
+    let mut app = test_app(None);
+    assert_eq!(app.config.pinned_quota_group(ProviderId::Antigravity), None);
+
+    let _ = app.handle_message(Message::TogglePinnedQuotaGroup(
+        ProviderId::Antigravity,
+        "Gemini Models".to_string(),
+    ));
+    assert_eq!(
+        app.config.pinned_quota_group(ProviderId::Antigravity),
+        Some("Gemini Models")
+    );
+
+    let _ = app.handle_message(Message::TogglePinnedQuotaGroup(
+        ProviderId::Antigravity,
+        "Claude and GPT models".to_string(),
+    ));
+    assert_eq!(
+        app.config.pinned_quota_group(ProviderId::Antigravity),
+        Some("Claude and GPT models")
+    );
+
+    let _ = app.handle_message(Message::TogglePinnedQuotaGroup(
+        ProviderId::Antigravity,
+        "Claude and GPT models".to_string(),
+    ));
+    assert_eq!(app.config.pinned_quota_group(ProviderId::Antigravity), None);
 }
 
 fn state_with_account_percents(percents: &[f32]) -> AppState {

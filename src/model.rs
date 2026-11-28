@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const STALE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(10);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderId {
     Codex,
@@ -131,22 +131,29 @@ impl UsageSnapshot {
 
     #[must_use]
     pub fn applet_windows(&self) -> Option<AppletWindows<'_>> {
+        self.applet_windows_for_group(None)
+    }
+
+    #[must_use]
+    pub fn applet_windows_for_group(
+        &self,
+        pinned_group: Option<&str>,
+    ) -> Option<AppletWindows<'_>> {
         if self.provider == ProviderId::Cursor {
             return self.windows.first().map(|primary| AppletWindows {
                 primary,
                 secondary: self.windows.get(2).or_else(|| self.windows.get(1)),
             });
         }
-        if self.provider == ProviderId::Antigravity {
-            let five_hour: Vec<&UsageWindow> = self
+        if let Some(group) = self.selected_applet_group(pinned_group) {
+            let mut group_windows = self
                 .windows
                 .iter()
-                .filter(|window| window.window_seconds == Some(5 * 3600))
-                .collect();
-            if let [primary, secondary, ..] = five_hour.as_slice() {
+                .filter(|window| window.group.as_deref() == Some(group));
+            if let Some(primary) = group_windows.next() {
                 return Some(AppletWindows {
                     primary,
-                    secondary: Some(secondary),
+                    secondary: group_windows.next(),
                 });
             }
         }
@@ -154,6 +161,38 @@ impl UsageSnapshot {
             primary,
             secondary: self.windows.get(1),
         })
+    }
+
+    fn selected_applet_group(&self, pinned_group: Option<&str>) -> Option<&str> {
+        let mut groups: Vec<&str> = Vec::new();
+        for group in self.windows.iter().filter_map(|w| w.group.as_deref()) {
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
+        }
+        if groups.len() < 2 {
+            return None;
+        }
+        if let Some(pinned) = pinned_group
+            && let Some(matched) = groups.iter().copied().find(|&group| group == pinned)
+        {
+            return Some(matched);
+        }
+        let mut best_group = groups[0];
+        let mut best_used = -1.0_f32;
+        for group in groups {
+            let group_max = self
+                .windows
+                .iter()
+                .filter(|w| w.group.as_deref() == Some(group))
+                .map(|w| w.used_percent)
+                .fold(0.0_f32, f32::max);
+            if group_max > best_used {
+                best_used = group_max;
+                best_group = group;
+            }
+        }
+        Some(best_group)
     }
 }
 
@@ -452,22 +491,92 @@ mod tests {
         }
     }
 
-    #[test]
-    fn antigravity_applet_selects_two_five_hour_windows_in_order() {
-        let mut snap = snapshot(ProviderId::Antigravity);
-        snap.windows = vec![
-            weekly_window("Gemini Weekly"),
-            five_hour_window("Gemini 5h"),
-            weekly_window("3p Weekly"),
-            five_hour_window("3p 5h"),
-        ];
-        let windows = snap.applet_windows().unwrap();
-        assert_eq!(windows.primary.label, "Gemini 5h");
-        assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("3p 5h"));
+    fn grouped_window(
+        label: &str,
+        group: &str,
+        used_percent: f32,
+        window_seconds: i64,
+    ) -> UsageWindow {
+        UsageWindow {
+            label: label.to_string(),
+            used_percent,
+            reset_at: None,
+            window_seconds: Some(window_seconds),
+            reset_description: None,
+            group: Some(group.to_string()),
+        }
     }
 
     #[test]
-    fn antigravity_applet_falls_back_to_first_two_when_fewer_than_two_five_hour() {
+    fn grouped_applet_auto_selects_most_used_group() {
+        let mut snap = snapshot(ProviderId::Antigravity);
+        snap.windows = vec![
+            grouped_window("Five Hour Limit", "Gemini Models", 2.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Gemini Models", 5.0, 7 * 24 * 3600),
+            grouped_window("Five Hour Limit", "Claude and GPT models", 12.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Claude and GPT models", 30.0, 7 * 24 * 3600),
+        ];
+        let windows = snap.applet_windows().unwrap();
+        assert_eq!(
+            windows.primary.group.as_deref(),
+            Some("Claude and GPT models")
+        );
+        assert_eq!(windows.primary.label, "Five Hour Limit");
+        assert_eq!(
+            windows.secondary.and_then(|w| w.group.as_deref()),
+            Some("Claude and GPT models")
+        );
+        assert_eq!(
+            windows.secondary.map(|w| w.label.as_str()),
+            Some("Weekly Limit")
+        );
+    }
+
+    #[test]
+    fn grouped_applet_breaks_ties_by_first_group() {
+        let mut snap = snapshot(ProviderId::Antigravity);
+        snap.windows = vec![
+            grouped_window("Five Hour Limit", "Gemini Models", 0.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Gemini Models", 0.0, 7 * 24 * 3600),
+            grouped_window("Five Hour Limit", "Claude and GPT models", 0.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Claude and GPT models", 0.0, 7 * 24 * 3600),
+        ];
+        let windows = snap.applet_windows().unwrap();
+        assert_eq!(windows.primary.group.as_deref(), Some("Gemini Models"));
+        assert_eq!(
+            windows.secondary.and_then(|w| w.group.as_deref()),
+            Some("Gemini Models")
+        );
+    }
+
+    #[test]
+    fn grouped_applet_respects_pinned_group_and_falls_back_when_missing() {
+        let mut snap = snapshot(ProviderId::Antigravity);
+        snap.windows = vec![
+            grouped_window("Five Hour Limit", "Gemini Models", 2.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Gemini Models", 5.0, 7 * 24 * 3600),
+            grouped_window("Five Hour Limit", "Claude and GPT models", 12.0, 5 * 3600),
+            grouped_window("Weekly Limit", "Claude and GPT models", 30.0, 7 * 24 * 3600),
+        ];
+
+        let pinned = snap
+            .applet_windows_for_group(Some("Gemini Models"))
+            .unwrap();
+        assert_eq!(pinned.primary.group.as_deref(), Some("Gemini Models"));
+        assert_eq!(
+            pinned.secondary.and_then(|w| w.group.as_deref()),
+            Some("Gemini Models")
+        );
+
+        let missing = snap.applet_windows_for_group(Some("Nonexistent")).unwrap();
+        assert_eq!(
+            missing.primary.group.as_deref(),
+            Some("Claude and GPT models")
+        );
+    }
+
+    #[test]
+    fn antigravity_applet_falls_back_to_first_two_when_ungrouped() {
         let mut snap = snapshot(ProviderId::Antigravity);
         snap.windows = vec![weekly_window("Weekly"), five_hour_window("5h")];
         let windows = snap.applet_windows().unwrap();

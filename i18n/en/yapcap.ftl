@@ -230,3 +230,7 @@ resets-today-at = Resets today at { $time }
 resets-tomorrow-at = Resets tomorrow at { $time }
 resets-weekday-at = Resets { $weekday } at { $time }
 resets-date-at = Resets { $date } at { $time }
+
+## Quota group pinning
+quota-group-pin-tooltip = Pin to panel
+quota-group-unpin-tooltip = Pinned to panel — click to unpin (auto)
